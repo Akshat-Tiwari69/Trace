@@ -23,6 +23,10 @@ __pycache__/
 venv/
 *.egg-info/
 .ipynb_checkpoints/
+.pytest_cache/
+
+# osmnx HTTP response cache (Overpass downloads)
+cache/
 
 # Env / secrets
 .env
