@@ -46,25 +46,38 @@ def build_model(
     )
 
 
+def _unwrap(model: torch.nn.Module) -> torch.nn.Module:
+    """Return the underlying module, unwrapping DataParallel/DDP if present."""
+    return model.module if hasattr(model, "module") else model
+
+
 def save_checkpoint(
     model: torch.nn.Module,
     path: str | Path,
     meta: dict[str, Any] | None = None,
 ) -> None:
-    """Save model weights + metadata (encoder, metrics, config) to ``path``."""
+    """Save model weights + metadata (encoder, metrics, config) to ``path``.
+
+    Unwraps DataParallel/DDP so the saved keys match a plain model on reload.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"state_dict": model.state_dict(), "meta": meta or {}}, path)
+    torch.save({"state_dict": _unwrap(model).state_dict(), "meta": meta or {}}, path)
 
 
 def load_checkpoint(
     path: str | Path,
-    encoder: str = "mit_b0",
+    encoder: str | None = None,
     map_location: str = "cpu",
 ) -> tuple[torch.nn.Module, dict[str, Any]]:
-    """Rebuild the model (random encoder, no download) and load saved weights."""
+    """Rebuild the model (random encoder, no download) and load saved weights.
+
+    The encoder defaults to whatever the checkpoint's ``meta['encoder']`` says
+    (so a mit_b2 checkpoint rebuilds as mit_b2); pass ``encoder`` to override.
+    """
     ckpt = torch.load(path, map_location=map_location)
-    model = build_model(encoder=encoder, encoder_weights=None)
+    enc = encoder or ckpt.get("meta", {}).get("encoder", "mit_b0")
+    model = build_model(encoder=enc, encoder_weights=None)
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
     return model, ckpt.get("meta", {})
@@ -92,8 +105,9 @@ def predict_mask(
     ``image`` is ``HxWx3`` (uint8 0–255 or float 0–1). Returns a ``uint8``
     ``HxW`` mask of 0/1, the §4 contract shape P2 consumes.
     """
-    model.eval()
+    net = _unwrap(model).to(device)
+    net.eval()
     x = _to_chw_tensor(image).to(device)
-    logits = model(x)
+    logits = net(x)
     prob = torch.sigmoid(logits)[0, 0].cpu().numpy()
     return (prob >= threshold).astype(np.uint8)

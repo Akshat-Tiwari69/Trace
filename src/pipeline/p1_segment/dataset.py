@@ -91,20 +91,28 @@ class RoadTileDataset(Dataset):
 
     Returns ``image`` as a ``(3,H,W)`` float tensor and ``mask`` as a
     ``(1,H,W)`` float tensor in {0,1}.
+
+    ``crops_per_image`` > 1 makes each source image appear that many times per
+    epoch — with a random-crop train transform that yields a different 256px
+    window each time, so a 1024px DeepGlobe tile (16 non-overlapping windows)
+    is actually used instead of sampling just one crop per epoch. Big data-
+    efficiency win; keep it at 1 for deterministic val (centre crop).
     """
 
     def __init__(
         self,
         pairs: list[tuple[Path, Path]],
         transform: Any | None = None,
+        crops_per_image: int = 1,
     ) -> None:
         if not pairs:
             raise ValueError("RoadTileDataset got no (image, mask) pairs")
         self.pairs = pairs
         self.transform = transform
+        self.crops_per_image = max(1, crops_per_image)
 
     def __len__(self) -> int:
-        return len(self.pairs)
+        return len(self.pairs) * self.crops_per_image
 
     def _read(self, image_path: Path, mask_path: Path) -> tuple[np.ndarray, np.ndarray]:
         import cv2
@@ -116,7 +124,7 @@ class RoadTileDataset(Dataset):
         return image, mask
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        image, mask = self._read(*self.pairs[idx])
+        image, mask = self._read(*self.pairs[idx % len(self.pairs)])
         if self.transform is not None:
             out = self.transform(image=image, mask=mask)
             image, mask = out["image"], out["mask"]
