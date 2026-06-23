@@ -1,13 +1,19 @@
-"""Streamlit dashboard scaffold for the committed sample road network."""
+"""Interactive Streamlit dashboard for road-network resilience."""
 
+from dataclasses import dataclass
+from itertools import combinations
+from math import inf, isfinite
 from pathlib import Path
 
 import branca.colormap as cm
 import folium
 import geopandas as gpd
+import networkx as nx
 import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
+
+from src.pipeline.p3_analysis.resilience import resilience_index
 
 
 def find_repo_root() -> Path:
@@ -21,6 +27,30 @@ def find_repo_root() -> Path:
 REPO_ROOT = find_repo_root()
 SAMPLE_GEOJSON = REPO_ROOT / "data" / "sample" / "panaji_demo_graph.geojson"
 SAMPLE_CRITICALITY = REPO_ROOT / "data" / "sample" / "panaji_demo_criticality.csv"
+
+
+@dataclass(frozen=True)
+class RouteResult:
+    """Representative route before and after a junction failure."""
+
+    origin: int
+    destination: int
+    baseline_path: tuple[int, ...]
+    rerouted_path: tuple[int, ...] | None
+    baseline_length_m: float
+    rerouted_length_m: float | None
+    travel_time_delta_pct: float
+    delay_segments: tuple[tuple[str, float], ...]
+
+
+@dataclass(frozen=True)
+class SimulationResult:
+    """Metrics and route state produced by one node ablation."""
+
+    disabled_node: int
+    resilience_index: float
+    largest_cc_fraction: float
+    route: RouteResult | None
 
 
 @st.cache_data
@@ -62,10 +92,172 @@ def split_features(
     return nodes, edges
 
 
-def build_map(features: gpd.GeoDataFrame, criticality: pd.DataFrame) -> folium.Map:
-    """Build a dark Folium map with roads coloured by endpoint criticality."""
-    nodes, edges = split_features(features)
+@st.cache_data(show_spinner=False)
+def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
+    """Convert the map-ready GeoJSON features into a routable graph."""
+    nodes, edges = split_features(_features)
+    graph = nx.Graph()
+    for _, node in nodes.iterrows():
+        node_id = int(node["node_id"])
+        graph.add_node(
+            node_id,
+            x=float(node.geometry.x),
+            y=float(node.geometry.y),
+            betweenness=float(node.get("betweenness", 0.0)),
+            is_critical=bool(node.get("is_critical", False)),
+        )
+    for _, edge in edges.iterrows():
+        graph.add_edge(
+            int(edge["u"]),
+            int(edge["v"]),
+            length_m=float(edge["length_m"]),
+            is_bridged=bool(edge["is_bridged"]),
+            coordinates=tuple(
+                (float(longitude), float(latitude))
+                for longitude, latitude in edge.geometry.coords
+            ),
+        )
+    return graph
 
+
+def path_length(graph: nx.Graph, path: tuple[int, ...] | list[int]) -> float:
+    """Return a path's total length in metres."""
+    return sum(
+        float(graph.edges[start, end]["length_m"])
+        for start, end in zip(path, path[1:])
+    )
+
+
+def edge_key(start: int, end: int) -> tuple[int, int]:
+    """Return an order-independent edge identifier."""
+    return min(start, end), max(start, end)
+
+
+def representative_reroute(graph: nx.Graph, disabled_node: int) -> RouteResult | None:
+    """Find the most affected finite detour across a disabled junction."""
+    neighbours = list(graph.neighbors(disabled_node))
+    if len(neighbours) < 2:
+        return None
+
+    perturbed = graph.copy()
+    perturbed.remove_node(disabled_node)
+    finite_candidates: list[RouteResult] = []
+    disconnected_candidate: RouteResult | None = None
+
+    for origin, destination in combinations(neighbours, 2):
+        baseline_path = tuple(
+            nx.shortest_path(graph, origin, destination, weight="length_m")
+        )
+        if disabled_node not in baseline_path:
+            continue
+        baseline_length = path_length(graph, baseline_path)
+        if baseline_length <= 0:
+            continue
+
+        try:
+            rerouted_path = tuple(
+                nx.shortest_path(perturbed, origin, destination, weight="length_m")
+            )
+        except nx.NetworkXNoPath:
+            disconnected_candidate = RouteResult(
+                origin=origin,
+                destination=destination,
+                baseline_path=baseline_path,
+                rerouted_path=None,
+                baseline_length_m=baseline_length,
+                rerouted_length_m=None,
+                travel_time_delta_pct=inf,
+                delay_segments=(),
+            )
+            continue
+
+        rerouted_length = path_length(perturbed, rerouted_path)
+        travel_delta = 100.0 * (rerouted_length / baseline_length - 1.0)
+        baseline_edges = {
+            edge_key(start, end) for start, end in zip(baseline_path, baseline_path[1:])
+        }
+        delay_segments = []
+        for start, end in zip(rerouted_path, rerouted_path[1:]):
+            if edge_key(start, end) not in baseline_edges:
+                contribution = (
+                    100.0 * float(graph.edges[start, end]["length_m"]) / baseline_length
+                )
+                delay_segments.append((f"{start}–{end}", contribution))
+
+        finite_candidates.append(
+            RouteResult(
+                origin=origin,
+                destination=destination,
+                baseline_path=baseline_path,
+                rerouted_path=rerouted_path,
+                baseline_length_m=baseline_length,
+                rerouted_length_m=rerouted_length,
+                travel_time_delta_pct=travel_delta,
+                delay_segments=tuple(
+                    sorted(delay_segments, key=lambda item: item[1], reverse=True)[:5]
+                ),
+            )
+        )
+
+    if finite_candidates:
+        return max(finite_candidates, key=lambda route: route.travel_time_delta_pct)
+    return disconnected_candidate
+
+
+@st.cache_data(show_spinner=False)
+def simulate_ablation(_graph: nx.Graph, node: int) -> SimulationResult:
+    """Disable one node and compute resilience plus a representative reroute."""
+    metrics = resilience_index(_graph, removed_nodes=[node])
+    return SimulationResult(
+        disabled_node=node,
+        resilience_index=float(metrics["resilience_index"]),
+        largest_cc_fraction=float(metrics["largest_cc_fraction"]),
+        route=representative_reroute(_graph, node),
+    )
+
+
+def semantic_legend() -> folium.Element:
+    """Create a labelled map legend for semantic route states."""
+    html = """
+    <div style="position: fixed; bottom: 36px; right: 12px; z-index: 9999;
+                background: #1e1e2e; color: #ffffff; padding: 10px 12px;
+                border: 1px solid #555; border-radius: 6px; font-size: 12px;">
+      <b>Network states</b><br>
+      <span style="color:#00d4ff">●</span> selected junction<br>
+      <span style="color:#ff4b4b">●</span> disabled junction / links<br>
+      <span style="color:#ff8c42">━</span> rerouted path<br>
+      <span style="color:#aaaaaa">┄</span> healed road
+    </div>
+    """
+    return folium.Element(html)
+
+
+def add_rerouted_path(road_map: folium.Map, graph: nx.Graph, route: RouteResult) -> None:
+    """Draw the rerouted path last so its orange highlight stays visible."""
+    if route.rerouted_path is None:
+        return
+    for start, end in zip(route.rerouted_path, route.rerouted_path[1:]):
+        coordinates = graph.edges[start, end]["coordinates"]
+        folium.PolyLine(
+            [(latitude, longitude) for longitude, latitude in coordinates],
+            color="#ff8c42",
+            weight=7,
+            opacity=1.0,
+            tooltip=f"Rerouted road {start}–{end}",
+        ).add_to(road_map)
+
+
+def build_map(
+    features: gpd.GeoDataFrame,
+    criticality: pd.DataFrame,
+    graph: nx.Graph,
+    selected_node: int,
+    simulation: SimulationResult | None,
+    show_critical: bool,
+    show_healed: bool,
+) -> folium.Map:
+    """Build the map with criticality, selection, failure, and reroute states."""
+    nodes, edges = split_features(features)
     scores = criticality.set_index("node_id")["betweenness"].to_dict()
     maximum = max(float(criticality["betweenness"].max()), 1e-9)
     colour_scale = cm.LinearColormap(
@@ -74,6 +266,7 @@ def build_map(features: gpd.GeoDataFrame, criticality: pd.DataFrame) -> folium.M
         vmax=maximum,
         caption="Road criticality (endpoint betweenness: low to high)",
     )
+    disabled_node = simulation.disabled_node if simulation else None
 
     road_map = folium.Map(
         location=[nodes.geometry.y.mean(), nodes.geometry.x.mean()],
@@ -83,85 +276,285 @@ def build_map(features: gpd.GeoDataFrame, criticality: pd.DataFrame) -> folium.M
     )
 
     for _, edge in edges.iterrows():
-        score = max(
-            float(scores.get(edge.get("u"), 0.0)),
-            float(scores.get(edge.get("v"), 0.0)),
+        is_bridged = bool(edge["is_bridged"])
+        if is_bridged and not show_healed:
+            continue
+        start, end = int(edge["u"]), int(edge["v"])
+        score = max(float(scores.get(start, 0.0)), float(scores.get(end, 0.0)))
+        is_disabled = disabled_node in {start, end}
+        colour = "#ff4b4b" if is_disabled else colour_scale(score)
+        state = "disabled link" if is_disabled else (
+            "healed link" if is_bridged else "observed link"
         )
-        coordinates = [(latitude, longitude) for longitude, latitude in edge.geometry.coords]
-        is_bridged = bool(edge.get("is_bridged", False))
+        coordinates = [
+            (latitude, longitude) for longitude, latitude in edge.geometry.coords
+        ]
         folium.PolyLine(
             coordinates,
-            color=colour_scale(score),
-            weight=4 if is_bridged else 3,
-            opacity=0.9,
-            dash_array="8 6" if is_bridged else None,
-            tooltip=(
-                f"Road {edge.get('u')}–{edge.get('v')} · "
-                f"criticality {score:.3f} · "
-                f"{'healed link' if is_bridged else 'observed link'}"
-            ),
+            color=colour,
+            weight=4 if is_disabled or is_bridged else 3,
+            opacity=0.45 if is_disabled else 0.85,
+            dash_array="8 6" if is_bridged or is_disabled else None,
+            tooltip=f"Road {start}–{end} · criticality {score:.3f} · {state}",
         ).add_to(road_map)
 
-    critical_ids = set(criticality.loc[criticality["is_critical"], "node_id"])
-    for _, node in nodes[nodes["node_id"].isin(critical_ids)].iterrows():
-        score = float(scores.get(node["node_id"], 0.0))
-        folium.CircleMarker(
-            location=[node.geometry.y, node.geometry.x],
-            radius=5,
-            color="#ffffff",
-            weight=1,
-            fill=True,
-            fill_color=colour_scale(score),
-            fill_opacity=1.0,
-            tooltip=f"Critical junction {node['node_id']} · score {score:.3f}",
-        ).add_to(road_map)
+    critical_ids = set(criticality.loc[criticality["is_critical"], "node_id"].astype(int))
+    if show_critical:
+        for _, node in nodes[nodes["node_id"].isin(critical_ids)].iterrows():
+            node_id = int(node["node_id"])
+            score = float(scores.get(node_id, 0.0))
+            if node_id == disabled_node:
+                colour, radius, label = "#ff4b4b", 9, "Disabled junction"
+            elif node_id == selected_node:
+                colour, radius, label = "#00d4ff", 8, "Selected junction"
+            else:
+                colour, radius, label = colour_scale(score), 5, "Critical junction"
+            folium.CircleMarker(
+                location=[node.geometry.y, node.geometry.x],
+                radius=radius,
+                color="#ffffff",
+                weight=2 if node_id in {selected_node, disabled_node} else 1,
+                fill=True,
+                fill_color=colour,
+                fill_opacity=1.0,
+                tooltip=f"{label} {node_id} · score {score:.3f}",
+            ).add_to(road_map)
 
+    if simulation and simulation.route:
+        add_rerouted_path(road_map, graph, simulation.route)
     colour_scale.add_to(road_map)
+    road_map.get_root().html.add_child(semantic_legend())
     return road_map
 
 
-def render_panel(features: gpd.GeoDataFrame, criticality: pd.DataFrame) -> None:
-    """Render the read-only F1 summary panel."""
+def nearest_critical_node(
+    nodes: gpd.GeoDataFrame,
+    critical_ids: set[int],
+    clicked: dict | None,
+) -> int | None:
+    """Resolve a Folium click to a nearby critical junction."""
+    if not clicked or "lat" not in clicked or "lng" not in clicked:
+        return None
+    candidates = nodes[nodes["node_id"].isin(critical_ids)].copy()
+    candidates["distance"] = (
+        (candidates.geometry.y - float(clicked["lat"])) ** 2
+        + (candidates.geometry.x - float(clicked["lng"])) ** 2
+    )
+    nearest = candidates.loc[candidates["distance"].idxmin()]
+    if float(nearest["distance"]) > 0.0003**2:
+        return None
+    return int(nearest["node_id"])
+
+
+def render_charts(simulation: SimulationResult) -> None:
+    """Render Design.md's live travel-impact and delay-contributor charts."""
+    route = simulation.route
+    if route is None:
+        st.warning("This junction has no through-route to reroute.")
+        return
+    if route.rerouted_path is None:
+        st.error(
+            f"No alternate route remains between junctions {route.origin} and "
+            f"{route.destination}."
+        )
+        return
+
+    st.subheader("Travel impact")
+    trend = pd.DataFrame(
+        {
+            "Disabled junctions": [0, 1],
+            "Travel-time increase (%)": [0.0, route.travel_time_delta_pct],
+        }
+    )
+    st.line_chart(
+        trend,
+        x="Disabled junctions",
+        y="Travel-time increase (%)",
+        color="#ff8c42",
+        height=180,
+    )
+
+    if route.delay_segments:
+        st.caption("Top delay contributors on the detour")
+        delays = pd.DataFrame(
+            route.delay_segments,
+            columns=["Road", "Delay contribution (%)"],
+        ).set_index("Road")
+        st.bar_chart(delays, color="#ff8c42", height=190)
+
+
+def render_panel(
+    features: gpd.GeoDataFrame,
+    criticality: pd.DataFrame,
+    simulation: SimulationResult | None,
+) -> None:
+    """Render controls, metrics, ranked hotspots, and live charts."""
     nodes, edges = split_features(features)
     critical_nodes = criticality[criticality["is_critical"]].sort_values("rank")
+    critical_ids = critical_nodes["node_id"].astype(int).tolist()
+    scores = criticality.set_index("node_id")["betweenness"].to_dict()
+    ranks = criticality.set_index("node_id")["rank"].to_dict()
 
     st.title("Route Resilience")
-    st.caption("Sample network · Panaji demo")
+    st.caption("Panaji demo · live junction-failure simulation")
 
-    node_metric, road_metric = st.columns(2)
-    node_metric.metric("Junctions", f"{len(nodes):,}")
-    road_metric.metric("Road links", f"{len(edges):,}")
-
-    st.subheader("Criticality overview")
-    st.write(
-        "Brighter roads connect more critical junctions. Dashed roads are healed "
-        "links inferred by the graph pipeline."
+    ri = simulation.resilience_index if simulation else 1.0
+    route = simulation.route if simulation else None
+    travel_delta = route.travel_time_delta_pct if route else 0.0
+    ri_column, travel_column = st.columns(2)
+    ri_column.metric(
+        "Resilience Index",
+        f"{ri:.3f}",
+        delta=f"{(ri - 1.0) * 100:.1f}%" if simulation else None,
+        delta_color="inverse",
+        help="Global efficiency after failure divided by baseline global efficiency.",
     )
-    st.metric("Critical junctions", f"{len(critical_nodes):,}")
+    travel_value = "Route cut" if simulation and not isfinite(travel_delta) else f"+{travel_delta:.1f}%"
+    travel_column.metric(
+        "Travel-time impact",
+        travel_value,
+        help="Exact route-length change at constant speed; no speed data is assumed.",
+    )
+
+    st.subheader("Scenario controls")
+    st.selectbox("Region", ["Panaji demo"], disabled=True)
+    st.selectbox("Scenario", ["Road closure", "Accident", "Flood"])
+    selected = st.selectbox(
+        "Junction to disable",
+        critical_ids,
+        key="selected_node",
+        format_func=lambda node: (
+            f"#{int(ranks[node])} · Junction {node} · score {scores[node]:.3f}"
+        ),
+    )
+    st.caption("Click a critical junction on the map or choose one above.")
+
+    simulate_column, reset_column = st.columns(2)
+    if simulate_column.button(
+        "Simulate closure",
+        type="primary",
+        use_container_width=True,
+        help="Disable the selected junction and recompute routes and resilience.",
+    ):
+        st.session_state["disabled_node"] = int(selected)
+        st.rerun()
+    if reset_column.button("Reset", use_container_width=True):
+        st.session_state["disabled_node"] = None
+        st.rerun()
+
+    layer_one, layer_two = st.columns(2)
+    layer_one.checkbox("Critical nodes", value=True, key="show_critical")
+    layer_two.checkbox("Healed roads", value=True, key="show_healed")
+
+    if simulation:
+        st.success(f"Junction {simulation.disabled_node} is disabled.")
+        st.caption(
+            f"Largest connected network: {simulation.largest_cc_fraction:.1%} of "
+            "remaining junctions."
+        )
+        if route and route.rerouted_path:
+            st.write(
+                f"Reroute **{route.origin} → {route.destination}**: "
+                f"{route.baseline_length_m:.0f} m → {route.rerouted_length_m:.0f} m"
+            )
+        render_charts(simulation)
+    else:
+        st.info("No simulation running. Select a junction, then simulate its closure.")
 
     st.subheader("Top critical junctions")
     top_nodes = critical_nodes[["rank", "node_id", "betweenness"]].head(5).copy()
     top_nodes["betweenness"] = top_nodes["betweenness"].map(lambda value: f"{value:.3f}")
     st.dataframe(top_nodes, hide_index=True, use_container_width=True)
+    st.caption(f"Network: {len(nodes):,} junctions · {len(edges):,} road links")
 
-    st.info("Failure simulation and live resilience metrics arrive in F2.")
+
+def apply_design_theme() -> None:
+    """Apply the restrained dark mission-control styling from Design.md."""
+    st.markdown(
+        """
+        <style>
+          .stApp { background: #121212; }
+          [data-testid="stMetric"] {
+            background: #1e1e2e;
+            border: 1px solid #343447;
+            border-radius: 8px;
+            padding: 10px 12px;
+          }
+          [data-testid="stMetricValue"] { font-variant-numeric: tabular-nums; }
+          .block-container { padding-top: 1rem; padding-bottom: 1rem; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def main() -> None:
-    """Render the F1 dashboard."""
+    """Render the interactive F2 dashboard."""
     st.set_page_config(page_title="Route Resilience", layout="wide")
+    apply_design_theme()
     try:
         features, criticality = load_sample_data()
-        road_map = build_map(features, criticality)
-    except (FileNotFoundError, OSError, ValueError) as error:
+        graph = graph_from_features(features)
+    except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
         st.error(f"Could not load the sample network: {error}")
         st.stop()
 
+    critical_ids = set(
+        criticality.loc[criticality["is_critical"], "node_id"].astype(int)
+    )
+    if "selected_node" not in st.session_state:
+        st.session_state["selected_node"] = int(
+            criticality.sort_values("rank").iloc[0]["node_id"]
+        )
+    disabled_node = st.session_state.get("disabled_node")
+    with st.spinner("Simulating junction failure…") if disabled_node is not None else st.empty():
+        simulation = (
+            simulate_ablation(graph, int(disabled_node))
+            if disabled_node is not None
+            else None
+        )
+
+    show_critical = st.session_state.get("show_critical", True)
+    show_healed = st.session_state.get("show_healed", True)
+    road_map = build_map(
+        features,
+        criticality,
+        graph,
+        int(st.session_state["selected_node"]),
+        simulation,
+        show_critical,
+        show_healed,
+    )
+
     map_column, panel_column = st.columns([6.5, 3.5], gap="medium")
     with map_column:
-        st_folium(road_map, height=720, use_container_width=True)
+        map_state = st_folium(
+            road_map,
+            height=760,
+            use_container_width=True,
+            returned_objects=["last_object_clicked"],
+            key=f"network_map_{disabled_node}_{show_critical}_{show_healed}",
+        )
+        st.caption(
+            "Brighter roads connect more critical junctions · dashed = healed · "
+            "orange = reroute · red = disabled"
+        )
+    clicked = map_state.get("last_object_clicked") if map_state else None
+    click_signature = (
+        (round(float(clicked["lat"]), 7), round(float(clicked["lng"]), 7))
+        if clicked and "lat" in clicked and "lng" in clicked
+        else None
+    )
+    if click_signature and click_signature != st.session_state.get("last_map_click"):
+        st.session_state["last_map_click"] = click_signature
+        nodes, _ = split_features(features)
+        selected = nearest_critical_node(nodes, critical_ids, clicked)
+        if selected is not None:
+            st.session_state["selected_node"] = selected
+            st.rerun()
+
     with panel_column:
-        render_panel(features, criticality)
+        render_panel(features, criticality, simulation)
 
 
 if __name__ == "__main__":
