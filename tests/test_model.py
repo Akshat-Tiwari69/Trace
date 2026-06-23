@@ -11,6 +11,7 @@ import torch
 from src.pipeline.p1_segment.model import (
     build_model,
     load_checkpoint,
+    predict_large,
     predict_mask,
     save_checkpoint,
 )
@@ -31,6 +32,22 @@ def test_predict_mask_is_binary_hw():
     assert mask.shape == (64, 64)
     assert mask.dtype == np.uint8
     assert set(np.unique(mask)).issubset({0, 1})
+
+
+def test_predict_large_stitches_to_full_size():
+    model = build_model(encoder_weights=None)
+    image = (np.random.rand(300, 400, 3) * 255).astype(np.uint8)  # > one tile, ragged
+    mask = predict_large(model, image, tile_size=256)
+    assert mask.shape == (300, 400)         # stitched back to the original size
+    assert mask.dtype == np.uint8
+    assert set(np.unique(mask)).issubset({0, 1})
+
+
+def test_predict_large_matches_predict_mask_on_single_tile():
+    model = build_model(encoder_weights=None)
+    image = (np.random.rand(256, 256, 3) * 255).astype(np.uint8)
+    assert np.array_equal(predict_large(model, image, tile_size=256),
+                          predict_mask(model, image))
 
 
 def test_save_checkpoint_unwraps_dataparallel(tmp_path):

@@ -111,3 +111,29 @@ def predict_mask(
     logits = net(x)
     prob = torch.sigmoid(logits)[0, 0].cpu().numpy()
     return (prob >= threshold).astype(np.uint8)
+
+
+@torch.no_grad()
+def predict_large(
+    model: torch.nn.Module,
+    image: np.ndarray,
+    tile_size: int = 256,
+    device: str = "cpu",
+    threshold: float = 0.5,
+) -> np.ndarray:
+    """Predict a binary {0,1} road mask for a whole (large) RGB image.
+
+    The model only sees ``tile_size`` windows, so tile the image, predict each
+    tile, and stitch the results back to the original ``HxW`` — the §4 contract
+    ``data/interim/{aoi}_mask.png`` that P2 consumes. Reuses A3's ``tile_array``.
+    """
+    from src.pipeline.p1_segment.osm_mask import tile_array
+
+    net = _unwrap(model).to(device)
+    h, w = image.shape[:2]
+    full = np.zeros((h, w), dtype=np.uint8)
+    for t in tile_array(image, tile_size):
+        pred = predict_mask(net, t.data, device=device, threshold=threshold)
+        th, tw = min(tile_size, h - t.y0), min(tile_size, w - t.x0)
+        full[t.y0 : t.y0 + th, t.x0 : t.x0 + tw] = pred[:th, :tw]  # drop padding
+    return full
