@@ -16,7 +16,7 @@ Urban road networks are vulnerable to floods, accidents, construction, and disas
 2. **G2 — Routable healed graph.** Convert fragmented masks into a single connected, weighted vector graph via skeletonization → sknw/NetworkX → MST/Union-Find bridging scored by distance + angular alignment.
 3. **G3 — Criticality & resilience analysis.** Compute betweenness centrality to find "Gatekeeper Nodes"; run node-ablation stress tests; report a **finite Resilience Index based on global efficiency**.
 4. **G4 — Interactive dashboard.** Streamlit + Folium/Leaflet app with a criticality heatmap and a click-to-disable-node simulation that reroutes live and reports increased travel time.
-5. **G5 — Run on modest hardware.** Everything trainable on commodity 8 GB GPUs, with free cloud (Colab/Kaggle) as overflow.
+5. **G5 — Hardware-agnostic & runnable by everyone.** Training runs on free cloud (Colab/Kaggle) so it works identically on any machine; the graph and dashboard run on CPU; committed sample artifacts let any team member run their part without a GPU. Local 8 GB GPUs are an optional faster path.
 
 ## Target Users
 

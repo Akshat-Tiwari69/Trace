@@ -33,7 +33,7 @@
 
 | ID | Risk | P | I | Mitigation | Owner |
 |---|---|---|---|---|---|
-| I-1 | RTX 50-series (Blackwell, sm_120) not picked up by PyTorch | M | H | Install **PyTorch ≥2.7 + CUDA 12.8 (cu128)**; verify `get_device_capability()==(12,0)` **early**; ML Lead sets it up remotely on the Graph Lead's machine | ML Lead |
+| I-1 | RTX 50-series (Blackwell, sm_120) not picked up by PyTorch | M | H | Primary training path is **Colab/Kaggle (hardware-agnostic)**, so this never blocks the build. For local use, install **PyTorch ≥2.7 + CUDA 12.8 (cu128)** and verify `get_device_capability()==(12,0)` — each GPU owner follows the written setup guide themselves (no remote access) | Shaivi (own machine) |
 | I-2 | 8 GB VRAM out-of-memory during training | M | M | AMP/FP16, small tiles (256/512), gradient accumulation + checkpointing; **free Colab/Kaggle (16 GB) overflow** | ML Lead |
 | I-3 | Laptop GPU thermal throttling on long runs | M | L | Cooling/airflow, performance power mode, smaller tiles, **frequent checkpoints** (lose ≤1 epoch on shutdown) | ML Lead |
 | I-4 | GDAL/rasterio install differs across machines | M | M | Validate installs in Sprint 0; pin versions / prefer conda; document the working setup | ML Lead |
@@ -43,7 +43,7 @@
 
 | ID | Risk | P | I | Mitigation | Owner |
 |---|---|---|---|---|---|
-| TM-1 | Strongest GPU sits with the less-experienced coder | M | M | ML Lead configures that machine remotely; Graph Lead owns the more approachable **classical-Python** graph half + hosts training runs | ML Lead |
+| TM-1 | Uneven coding experience across the team | M | M | Training is hardware-agnostic (Colab/Kaggle), so **no one remote-accesses anyone's machine**; each person sets up their own environment from a step-by-step guide (learning by doing). Shaivi owns the approachable **classical-Python** graph half (CPU, no GPU needed) | Each member (own machine) |
 | TM-2 | Single points of knowledge (only one person understands a part) | M | M | Docs-first; shared repo; brief walkthroughs at handoffs | All |
 | TM-3 | Coordination friction across three machines | L | M | Clean file-handoff contracts; git discipline; `Tracker.md` kept current | All |
 
