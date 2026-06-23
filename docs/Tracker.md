@@ -137,7 +137,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 ### Saanvi — dashboard (CPU, off `data/sample/`)
 | ID | Status | Task | Waits on | Blocks | Done when |
 |---|---|---|---|---|---|
-| **F1** | 🔄 | Dashboard env + scaffold on sample artifacts | uses S1 sample (mock OK until then) | F2 | Streamlit+folium app loads `data/sample/`, renders roads coloured by criticality + legend; map ~65% / panel ~35% per `Design.md` |
+| **F1** | ✅ | Dashboard env + scaffold on sample artifacts | uses S1 sample (mock OK until then) | F2 | Streamlit+folium app loads `data/sample/`, renders roads coloured by criticality + legend; map ~65% / panel ~35% per `Design.md` |
 | **F2** | ⏳ | Full dashboard: click-to-disable sim + rerouting + travel-time + charts | F1 | A5 | clicking a node disables it, reroutes, shows RI drop + travel-time %, updates instantly |
 
 ### Shared / final
@@ -201,9 +201,9 @@ flowchart TD
 ## §9 · Status Snapshot
 
 - **Docs:** ✅ 11/11 complete. **Build:** in progress.
-- **Done:** A1–A3 ✅ (env, skeleton, OSM→mask pipeline) · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience, committed `data/sample/`) · A4 ✅ (segmentation fine-tuned on DeepGlobe: val IoU 0.547 / Dice 0.703 / Occlusion-Recall 0.897).
-- **In flight:** F1 🔄 (Saanvi dashboard; S1 sample available). **Ready:** S2 (real masks — A4 checkpoint exists now), E1 (eval).
-- **Next convergence:** A4 checkpoint feeds S2 (real masks) + E1; F1→F2; then **A5** end-to-end integration (needs A4 + S2 + F2).
+- **Done:** A1–A3 ✅ (env, skeleton, OSM→mask pipeline) · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience, committed `data/sample/`) · A4 ✅ (segmentation fine-tuned on DeepGlobe: val IoU 0.547 / Dice 0.703 / Occlusion-Recall 0.897) · F1 ✅ (dashboard scaffold on the S1 sample).
+- **In flight:** None. **Ready:** S2 (real masks — A4 checkpoint exists now), E1 (eval), F2 (full dashboard simulation).
+- **Next convergence:** A4 checkpoint feeds S2 (real masks) + E1; F2; then **A5** end-to-end integration (needs A4 + S2 + F2).
 - **Top risk to clear early:** A5 integration is the last big convergence — all three lanes (A4 ✅, S2, F2) must land first.
 
 ---
@@ -211,6 +211,11 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-23 (Saanvi)**
+- Done: **F1 ✅** — rebuilt the Streamlit + Folium dashboard on the committed S1 sample artifacts. The 65/35 layout renders 760 roads by endpoint criticality with a Viridis legend, labels 64 critical junctions, and distinguishes healed links with dashed lines.
+- Verified: installed `requirements.txt` globally under Python 3.12 (no virtual environment); imports pass; Streamlit health check passes; browser render shows 637 junctions / 760 road links with no console errors.
+- Next: open the F1 PR into `dev`, then F2 after Akshat reviews/merges it.
 
 **2026-06-23 (cont. 2)**
 - Done: **P1 inference CLI** (`src/pipeline/p1_segment/predict.py` + `predict_large` in `model.py`) — turns imagery + a trained checkpoint into the §4 contract artifact `data/interim/{aoi}_mask.png` by tiling/stitching (reuses A3's `tile_array`). This is the bridge from A4's model to S2's graph build. 55 tests pass (added `predict_large` coverage). Verified end-to-end on a dummy checkpoint.
