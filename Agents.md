@@ -22,4 +22,30 @@ This repo (**Route Resilience**) is coordinated through one backbone file: **`do
 ## Setup
 Environment setup is self-service in **`SETUP.md`** (pick your path by role).
 
+## Working Principles (how to operate)
+
+**1. Think before coding.** Don't assume; don't hide confusion; surface tradeoffs.
+- State your assumptions explicitly; if uncertain, ask.
+- If multiple interpretations exist, present them — don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop, name what's confusing, and ask.
+
+**2. Simplicity first.** The minimum code that solves the problem — nothing speculative.
+- No features beyond what was asked; no abstractions for single-use code.
+- No "flexibility" / "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you wrote 200 lines and 50 would do, rewrite it. Ask: *"Would a senior engineer call this overcomplicated?"* If yes, simplify.
+
+**3. Surgical changes.** Touch only what you must; clean up only your own mess.
+- Don't "improve" adjacent code, comments, or formatting; don't refactor what isn't broken.
+- Match existing style, even if you'd do it differently.
+- Notice unrelated dead code? Mention it — don't delete it.
+- Remove imports/variables/functions that *your* changes made unused; leave pre-existing dead code unless asked.
+- The test: every changed line traces directly to the request.
+
+**4. Goal-driven execution.** Define success criteria, then loop until verified.
+- Turn tasks into verifiable goals: *"add validation"* → *"write tests for invalid inputs, then make them pass"*; *"fix the bug"* → *"write a failing test that reproduces it, then make it pass"*; *"refactor X"* → *"tests pass before and after"*.
+- For multi-step tasks, state a brief plan with a verify-check per step.
+- Strong success criteria let you loop independently; weak ones ("make it work") force constant clarification.
+
 > One-line summary: **Read `docs/Tracker.md`, work only in your lane, warn before crossing into someone else's, update the Tracker when done.**
