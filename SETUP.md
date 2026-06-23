@@ -30,11 +30,21 @@
 
 This runs the dashboard and the whole graph/resilience pipeline — **no GPU needed.**
 
+**If you have conda** (recommended on Linux/macOS, or if pip's GDAL/rasterio wheels fail):
 ```bash
 # GDAL/rasterio are the fussy ones — install via conda-forge FIRST (avoids the classic build errors)
 conda install -c conda-forge gdal rasterio geopandas -y
 # then the rest
 pip install -r requirements.txt
+```
+
+**If you don't have conda** (e.g. plain Windows + venv): prebuilt wheels for `rasterio`/`fiona`/`geopandas` are available on PyPI for common platforms, so plain pip usually works:
+```bash
+pip install -r requirements.txt
+```
+If pip fails to build `rasterio`/`fiona`/`GDAL` from source on your platform, install [Miniconda](https://docs.conda.io/en/latest/miniconda.html) and fall back to the conda-forge path above.
+
+```bash
 # CPU-only PyTorch (smaller, no CUDA): only needed if you run inference locally
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 ```
@@ -85,7 +95,7 @@ Download pointers (sources, licenses, roles) are in `docs/Research.md` → *Data
 
 ## Troubleshooting (I-1)
 
-- **GDAL/rasterio build errors on pip:** install them from **conda-forge first** (Path A), then `pip install -r requirements.txt`. This is the #1 cross-machine gotcha.
+- **GDAL/rasterio build errors on pip:** prebuilt wheels usually cover Windows/macOS/Linux + common Python versions, so plain `pip install -r requirements.txt` works on most machines. If pip tries to build from source and fails, install Miniconda and use the conda-forge path in Path A instead.
 - **`torch.cuda.is_available()` is False on a 50-series card:** wrong wheel → use **cu128** (Path C).
 - **Dashboard shows nothing:** confirm `data/sample/` has the graph + criticality files (Shaivi's S1 output).
 

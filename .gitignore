@@ -1,0 +1,35 @@
+# Route Resilience — gitignore
+# Raw data and model checkpoints are never committed (size + license restrictions).
+# data/sample/ IS committed — it's the small, real-shaped set that lets the
+# dashboard + analysis run without a GPU or a prior pipeline run.
+
+data/raw/*
+data/interim/*
+data/processed/*
+data/outputs/*
+models/*
+
+# ...but keep directory placeholders so the skeleton survives a clone
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!data/outputs/.gitkeep
+!models/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Env / secrets
+.env
+*.env.local
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
