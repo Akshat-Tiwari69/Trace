@@ -51,6 +51,7 @@ Every session, in order:
 - **Runnable by everyone:** committed `data/sample/` artifacts let the dashboard + analysis run with no GPU and no prior pipeline run.
 - **Repo hygiene:** keep it **neutral/generic** (no private hardware specifics, no secrets); `.gitignore` raw data + checkpoints; respect dataset licenses (OSM ODbL, OpenSatMap non-commercial, Cartosat restricted).
 - **Code:** simple and readable over clever; type hints + short docstrings; config not hardcoded.
+- **Git (see §11 for full workflow):** branch off **`dev`** (never `main`) as `<you>/<task-id>-<slug>`; when the task's done-criteria are met, **open a PR into `dev` and stop** — do not merge on creation. **Akshat is the only approver.** Only `main`-related: **agents never PR or merge into `main`** (that's Akshat's stage-gate).
 
 ---
 
@@ -105,6 +106,8 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 ## §6 · Task Board
 
 `ID · status · task — owner — waits on → blocks · done-when`. **Status:** ✅ done · 🔄 in progress · ⏳ ready (do now) · 🔒 blocked.
+
+> **Every task's "done" also includes:** open a PR into `dev` (per §11) and update this Tracker — a task isn't done until its PR is up and the status is flipped.
 
 ### Completed
 | ID | Task | Owner |
@@ -220,7 +223,39 @@ flowchart TD
 
 ---
 
-## §11 · How to Update This File
+## §11 · Git & Branching Workflow
+
+**Branch model:**
+```
+main   ← production. Only Akshat PRs dev→main, at stage completion. Agents NEVER touch this.
+ └ dev  ← integration. All task PRs land here.
+    ├ akshat/A3-osm-mask
+    ├ shaivi/S1-graph-healing
+    └ saanvi/F1-dashboard-scaffold
+```
+
+**One branch per task** (not per person) — it maps to the task IDs in §6 and keeps PRs small.
+
+**Agent git rules (follow exactly):**
+1. **Branch off `dev`**, never `main`: `git checkout dev && git pull && git checkout -b <you>/<task-id>-<slug>` (e.g. `shaivi/S1-graph-healing`).
+2. Do the task **inside your ownership lane** (§0/§5). Commit with clear messages (`feat(graph): add union-find healing`).
+3. When the task's **done-criteria** (§6) are met, **open a PR into `dev`** and **STOP**. ❌ Do not merge on creation. ❌ Never push directly to `dev` or `main`.
+4. **Request review from Akshat** (the only approver) in the PR.
+5. **Self-merge is a catch-up only:** an agent may merge **its own** PR **only if** it has verified the PR is **(a) approved by Akshat AND (b) still open/unmerged**. Otherwise leave it for Akshat to merge. Check before merging:
+   ```bash
+   gh pr view <number> --json reviewDecision,state,mergedAt
+   # merge only if reviewDecision == "APPROVED" and state == "OPEN" and mergedAt == null
+   ```
+6. **`main` is off-limits to agents:** never open, approve, or merge a PR into `main`. Stage completion (dev→main) is **Akshat's** manual decision.
+7. After a merge, update the task to ✅ in §6 and add a §10 log line.
+
+**Akshat's lane (human):** approve PRs into `dev`; merge them (or let the approved-PR self-merge catch-up handle ones you miss); and PR `dev→main` when a stage is complete.
+
+**Warning template (agent, when asked to cross the git boundary):** "⚠️ That would push/merge into `{branch}`. As an agent I only branch off `dev` and open PRs into `dev` — I can't touch `main`, and I don't merge unless this PR is already approved-and-unmerged. I'll open the PR and leave the merge to Akshat."
+
+
+
+## §12 · How to Update This File
 
 - Change a task's **status emoji** the moment it changes; never delete a task — mark it ✅.
 - **Keep task IDs stable** (agents reference them). Add new tasks with new IDs (A6, S3, F3…).

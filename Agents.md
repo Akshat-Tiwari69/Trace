@@ -17,8 +17,9 @@ This repo (**Route Resilience**) is coordinated through one backbone file: **`do
 - Training is **hardware-agnostic (Colab/Kaggle)**; graph + dashboard run on **CPU**. **No remote access** to anyone's machine.
 - Keep the repo **neutral/generic**; no secrets; `.gitignore` raw data + checkpoints; respect dataset licenses.
 - Prefer **simple, readable code**; explain non-trivial choices; don't invent results.
+- **Git:** branch off **`dev`** (never `main`) as `<you>/<task-id>-<slug>`; when done, **open a PR into `dev` and stop** (don't merge on creation). Akshat is the only approver. **Never PR or merge into `main`.** You may merge your *own* PR only if it's already **approved by Akshat and still unmerged**. Full rules in `docs/Tracker.md` §11.
 
 ## Setup
 Environment setup is self-service in **`SETUP.md`** (pick your path by role).
 
-> One-line summary: **Read `docs/Tracker.md`, work only in your lane, warn before crossing into someone else's, update the Tracker when done.** 
+> One-line summary: **Read `docs/Tracker.md`, work only in your lane, warn before crossing into someone else's, update the Tracker when done.**
