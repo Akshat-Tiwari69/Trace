@@ -65,7 +65,7 @@ A "walking skeleton" (a rough run through all four phases on one tile) should ex
 ## Dependencies
 
 - **Internal:** Phase II needs masks (Phase I) **or** an OSM graph for early dev; Phase III needs a healed graph; Phase IV needs precomputed artifacts; Phase 5 needs all. The OSM-graph path is what lets the graph/analysis workstream start immediately.
-- **External:** datasets (DeepGlobe/SpaceNet/OpenSatMap/Sentinel-2/LISS-IV — see `Research.md`); Cartosat-3 access for the high-res demo tile; open-source libraries; the RTX 50-series CUDA 12.8 toolchain; free Colab/Kaggle for overflow training.
+- **External:** datasets (DeepGlobe/SpaceNet/OpenSatMap/Sentinel-2/LISS-IV — see `Research.md`); Cartosat-3 access for the high-res demo tile; open-source libraries; **free Colab/Kaggle for training (primary, hardware-agnostic path)**; optional local NVIDIA GPU + CUDA toolchain for those who have one.
 
 ## Release Strategy
 
@@ -79,6 +79,6 @@ The plan bakes in the key mitigations (full detail in `RiskRegister.md`):
 - **Walking skeleton early** so integration risk surfaces in Sprint 0, not at the end.
 - **Graph/analysis on OSM first** so that workstream never waits on segmentation.
 - **Pretrained models + fine-tuning only** (no training from scratch) to fit the compute budget.
-- **Free-cloud overflow** (Colab/Kaggle) for any run that won't fit 8 GB.
+- **Cloud-first training** (Colab/Kaggle) so the build runs on any machine and never waits on local GPU setup; local GPUs are an optional speed-up.
 - **Frequent checkpointing** so a laptop thermal shutdown loses ≤ 1 epoch.
 - **Fallback MVP:** if segmentation underperforms, demonstrate Phases II–IV directly on an OSM-derived graph — the graph-theoretic resilience analysis (the most novel part) still shines.

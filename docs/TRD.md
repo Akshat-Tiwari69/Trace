@@ -107,7 +107,7 @@ Module contracts (illustrative):
 
 Even without user accounts, basic security hygiene applies:
 
-- **Input validation.** Only accept expected formats (GeoTIFF imagery, GraphML/GeoJSON graphs); reject/Ë‡guard malformed files so the dashboard can't be crashed by a bad upload.
+- **Input validation.** Only accept expected formats (GeoTIFF imagery, GraphML/GeoJSON graphs); reject/guard malformed files so the dashboard can't be crashed by a bad upload.
 - **No secrets in the repo.** No API keys/credentials committed; use environment variables / a git-ignored config if any data portal keys are needed.
 - **Dependency hygiene.** Pin versions (`requirements.txt`/`environment.yml`); avoid abandoned packages.
 - **Data licensing & provenance.** Respect dataset licenses — OSM (ODbL), OpenSatMap (CC BY-NC-SA, non-commercial), SpaceNet/DeepGlobe (research terms), Cartosat-3 (restricted/on request). Record the source and license of every dataset used. Do **not** commit large or restricted raw data to git.
@@ -116,7 +116,8 @@ Even without user accounts, basic security hygiene applies:
 
 ## Infrastructure Design
 
-- **Training:** commodity 8 GB GPUs are sufficient for the realistic fine-tuning plan (see `Research.md` → Infrastructure & Hardware Feasibility for the exact settings). Free **Colab/Kaggle** (16 GB T4/P100) is the overflow for heavier runs.
+- **Training:** the **primary, hardware-agnostic path is free Colab/Kaggle** (16 GB T4/P100) — the same notebook runs identically for every team member regardless of their laptop, so no one is gated by local hardware and no machine is remote-accessed. Local NVIDIA GPUs (where available) are an optional faster path each owner sets up themselves; commodity 8 GB GPUs are sufficient for the realistic fine-tuning plan (see `Research.md` → Infrastructure & Hardware Feasibility).
+- **Everyone can run the repo:** the GPU part (training) runs in the cloud; the CPU parts (graph build/healing, criticality, dashboard) run locally on any machine, including 8 GB / integrated-GPU laptops. **Committed sample artifacts** (a precomputed graph + criticality file) let the dashboard and analysis run out-of-the-box with no GPU and no prior pipeline run.
 - **Graph + dashboard:** CPU-only; runs comfortably on a modest laptop, including 8 GB RAM machines when working against precomputed artifacts.
 - **Dev environment:** Python virtual environment (venv/conda), pinned dependencies, fixed random seeds for reproducibility. An optional `Dockerfile` can lock the environment exactly.
 
