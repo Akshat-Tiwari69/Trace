@@ -14,7 +14,7 @@
 
 | If you are… | You own (edit freely) | Your job | Your next task | **Never touch** (warn instead) |
 |---|---|---|---|---|
-| **Akshat** | `src/pipeline/p1_segment/`, `notebooks/`, data-pipeline scripts, integration glue in `src/app/main wiring`, `requirements.txt`, `SETUP.md` | ML / segmentation, data pipeline, end-to-end integration, coordination | **A4** (run notebook) → A5 | Shaivi's `p2_graph/`, `p3_analysis/` internals · Saanvi's dashboard UI in `src/app/` (only touch the integration contract, with a heads-up) |
+| **Akshat** | `src/pipeline/p1_segment/`, `notebooks/`, data-pipeline scripts, integration glue in `src/app/main wiring`, `requirements.txt`, `SETUP.md` | ML / segmentation, data pipeline, end-to-end integration, coordination | **A5** (walking skeleton) | Shaivi's `p2_graph/`, `p3_analysis/` internals · Saanvi's dashboard UI in `src/app/` (only touch the integration contract, with a heads-up) |
 | **Shaivi** | `src/pipeline/p2_graph/`, `src/pipeline/p3_analysis/` | graph build + healing, criticality + resilience (classical Python, **CPU only**) | **S2** (waits on A4) | `p1_segment/` model code · `src/app/` dashboard UI · `notebooks/` training |
 | **Saanvi** | `src/app/` (Streamlit dashboard), `docs/Design.md` | frontend / dashboard (**CPU only**, runs off `data/sample/`) | **F1** (S1 sample ready) → F2 | Any `src/pipeline/` code — you **consume** its artifacts, you don't edit it |
 
@@ -125,7 +125,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **A1** | ✅ | Environment + pinned `requirements.txt` + `SETUP.md` | — | A3, everyone's setup | core libs import on a clean env; `requirements.txt` + `SETUP.md` committed — verified on Akshat's Windows machine: `pip install -r requirements.txt` succeeds, `import streamlit, folium, networkx, skimage, sknw, rasterio, osmnx` → `CPU env OK` |
 | **A2** | ✅ | Repo skeleton (`src/`, `data/`, `notebooks/`, `.gitignore`) | — | A3, F1, S1 outputs | dirs exist; `data/raw`+`models/` gitignored; `data/sample/` placeholder present — created `src/pipeline/{p1_segment,p2_graph,p3_analysis}`, `src/app`, `data/{raw,interim,processed,outputs,sample}`, `models/`, `notebooks/` with `.gitkeep`; `.gitignore` ignores `data/raw|interim|processed|outputs/*` + `models/*` (kept placeholders via `dir/*` + negated `.gitkeep`) |
 | **A3** | ✅ | Data pipeline: download/cache + tiling + **OSM→mask** script | A1, A2 | A4 | produces aligned `{aoi}_mask`-style labels in `data/interim/`; QC'd on 1 tile — `src/pipeline/p1_segment/{osm_mask,build_dataset}.py`: osmnx→rasterio metric-grid masks, m-buffered roads, 256px tiling, GPKG cache, JSON alignment manifest; verified on Panaji (4310×3343 @1m/px, 5.65% road px, 238 tiles, strictly {0,1}); 9 offline unit tests pass |
-| **A4** | 🔄 | Fine-tune segmentation (SegFormer/U-Net) — Colab/Kaggle notebook | A3 | S2, A5, E1 | model outputs a real road mask; IoU/Occlusion-Recall logged — **code complete, pending Colab/Kaggle run**: `notebooks/train_segmentation.ipynb` + reusable `p1_segment/{model,dataset,losses,metrics,train}.py` (SegFormer MiT-b0+U-Net via smp, DiceBCE loss, CoarseDropout occlusion aug, AMP, IoU/Dice/Occlusion-Recall, `predict_mask` for P2); 28 CPU unit tests pass. Akshat runs the notebook on Colab/Kaggle to produce the checkpoint + logged metrics |
+| **A4** | ✅ | Fine-tune segmentation (SegFormer/U-Net) — Colab/Kaggle notebook | A3 | S2, A5, E1 | model outputs a real road mask; IoU/Occlusion-Recall logged — **trained on DeepGlobe (Kaggle T4, 15 epochs, mit_b0+U-Net, DiceBCE, CoarseDropout occlusion aug, cosine LR): val IoU 0.547 · Dice 0.703 · Occlusion-Recall 0.897**. Checkpoint `models/segformer_mitb0_deepglobe.pt` (gitignored; saved off-device). `notebooks/train_segmentation.ipynb` + `p1_segment/{model,dataset,losses,metrics,train}.py`; `predict_mask` is the P2-facing API; 28 CPU unit tests pass |
 | **A5** | 🔒 | Walking skeleton → end-to-end integration on 1 tile | A4, S2, F2 | X1 | one tile flows P1→P2→P3→P4 without manual steps |
 
 ### Shaivi — graph + resilience (CPU, no GPU)
@@ -201,16 +201,21 @@ flowchart TD
 ## §9 · Status Snapshot
 
 - **Docs:** ✅ 11/11 complete. **Build:** in progress.
-- **Done:** A1–A3 ✅ (env, skeleton, OSM→mask pipeline) · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience, committed `data/sample/`).
-- **In flight:** A4 🔄 (segmentation training code complete — pending Akshat's Colab/Kaggle run for the checkpoint + logged IoU/Occlusion-Recall) · F1 🔄 (Saanvi dashboard; S1 sample now available for real data).
-- **Next convergence:** A4 checkpoint → unblocks S2 (real masks) + E1 (eval); F1→F2; then **A5** end-to-end integration (needs A4 + S2 + F2).
-- **Top risk to clear early:** A4 training run on free Colab/Kaggle GPU (env setup already cleared — pip wheels work on Windows, no conda/GDAL needed).
+- **Done:** A1–A3 ✅ (env, skeleton, OSM→mask pipeline) · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience, committed `data/sample/`) · A4 ✅ (segmentation fine-tuned on DeepGlobe: val IoU 0.547 / Dice 0.703 / Occlusion-Recall 0.897).
+- **In flight:** F1 🔄 (Saanvi dashboard; S1 sample available). **Ready:** S2 (real masks — A4 checkpoint exists now), E1 (eval).
+- **Next convergence:** A4 checkpoint feeds S2 (real masks) + E1; F1→F2; then **A5** end-to-end integration (needs A4 + S2 + F2).
+- **Top risk to clear early:** A5 integration is the last big convergence — all three lanes (A4 ✅, S2, F2) must land first.
 
 ---
 
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-23 (cont.)**
+- Done: **A4 ✅** — fine-tuned SegFormer mit_b0+U-Net on DeepGlobe via Kaggle (T4, 15 epochs, DiceBCE, CoarseDropout occlusion aug, cosine LR): **val IoU 0.547 · Dice 0.703 · Occlusion-Recall 0.897**. Checkpoint saved off-device.
+- Debugging the run surfaced + fixed several notebook issues (all on `akshat/A4-notebook-fixes`): private→public repo (token clone removed); clone the `dev` branch (main is empty); Kaggle env-detect (was misfiring to colab); Kaggle internet/accelerator notes (P100 sm_60 unsupported → T4); dataset auto-find (skip valid/test which lack masks); batch 16 + 4 workers + cosine LR; **and the key fix — val used `Resize` (whole 1024→256, roads vanish) vs train `RandomCrop` at native res → val IoU was pinned ~0.20; switched val to native-res CenterCrop → IoU jumped 0.18→0.37→0.547.**
+- Next: save checkpoint as a Kaggle Dataset for S2/A5 reuse; A4 unblocks S2 (real masks) + E1 (eval).
 
 **2026-06-23**
 - Done: A1 ✅ — pinned `requirements.txt` (fixed invalid `sknw==0.1.5` → `0.15`); verified on Akshat's Windows machine (`pip install` + import check → `CPU env OK`). Discovered conda isn't required on Windows; updated `SETUP.md` Path A + Troubleshooting to make conda an optional fallback instead of a required first step.
