@@ -10,7 +10,15 @@ import streamlit as st
 from streamlit_folium import st_folium
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+def find_repo_root() -> Path:
+    """Find the repository root using its Tracker file as a stable marker."""
+    for candidate in Path(__file__).resolve().parents:
+        if (candidate / "docs" / "Tracker.md").is_file():
+            return candidate
+    raise RuntimeError("Could not locate the repository root")
+
+
+REPO_ROOT = find_repo_root()
 SAMPLE_GEOJSON = REPO_ROOT / "data" / "sample" / "panaji_demo_graph.geojson"
 SAMPLE_CRITICALITY = REPO_ROOT / "data" / "sample" / "panaji_demo_criticality.csv"
 
@@ -21,7 +29,15 @@ def load_sample_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     features = gpd.read_file(SAMPLE_GEOJSON)
     criticality = pd.read_csv(SAMPLE_CRITICALITY)
 
-    required_features = {"feature_type", "geometry"}
+    required_features = {
+        "feature_type",
+        "geometry",
+        "node_id",
+        "u",
+        "v",
+        "length_m",
+        "is_bridged",
+    }
     required_criticality = {"node_id", "betweenness", "rank", "is_critical"}
     if not required_features.issubset(features.columns):
         missing = required_features - set(features.columns)
@@ -33,12 +49,22 @@ def load_sample_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     return features, criticality
 
 
-def build_map(features: gpd.GeoDataFrame, criticality: pd.DataFrame) -> folium.Map:
-    """Build a dark Folium map with roads coloured by endpoint criticality."""
+def split_features(
+    features: gpd.GeoDataFrame,
+) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
+    """Return validated node and edge feature tables."""
     nodes = features[features["feature_type"] == "node"]
     edges = features[features["feature_type"] == "edge"]
-    if nodes.empty:
-        raise ValueError("Sample GeoJSON contains no node features")
+    if nodes.empty or edges.empty:
+        raise ValueError("Sample GeoJSON must contain node and edge features")
+    if nodes["node_id"].isna().any() or edges[["u", "v", "length_m"]].isna().any().any():
+        raise ValueError("Sample GeoJSON contains incomplete graph features")
+    return nodes, edges
+
+
+def build_map(features: gpd.GeoDataFrame, criticality: pd.DataFrame) -> folium.Map:
+    """Build a dark Folium map with roads coloured by endpoint criticality."""
+    nodes, edges = split_features(features)
 
     scores = criticality.set_index("node_id")["betweenness"].to_dict()
     maximum = max(float(criticality["betweenness"].max()), 1e-9)
@@ -96,8 +122,7 @@ def build_map(features: gpd.GeoDataFrame, criticality: pd.DataFrame) -> folium.M
 
 def render_panel(features: gpd.GeoDataFrame, criticality: pd.DataFrame) -> None:
     """Render the read-only F1 summary panel."""
-    nodes = features[features["feature_type"] == "node"]
-    edges = features[features["feature_type"] == "edge"]
+    nodes, edges = split_features(features)
     critical_nodes = criticality[criticality["is_critical"]].sort_values("rank")
 
     st.title("Route Resilience")
