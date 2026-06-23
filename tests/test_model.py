@@ -33,6 +33,17 @@ def test_predict_mask_is_binary_hw():
     assert set(np.unique(mask)).issubset({0, 1})
 
 
+def test_save_checkpoint_unwraps_dataparallel(tmp_path):
+    # DataParallel can be constructed on CPU (no forward needed); save must
+    # unwrap .module so the keys reload into a plain model.
+    model = build_model(encoder_weights=None)
+    dp = torch.nn.DataParallel(model)
+    ckpt = tmp_path / "dp.pt"
+    save_checkpoint(dp, ckpt, meta={"encoder": "mit_b0"})
+    reloaded, _ = load_checkpoint(ckpt)
+    assert reloaded.state_dict().keys() == model.state_dict().keys()
+
+
 def test_checkpoint_roundtrip(tmp_path):
     model = build_model(encoder_weights=None)
     image = (np.random.rand(64, 64, 3) * 255).astype(np.uint8)

@@ -55,3 +55,13 @@ def test_val_transform_is_deterministic_size(tmp_path):
 def test_empty_pairs_raises(tmp_path):
     with pytest.raises(ValueError):
         RoadTileDataset([], build_val_transform(64))
+
+
+def test_crops_per_image_multiplies_length(tmp_path):
+    _make_pair(tmp_path, "1")
+    _make_pair(tmp_path, "2")
+    ds = RoadTileDataset(pair_deepglobe(tmp_path), build_train_transform(64), crops_per_image=4)
+    assert len(ds) == 2 * 4
+    # indices beyond the number of pairs still wrap to a valid item
+    image, mask = ds[7]
+    assert image.shape == (3, 64, 64) and mask.shape == (1, 64, 64)
