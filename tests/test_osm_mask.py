@@ -59,6 +59,17 @@ def test_tile_array_rejects_bad_size():
         tile_array(np.zeros((10, 10)), 0)
 
 
+def test_tile_array_preserves_channel_dims():
+    # H×W×C imagery (e.g. RGB) must tile + edge-pad without losing channels,
+    # so imagery can be tiled identically to its mask.
+    arr = np.ones((300, 300, 3), dtype=np.uint8)
+    tiles = tile_array(arr, 256)
+    assert all(t.data.shape == (256, 256, 3) for t in tiles)
+    br = next(t for t in tiles if (t.row, t.col) == (1, 1))  # padded edge tile
+    assert br.data.shape == (256, 256, 3)
+    assert br.data[:44, :44].sum() == 44 * 44 * 3  # real pixels kept, rest padded
+
+
 # --------------------------------------------------------------------------- #
 # build_grid
 # --------------------------------------------------------------------------- #

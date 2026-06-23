@@ -27,6 +27,7 @@ Design notes:
 from __future__ import annotations
 
 import dataclasses
+import json
 import math
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -77,12 +78,22 @@ def fetch_osm_roads(
 
     ``bbox`` is ``(west, south, east, north)`` in lon/lat (standard GIS
     minx,miny,maxx,maxy order). Results are cached to ``cache_path`` (GeoPackage)
-    so repeated runs don't re-hit the Overpass API.
+    so repeated runs don't re-hit the Overpass API. The cache is keyed to the
+    request (``bbox`` + ``network_type``) via a sidecar ``.meta.json``: if you
+    rerun the same ``--aoi`` with a different bbox or network type, the stale
+    cache is ignored and roads are re-fetched — otherwise we'd silently
+    rasterize the wrong vectors onto the new grid.
     """
     import geopandas as gpd  # lazy: heavy + only needed for the network path
 
-    if cache_path is not None and Path(cache_path).exists():
-        return gpd.read_file(cache_path)
+    cache_path = Path(cache_path) if cache_path is not None else None
+    meta_path = cache_path.with_suffix(".meta.json") if cache_path else None
+    signature = {"bbox": [round(v, 6) for v in bbox], "network_type": network_type}
+
+    if cache_path and cache_path.exists() and meta_path and meta_path.exists():
+        if json.loads(meta_path.read_text()) == signature:
+            return gpd.read_file(cache_path)
+        # else: cache was built for a different request → fall through, re-fetch
 
     import osmnx as ox
 
@@ -102,9 +113,10 @@ def fetch_osm_roads(
     edges = ox.graph_to_gdfs(graph, nodes=False, edges=True)
     roads = edges[["geometry"]].reset_index(drop=True)
 
-    if cache_path is not None:
-        Path(cache_path).parent.mkdir(parents=True, exist_ok=True)
+    if cache_path:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
         roads.to_file(cache_path, driver="GPKG")
+        meta_path.write_text(json.dumps(signature))
     return roads
 
 
@@ -186,19 +198,24 @@ def tile_array(
     """Split ``arr`` into ``tile_size``×``tile_size`` tiles, padding the edges.
 
     The last row/column is zero-padded (``pad_value``) up to ``tile_size`` so
-    every tile is exactly square — what the segmentation model expects.
+    every tile is exactly square — what the segmentation model expects. Works
+    for 2-D masks and ``H×W×C`` imagery alike (extra channel dims are preserved),
+    so imagery can be tiled identically to its mask.
     """
     if tile_size <= 0:
         raise ValueError("tile_size must be positive")
 
     height, width = arr.shape[:2]
+    channel_shape = arr.shape[2:]  # () for 2-D masks, (C,) for H×W×C imagery
     tiles: list[TileRef] = []
     for row, y0 in enumerate(range(0, height, tile_size)):
         for col, x0 in enumerate(range(0, width, tile_size)):
             patch = arr[y0 : y0 + tile_size, x0 : x0 + tile_size]
             ph, pw = patch.shape[:2]
             if ph < tile_size or pw < tile_size:
-                padded = np.full((tile_size, tile_size), pad_value, dtype=arr.dtype)
+                padded = np.full(
+                    (tile_size, tile_size, *channel_shape), pad_value, dtype=arr.dtype
+                )
                 padded[:ph, :pw] = patch
                 patch = padded
             tiles.append(TileRef(row=row, col=col, y0=y0, x0=x0, data=patch))
