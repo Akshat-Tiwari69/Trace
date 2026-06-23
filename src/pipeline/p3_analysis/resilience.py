@@ -135,7 +135,7 @@ def ablation_curve(
 
     if order == "targeted":
         if betweenness is None:
-            betweenness = {n: 0.0 for n in nodes}
+            raise ValueError("order='targeted' requires a betweenness dict")
         sequence = sorted(nodes, key=lambda n: betweenness.get(n, 0.0), reverse=True)
     elif order == "random":
         rng = random.Random(seed)

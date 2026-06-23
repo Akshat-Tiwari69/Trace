@@ -13,8 +13,9 @@ import math
 import networkx as nx
 import pytest
 
-from src.pipeline.p3_analysis.criticality import compute_betweenness
+from src.pipeline.p3_analysis.criticality import annotate_criticality, compute_betweenness
 from src.pipeline.p3_analysis.resilience import (
+    ablation_curve,
     global_efficiency,
     resilience_index,
 )
@@ -104,3 +105,29 @@ def test_largest_cc_fraction_reported():
     result = resilience_index(g, [chokepoint])
     # removing the bridge splits 6 nodes into 3 + 2 → largest CC = 3/5
     assert result["largest_cc_fraction"] == pytest.approx(3 / 5)
+
+
+def test_targeted_ablation_requires_betweenness():
+    """A 'targeted' curve with no betweenness must fail loudly, not silently."""
+    with pytest.raises(ValueError):
+        ablation_curve(_barbell(), order="targeted", betweenness=None)
+
+
+# --------------------------------------------------------------------------- #
+# critical_fraction semantics
+# --------------------------------------------------------------------------- #
+def test_critical_fraction_zero_flags_none():
+    g = _barbell()
+    annotate_criticality(g, critical_fraction=0.0)
+    assert not any(d["is_critical"] for _, d in g.nodes(data=True))
+
+
+def test_critical_fraction_positive_flags_at_least_one():
+    g = _barbell()
+    annotate_criticality(g, critical_fraction=0.10)  # 0.10·6 rounds to 1
+    assert sum(d["is_critical"] for _, d in g.nodes(data=True)) >= 1
+
+
+def test_critical_fraction_out_of_range_raises():
+    with pytest.raises(ValueError):
+        annotate_criticality(_barbell(), critical_fraction=1.5)

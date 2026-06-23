@@ -26,6 +26,7 @@ from src.pipeline.p2_graph.graph_io import save_geojson, save_graphml
 from src.pipeline.p2_graph.healing import HealReport, heal_graph
 from src.pipeline.p2_graph.skeleton_graph import (
     mask_to_skeleton,
+    prune_degenerate_edges,
     reproject_graph_to_wgs84,
     skeleton_to_graph,
 )
@@ -67,6 +68,7 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
 
     skeleton = mask_to_skeleton(mask)
     graph = skeleton_to_graph(skeleton, transform=transform, resolution_m=cfg.resolution_m)
+    prune_degenerate_edges(graph, cfg.min_edge_len_m)  # drop sub-pixel/self-loop edges
 
     graph, report = heal_graph(
         graph,

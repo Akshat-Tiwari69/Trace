@@ -48,11 +48,19 @@ def annotate_criticality(
     """Compute betweenness and write ``betweenness, is_critical`` onto each node.
 
     The top ``critical_fraction`` of nodes by betweenness are flagged
-    ``is_critical=True``. Returns the betweenness dict for downstream ranking.
+    ``is_critical=True``. ``critical_fraction=0.0`` flags **none**; any positive
+    fraction flags at least one (so "show me the critical nodes" never comes back
+    empty on a small graph). Returns the betweenness dict for downstream ranking.
     """
+    if not 0.0 <= critical_fraction <= 1.0:
+        raise ValueError("critical_fraction must be in [0, 1]")
+
     bc = compute_betweenness(graph, weight=weight, k=k)
     ranked = sorted(bc, key=lambda n: bc[n], reverse=True)
-    n_critical = max(1, int(round(len(ranked) * critical_fraction))) if ranked else 0
+    if critical_fraction == 0.0 or not ranked:
+        n_critical = 0
+    else:
+        n_critical = max(1, int(round(len(ranked) * critical_fraction)))
     critical = set(ranked[:n_critical])
 
     for node_id, score in bc.items():

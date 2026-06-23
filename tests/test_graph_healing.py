@@ -14,6 +14,7 @@ from src.pipeline.p2_graph.healing import UnionFind, heal_graph
 from src.pipeline.p2_graph.skeleton_graph import (
     TYPE_BRIDGED,
     _annotate_degree_and_type,
+    prune_degenerate_edges,
 )
 
 
@@ -112,6 +113,21 @@ def test_heal_rejects_sharp_turn():
 
     _, loose = heal_graph(g.copy(), gap_max_m=40.0, angle_max_deg=100.0)
     assert loose.bridges_added == 1  # same gap allowed once the angle budget opens
+
+
+def test_prune_removes_self_loops_and_short_edges():
+    g = nx.Graph()
+    _road(g, 0, (0.0, 0.0), 1, (10.0, 0.0))      # keep: 10 m
+    g.add_node(2, x=20.0, y=0.0)
+    g.add_edge(2, 2, length_m=0.0, geometry=[[20.0, 0.0], [20.0, 0.0]], is_bridged=False)  # self-loop
+    _road(g, 3, (30.0, 0.0), 4, (30.3, 0.0))     # drop: 0.3 m sub-pixel edge
+    _annotate_degree_and_type(g)
+
+    removed = prune_degenerate_edges(g, min_edge_len_m=1.0)
+    assert removed == 2                          # the self-loop + the 0.3 m edge
+    assert g.has_edge(0, 1)                       # the real road survives
+    assert 2 not in g.nodes                       # orphaned self-loop node dropped
+    assert not any(u == v for u, v in g.edges())  # no self-loops remain
 
 
 def test_heal_prefers_straight_over_kinked():

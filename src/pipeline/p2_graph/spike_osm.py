@@ -59,7 +59,7 @@ def simulate_occlusion(
     lane will train against. Reproducible via ``seed``.
     """
     if n_patches <= 0:
-        return mask
+        return mask.copy()
     rng = np.random.default_rng(seed)
     out = mask.copy()
     road_yx = np.argwhere(mask > 0)

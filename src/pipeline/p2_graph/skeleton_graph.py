@@ -142,3 +142,22 @@ def _annotate_degree_and_type(graph: "nx.Graph") -> None:
         deg = graph.degree(node_id)
         graph.nodes[node_id]["degree"] = int(deg)
         graph.nodes[node_id]["type"] = _classify(deg)
+
+
+def prune_degenerate_edges(graph: "nx.Graph", min_edge_len_m: float) -> int:
+    """Drop self-loops and sub-``min_edge_len_m`` edges; remove orphaned nodes.
+
+    Skeletonisation can emit zero/near-zero-length edges (self-loops at junction
+    pixels, single-pixel spurs). Left in, their tiny ``length_m`` weights skew the
+    weighted shortest-path metrics (betweenness, global efficiency). Returns the
+    number of edges removed. Run before healing, then re-annotate degree/type.
+    """
+    to_remove = [
+        (u, v)
+        for u, v, data in graph.edges(data=True)
+        if u == v or float(data.get("length_m", 0.0)) < min_edge_len_m
+    ]
+    graph.remove_edges_from(to_remove)
+    graph.remove_nodes_from([n for n in list(graph.nodes) if graph.degree(n) == 0])
+    _annotate_degree_and_type(graph)
+    return len(to_remove)
