@@ -93,6 +93,16 @@ If it prints `False` or a `sm_120 not compatible` warning on a 50-series card, y
 
 Download pointers (sources, licenses, roles) are in `docs/Research.md` → *Dataset Analysis*. The data-pipeline + OSM→mask script (task **A3**) automates label generation. Do **not** commit raw imagery or checkpoints (they're `.gitignore`d); commit only the small `data/sample/` set.
 
+## Run P1 inference (imagery → road mask)
+
+Once you have a trained checkpoint (from `notebooks/train_segmentation.ipynb`, saved off-device), turn an image into the road-mask artifact P2 consumes — runs on **CPU**, no GPU needed:
+
+```bash
+python -m src.pipeline.p1_segment.predict \
+    --image data/raw/<tile>.tif --checkpoint models/<checkpoint>.pt --aoi <id>
+# writes data/interim/<id>_mask.png  (binary {0,1}); large images are tiled + stitched
+```
+
 ## Troubleshooting (I-1)
 
 - **GDAL/rasterio build errors on pip:** prebuilt wheels usually cover Windows/macOS/Linux + common Python versions, so plain `pip install -r requirements.txt` works on most machines. If pip tries to build from source and fails, install Miniconda and use the conda-forge path in Path A instead.
