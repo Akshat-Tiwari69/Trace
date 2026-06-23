@@ -149,8 +149,8 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 ### Bugs / Issues
 | ID | Type | Description | Owner | Status |
 |---|---|---|---|---|
-| I-1 | issue | GDAL/rasterio installs differ per machine — solve in A1, document the fix in `SETUP.md` | Akshat | 🔄 |
-| I-2 | issue | DeprecationWarnings from torch.jit.script and torch.jit.interface during tests (18 warnings) — update code to use torch.compile/export | Akshat | 🔄 |
+| I-1 | issue | GDAL/rasterio installs differ per machine — solve in A1, document the fix in `SETUP.md` | Akshat | ✅ resolved: pip wheels install rasterio/fiona/geopandas directly on Windows (no conda/GDAL build) — confirmed independently by A1 (Akshat) and S1 (Shaivi); `SETUP.md` Path A + Troubleshooting now make conda an optional fallback |
+| I-2 | issue | DeprecationWarnings from torch.jit.script / torch.jit.interface during tests (18) | Akshat | ✅ triaged: **upstream, not our code** — `timm` (transitive dep of smp) calls `torch.jit.script` at import (`timm/layers/activations_jit.py`). Silenced via scoped `pytest.ini` `filterwarnings`; clears when smp/timm migrate to torch.compile |
 ---
 
 ## §7 · Coordination & Wait-Points (where to wait for whom)
