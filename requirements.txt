@@ -31,6 +31,8 @@ pandas==2.2.2
 # Deep learning (torch installed separately per SETUP.md Path A/B/C)
 segmentation-models-pytorch==0.3.4
 transformers==4.44.2
+albumentations==2.0.8         # occlusion-sim augmentation (CoarseDropout etc.)
+albucore==0.0.24              # albumentations 2.0.8's core dep — pin to avoid a too-new break
 
 # Notebooks
 jupyter==1.0.0
