@@ -26,24 +26,42 @@ IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
+# smp decoders that build with the MiT (SegFormer) encoders. UnetPlusPlus and
+# DeepLabV3+ do NOT support MiT encoders (verified), so they're excluded.
+_ARCHITECTURES = {"unet": smp.Unet, "manet": smp.MAnet, "fpn": smp.FPN}
+
+
 def build_model(
     encoder: str = "mit_b0",
     encoder_weights: str | None = "imagenet",
     in_channels: int = 3,
     classes: int = 1,
+    arch: str = "unet",
+    decoder_attention_type: str | None = None,
 ) -> torch.nn.Module:
-    """Build the SegFormer-MiT(U-Net) road segmenter.
+    """Build the SegFormer-MiT road segmenter.
 
-    ``encoder_weights="imagenet"`` downloads pretrained encoder weights (the
-    fine-tune starting point); pass ``None`` for a random encoder (tests/offline).
+    ``arch`` picks the smp decoder (``unet`` default; also ``manet``/``fpn``).
+    ``decoder_attention_type`` (e.g. ``"scse"``) adds attention to the U-Net
+    decoder blocks — a cheap accuracy boost; only valid for ``arch="unet"``.
+    ``encoder_weights="imagenet"`` fine-tunes pretrained weights; ``None`` gives
+    a random encoder (tests/offline). Raw logits out (loss/metrics apply sigmoid).
     """
-    return smp.Unet(
+    arch = arch.lower()
+    if arch not in _ARCHITECTURES:
+        raise ValueError(f"arch must be one of {sorted(_ARCHITECTURES)}, got {arch!r}")
+    kwargs: dict[str, Any] = dict(
         encoder_name=encoder,
         encoder_weights=encoder_weights,
         in_channels=in_channels,
         classes=classes,
-        activation=None,  # raw logits — DiceBCELoss/metrics apply sigmoid
+        activation=None,
     )
+    if decoder_attention_type:
+        if arch != "unet":
+            raise ValueError("decoder_attention_type is only supported for arch='unet'")
+        kwargs["decoder_attention_type"] = decoder_attention_type
+    return _ARCHITECTURES[arch](**kwargs)
 
 
 def _unwrap(model: torch.nn.Module) -> torch.nn.Module:
@@ -72,15 +90,23 @@ def load_checkpoint(
 ) -> tuple[torch.nn.Module, dict[str, Any]]:
     """Rebuild the model (random encoder, no download) and load saved weights.
 
-    The encoder defaults to whatever the checkpoint's ``meta['encoder']`` says
-    (so a mit_b2 checkpoint rebuilds as mit_b2); pass ``encoder`` to override.
+    The encoder/arch default to whatever the checkpoint's ``meta`` says (so a
+    mit_b3 Unet+scse checkpoint rebuilds correctly); pass ``encoder`` to override.
+    ``weights_only=False`` because these are our own checkpoints whose ``meta``
+    holds config/metric objects torch 2.6+ would otherwise refuse to unpickle.
     """
-    ckpt = torch.load(path, map_location=map_location)
-    enc = encoder or ckpt.get("meta", {}).get("encoder", "mit_b0")
-    model = build_model(encoder=enc, encoder_weights=None)
+    ckpt = torch.load(path, map_location=map_location, weights_only=False)
+    meta = ckpt.get("meta", {})
+    enc = encoder or meta.get("encoder", "mit_b0")
+    model = build_model(
+        encoder=enc,
+        encoder_weights=None,
+        arch=meta.get("arch", "unet"),
+        decoder_attention_type=meta.get("decoder_attention_type"),
+    )
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
-    return model, ckpt.get("meta", {})
+    return model, meta
 
 
 def _to_chw_tensor(image: np.ndarray) -> torch.Tensor:
