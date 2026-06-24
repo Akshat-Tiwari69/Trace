@@ -111,7 +111,7 @@ def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
             int(edge["u"]),
             int(edge["v"]),
             length_m=float(edge["length_m"]),
-            is_bridged=bool(edge["is_bridged"]),
+            is_bridged=bool(edge.get("is_bridged", False)),
             coordinates=tuple(
                 (float(longitude), float(latitude))
                 for longitude, latitude in edge.geometry.coords
@@ -205,7 +205,7 @@ def representative_reroute(graph: nx.Graph, disabled_node: int) -> RouteResult |
 
 
 @st.cache_data(show_spinner=False)
-def simulate_ablation(_graph: nx.Graph, node: int) -> SimulationResult:
+def simulate_ablation(graph_fingerprint: str, _graph: nx.Graph, node: int) -> SimulationResult:
     """Disable one node and compute resilience plus a representative reroute."""
     metrics = resilience_index(_graph, removed_nodes=[node])
     return SimulationResult(
@@ -336,6 +336,8 @@ def nearest_critical_node(
     if not clicked or "lat" not in clicked or "lng" not in clicked:
         return None
     candidates = nodes[nodes["node_id"].isin(critical_ids)].copy()
+    if candidates.empty:
+        return None
     candidates["distance"] = (
         (candidates.geometry.y - float(clicked["lat"])) ** 2
         + (candidates.geometry.x - float(clicked["lng"])) ** 2
@@ -418,7 +420,8 @@ def render_panel(
 
     st.subheader("Scenario controls")
     st.selectbox("Region", ["Panaji demo"], disabled=True)
-    st.selectbox("Scenario", ["Road closure", "Accident", "Flood"])
+    scenario = st.selectbox("Scenario", ["Road closure", "Accident", "Flood"])
+    # TODO: wire scenario-specific behavior into routing logic
     selected = st.selectbox(
         "Junction to disable",
         critical_ids,
@@ -509,7 +512,7 @@ def main() -> None:
     disabled_node = st.session_state.get("disabled_node")
     with st.spinner("Simulating junction failure…") if disabled_node is not None else st.empty():
         simulation = (
-            simulate_ablation(graph, int(disabled_node))
+            simulate_ablation("panaji_demo_v1", graph, int(disabled_node))
             if disabled_node is not None
             else None
         )

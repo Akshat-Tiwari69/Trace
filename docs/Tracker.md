@@ -215,7 +215,7 @@ flowchart TD
 **2026-06-23 (Saanvi, F2)**
 - Done: **F2 ✅** — added map-click junction selection, node-ablation simulation using the locked global-efficiency RI, exact same-speed route-length impact, orange rerouting, red disabled states, reset/layer/scenario controls, and live travel-impact/delay-contributor charts per `Design.md`.
 - Verified: top-ranked junction 45 updates RI 1.000→0.976 and representative route 161 m→449 m (+178.6%); top-five critical-node sweep handles finite detours and route cuts; browser closure/reset flows pass with no console errors; 55 tests pass.
-- PR: F2 is stacked on the open F1 PR branch; request Akshat review, then retarget F2 to `dev` when F1 merges.
+- PR: F2 is stacked on the open F1 PR branch; request Akshat's review, then retarget F2 to `dev` when F1 merges.
 
 **2026-06-23 (Saanvi)**
 - Done: **F1 ✅** — rebuilt the Streamlit + Folium dashboard on the committed S1 sample artifacts. The 65/35 layout renders 760 roads by endpoint criticality with a Viridis legend, labels 64 critical junctions, and distinguishes healed links with dashed lines.
