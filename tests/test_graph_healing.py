@@ -8,6 +8,7 @@ hand (no skeletonisation, no network) so the healing logic is tested in isolatio
 from __future__ import annotations
 
 import networkx as nx
+import numpy as np
 import pytest
 
 from src.pipeline.p2_graph.healing import UnionFind, heal_graph
@@ -16,6 +17,7 @@ from src.pipeline.p2_graph.skeleton_graph import (
     _annotate_degree_and_type,
     prune_degenerate_edges,
 )
+from src.pipeline.p2_graph.spike_osm import simulate_occlusion
 
 
 # --------------------------------------------------------------------------- #
@@ -128,6 +130,30 @@ def test_prune_removes_self_loops_and_short_edges():
     assert g.has_edge(0, 1)                       # the real road survives
     assert 2 not in g.nodes                       # orphaned self-loop node dropped
     assert not any(u == v for u, v in g.edges())  # no self-loops remain
+
+
+def test_simulate_occlusion_patch_is_exact_size():
+    """A patch zeroes an exactly patch_px×patch_px window (not 2·half)."""
+    mask = np.ones((60, 60), dtype=np.uint8)
+    out = simulate_occlusion(mask, n_patches=1, patch_px=11, seed=7)
+    assert out is not mask  # returns a copy
+
+    # Replicate the (seeded) centre choice to compute the expected clamped window.
+    rng = np.random.default_rng(7)
+    road_yx = np.argwhere(mask > 0)
+    cy, cx = road_yx[rng.integers(0, len(road_yx), size=1)][0]
+    half = 11 // 2
+    y0, x0 = max(0, cy - half), max(0, cx - half)
+    expected = mask[y0 : y0 + 11, x0 : x0 + 11].size
+
+    removed = int((mask > 0).sum() - (out > 0).sum())
+    assert removed == expected  # old 2·half slicing would zero 10×10, not 11×11
+
+
+def test_simulate_occlusion_zero_patches_returns_copy():
+    mask = np.ones((5, 5), dtype=np.uint8)
+    out = simulate_occlusion(mask, n_patches=0, patch_px=3)
+    assert out is not mask and np.array_equal(out, mask)  # copy, unchanged
 
 
 def test_heal_prefers_straight_over_kinked():

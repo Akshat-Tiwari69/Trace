@@ -212,6 +212,14 @@ flowchart TD
 
 > Copy the block each working day. Newest on top.
 
+**2026-06-24 (Shaivi — S1 review follow-ups)**
+- Done: addressed the second-pass Copilot review on the (now-merged) S1 PR #10, in branch `shaivi/S1-review-followups`:
+  - `spike_osm.simulate_occlusion` — fixed off-by-one so a patch is exactly `patch_px×patch_px` (was `2·half`); regenerated `data/sample/` (29→10 components, +19 bridges, +15.1% connectivity; targeted RI 0.638 < random 0.816).
+  - `resilience.global_efficiency` — added optional `k`-sample source estimation (forwarded through `resilience_index`/`ablation_curve` + new `analyze --efficiency-k`) so the O(N·E log V) all-pairs recompute can't hang on very large AOIs (TRD perf / RiskRegister T-3). Default stays exact, so artifacts don't drift.
+  - `test_resilience` — compute betweenness once in `test_largest_cc_fraction_reported`.
+  - Tests: +3 (occlusion exact-size, zero-patch copy, efficiency k-sample); P2/P3 suite 23/23 green.
+- Next: S2 — now unblocked (A4 landed, P1 `predict.py` produces the mask artifact); run the same `build_graph`/`analyze` on a real predicted mask → `data/processed/`.
+
 **2026-06-24 (cont. 2)**
 - Done: **A4 notebook rebuilt for max accuracy** — `notebooks/train_segmentation.ipynb` now uses **SegFormer mit_b3 + SCSE-attention U-Net**, **EMA** weights (evaluated + exported), **ComboLoss = BCE + Dice + Lovász-hinge + soft-clDice (ramped)**, richer augmentation (ShiftScaleRotate/blur/noise/CLAHE), and **flip + multi-scale TTA**, on top of the prior sliding-window/Hann val + occlusion-aware threshold infra. Extended the P1 API to support it: `build_model(arch, decoder_attention_type)`, `losses.ComboLoss`/`lovasz_hinge`, and `load_checkpoint` now reads `arch`/`decoder_attention_type` from `meta` (+`weights_only=False`) so the SCSE checkpoint reloads cleanly. **Verified which decoders actually build with the MiT encoder** (Unet/MAnet/FPN yes; UnetPlusPlus/DeepLabV3+ no) and CPU-dry-ran every notebook function (TTA, EMA, ComboLoss, occlusion selection). 62 unit tests pass. **Honest note: not GPU-benchmarked — expected to beat 0.672, but the real number needs Akshat's Kaggle run.**
 

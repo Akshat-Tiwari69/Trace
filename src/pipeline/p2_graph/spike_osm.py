@@ -65,9 +65,14 @@ def simulate_occlusion(
     road_yx = np.argwhere(mask > 0)
     if len(road_yx) == 0:
         return out
-    half = max(1, patch_px // 2)
+    size = max(1, patch_px)
+    half = size // 2
     for cy, cx in road_yx[rng.integers(0, len(road_yx), size=n_patches)]:
-        out[max(0, cy - half) : cy + half, max(0, cx - half) : cx + half] = 0
+        # Anchor an exactly size×size window (clamped at the top/left edges) so
+        # the hole is the requested patch size, not 2·half.
+        y0 = max(0, cy - half)
+        x0 = max(0, cx - half)
+        out[y0 : y0 + size, x0 : x0 + size] = 0
     return out
 
 

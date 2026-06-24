@@ -57,6 +57,16 @@ def test_global_efficiency_tiny_graphs():
     assert global_efficiency(g) == 0.0
 
 
+def test_global_efficiency_k_sample():
+    g = _barbell()
+    exact = global_efficiency(g)
+    # k >= N falls back to exact
+    assert global_efficiency(g, k=g.number_of_nodes()) == pytest.approx(exact)
+    # k < N gives a finite, positive estimate (won't be identical to exact)
+    est = global_efficiency(g, k=3, seed=1)
+    assert math.isfinite(est) and est > 0
+
+
 def test_global_efficiency_finite_when_disconnected():
     """The whole reason we use this metric: no division by infinity."""
     g = nx.Graph()
@@ -101,7 +111,8 @@ def test_targeted_removal_hurts_more_than_peripheral():
 
 def test_largest_cc_fraction_reported():
     g = _barbell()
-    chokepoint = max(compute_betweenness(g), key=compute_betweenness(g).get)
+    bc = compute_betweenness(g)
+    chokepoint = max(bc, key=bc.get)
     result = resilience_index(g, [chokepoint])
     # removing the bridge splits 6 nodes into 3 + 2 → largest CC = 3/5
     assert result["largest_cc_fraction"] == pytest.approx(3 / 5)

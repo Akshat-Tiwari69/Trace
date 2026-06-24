@@ -42,8 +42,14 @@ def analyze(
     critical_fraction: float = 0.10,
     k: int | None = None,
     curve_steps: int = 25,
+    efficiency_k: int | None = None,
 ) -> dict:
-    """Run criticality + resilience on the AOI's graph; write the P3 artifacts."""
+    """Run criticality + resilience on the AOI's graph; write the P3 artifacts.
+
+    ``k`` k-samples betweenness; ``efficiency_k`` k-samples global efficiency in
+    the ablation curves. Both default to exact (None) — set them only to keep the
+    CLI responsive on very large AOIs.
+    """
     graph = load_graphml(cfg.graphml_path)
 
     bc = annotate_criticality(graph, k=k, critical_fraction=critical_fraction)
@@ -55,8 +61,8 @@ def analyze(
     # Resilience: targeted (high-betweenness first) vs. random — the sanity check
     # that betweenness finds genuinely critical nodes (docs/Evaluation.md).
     steps = min(curve_steps, max(0, graph.number_of_nodes() - 1))
-    targeted = ablation_curve(graph, "targeted", betweenness=bc, steps=steps)
-    random_curve = ablation_curve(graph, "random", steps=steps)
+    targeted = ablation_curve(graph, "targeted", betweenness=bc, steps=steps, k=efficiency_k)
+    random_curve = ablation_curve(graph, "random", steps=steps, k=efficiency_k)
     curve_rows = [
         {
             "n_removed": t.n_removed,
@@ -101,10 +107,18 @@ def main() -> None:
     p.add_argument("--critical-fraction", type=float, default=0.10, help="top fraction flagged critical")
     p.add_argument("--k", type=int, default=None, help="k-sample betweenness (large graphs)")
     p.add_argument("--curve-steps", type=int, default=25, help="ablation curve length")
+    p.add_argument("--efficiency-k", type=int, default=None,
+                   help="k-sample global efficiency in ablation (large graphs)")
     args = p.parse_args()
 
     cfg = GraphConfig(aoi=args.aoi)
-    analyze(cfg, critical_fraction=args.critical_fraction, k=args.k, curve_steps=args.curve_steps)
+    analyze(
+        cfg,
+        critical_fraction=args.critical_fraction,
+        k=args.k,
+        curve_steps=args.curve_steps,
+        efficiency_k=args.efficiency_k,
+    )
 
 
 if __name__ == "__main__":
