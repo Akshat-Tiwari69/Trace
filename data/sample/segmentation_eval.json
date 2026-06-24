@@ -1,0 +1,25 @@
+{
+  "model": {
+    "encoder": "mit_b3",
+    "arch": "unet",
+    "decoder_attention_type": "scse",
+    "image_size": 512,
+    "epochs": 30
+  },
+  "dataset": "DeepGlobe Road Extraction (held-out validation)",
+  "validation": {
+    "iou_flip_multiscale_tta": 0.6699,
+    "iou_best_single_view": 0.6638,
+    "deploy_threshold": 0.44,
+    "clean_iou_at_deploy_threshold": 0.6617,
+    "occlusion_recall": 0.7927,
+    "threshold_selection": "max occlusion recall with <= 0.010 clean-IoU drop",
+    "tta": {
+      "flip": true,
+      "scales": [
+        1.0,
+        1.25
+      ]
+    }
+  }
+}
