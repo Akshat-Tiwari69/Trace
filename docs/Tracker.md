@@ -14,7 +14,7 @@
 
 | If you are… | You own (edit freely) | Your job | Your next task | **Never touch** (warn instead) |
 |---|---|---|---|---|
-| **Akshat** | `src/pipeline/p1_segment/`, `notebooks/`, data-pipeline scripts, integration glue in `src/app/main wiring`, `requirements.txt`, `SETUP.md` | ML / segmentation, data pipeline, end-to-end integration, coordination | **A5** (walking skeleton) | Shaivi's `p2_graph/`, `p3_analysis/` internals · Saanvi's dashboard UI in `src/app/` (only touch the integration contract, with a heads-up) |
+| **Akshat** | `src/pipeline/p1_segment/`, `notebooks/`, data-pipeline scripts, integration glue in `src/app/main wiring`, `requirements.txt`, `SETUP.md` | ML / segmentation, data pipeline, end-to-end integration, coordination | **A6** (dataset expansion / domain fine-tune) | Shaivi's `p2_graph/`, `p3_analysis/` internals · Saanvi's dashboard UI in `src/app/` (only touch the integration contract, with a heads-up) |
 | **Shaivi** | `src/pipeline/p2_graph/`, `src/pipeline/p3_analysis/` | graph build + healing, criticality + resilience (classical Python, **CPU only**) | **S2** (waits on A4) | `p1_segment/` model code · `src/app/` dashboard UI · `notebooks/` training |
 | **Saanvi** | `src/app/` (Streamlit dashboard), `docs/Design.md` | frontend / dashboard (**CPU only**, runs off `data/sample/`) | **F1** (S1 sample ready) → F2 | Any `src/pipeline/` code — you **consume** its artifacts, you don't edit it |
 
@@ -127,6 +127,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **A3** | ✅ | Data pipeline: download/cache + tiling + **OSM→mask** script | A1, A2 | A4 | produces aligned `{aoi}_mask`-style labels in `data/interim/`; QC'd on 1 tile — `src/pipeline/p1_segment/{osm_mask,build_dataset}.py`: osmnx→rasterio metric-grid masks, m-buffered roads, 256px tiling, GPKG cache, JSON alignment manifest; verified on Panaji (4310×3343 @1m/px, 5.65% road px, 238 tiles, strictly {0,1}); 9 offline unit tests pass |
 | **A4** | ✅ | Fine-tune segmentation (SegFormer/U-Net) — Colab/Kaggle notebook | A3 | S2, A5, E1 | **COMPLETE.** Final model: **SegFormer MiT-B3 + SCSE U-Net (EMA), 47.5M params, 30 epochs**, DeepGlobe Roads. Full-res sliding-window+Hann validation → **flip+multi-scale TTA IoU 0.6699** (best single-view EMA 0.6638); occlusion-aware deploy **thr 0.44 → clean IoU 0.6617 / Occlusion-Recall 0.793** (selection written into checkpoint `meta`). Recipe: ComboLoss (BCE+Dice+Lovász+clDice ramp), road-aware crops, rich aug, discriminative LR, warmup+cosine. **Checkpoint released:** https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v1 (asset `deepglobe_mit_b3_scse_512px_best.pt`, ~190 MB; local `models/` gitignored). `load_checkpoint` rebuilds the SCSE arch from `meta`; `predict.py` / S2 `run_real_mask` deploy it unchanged (smoke-tested on the real file). P1→P2→P3 integration verified on the §4 contracts. 68 CPU unit tests pass. (Honest note vs the 0.672 Codex baseline: a statistical tie, ~0.002 behind on raw IoU; the gain is rigor + integration.) |
 | **A5** | ✅ | Walking skeleton → end-to-end integration on 1 tile | A4 ✅, S2 ✅, F2 ✅ | X1 | **DONE.** `src/pipeline/run_pipeline.py` — one command runs P1 `predict` → P2 `build_graph` → P3 `analyze` → P4 contract check, no manual steps. Verified end-to-end on a real Panaji tile (100 nodes/77 edges, dashboard columns match) + deterministic orchestration test (`tests/test_run_pipeline.py`). |
+| **A6** | ⏳ | **Dataset expansion + domain fine-tune** (push seg past A4's 0.670) | A3 ✅ (OSM→mask tooling) · A4 ✅ (base checkpoint) → **ready / unblocked** | **nothing hard** — leaf enhancement; succeeding only *enables* (not gates) an optional refreshed E1 eval + a re-run of A5/S2 on the better model + a `a4-roadseg-v2` release | a fine-tuned checkpoint **beats 0.670 IoU / 0.793 Occ-Recall** on held-out val. Plan: generate domain-matched Indian OSM tiles via the existing A3 pipeline (Panaji/Mumbai/Bengaluru/Delhi…) + optional **SpaceNet-3**; **staged** fine-tune *from* the A4 checkpoint (never from scratch, per §2); eval with `p1_segment/evaluate.py`; record recipe + numbers in `Evaluation.md`; release v2 **only if it wins**. **Training needs a Kaggle/Colab GPU** (same as A4). Lane: Akshat. |
 
 ### Shaivi — graph + resilience (CPU, no GPU)
 | ID | Status | Task | Waits on | Blocks | Done when |
@@ -168,9 +169,11 @@ flowchart TD
     F2 --> A5
     S2 --> E1
     A5 --> X1
+    A3 --> A6
+    A4 --> A6
     classDef ready fill:#1b9c6b,color:#fff;
     classDef blocked fill:#999,color:#fff;
-    class A1,A2,S1,F1 ready;
+    class A1,A2,S1,F1,A6 ready;
     class A4,A5,S2,E1 blocked;
 ```
 
@@ -203,7 +206,7 @@ flowchart TD
 - **Docs:** ✅ 11/11 complete. **Build:** in progress.
 - **Done:** A1–A3 ✅ · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience) · **A4 ✅ COMPLETE** (DeepGlobe road seg — **MiT-B3 + SCSE U-Net, EMA**: flip+scale-TTA IoU **0.670**, deploy thr 0.44 → IoU 0.662 / Occ-Recall 0.793; released **`a4-roadseg-v1`**) · F1 ✅ + F2 ✅ (#19/#20) · S1 follow-ups ✅ (#24) · **S2 ✅** (consume-path #25 + real-mask run on a live Panaji tile: 100 nodes/77 edges, 38→23 components, targeted RI 0.503 < random 0.780) · **E1 ✅** (graph #27 + seg `p1_segment/evaluate.py`: IoU 0.670 / Occ-Recall 0.793 → `segmentation_eval.json`) · **A5 ✅** (`run_pipeline.py` — one command P1→P2→P3→P4, verified on a real tile).
 - **Pipeline backbone closed end-to-end (A1–A5 ✅).** Remaining: optional polish + the parked dataset research.
-- **Parked (next):** research additional training datasets (SpaceNet / OpenSatMap / OSM-India AOIs) to push seg accuracy beyond 0.670.
+- **Next task (Akshat): A6** — dataset expansion + domain fine-tune (Indian OSM tiles via A3 + optional SpaceNet-3) to push seg past 0.670. Ready/unblocked (A3 ✅, A4 ✅); blocks nothing hard; needs a Kaggle/Colab GPU run.
 - **Open handoff:** pixel-space↔georeferenced (a real *on-map* dashboard demo needs the tile's geo-transform/manifest to ride with the mask).
 
 ---
@@ -211,6 +214,9 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-24 (Akshat — A6 task created)**
+- New task **A6** (dataset expansion + domain fine-tune) added to §6/§7. Dependency analysis: **blocked by** A3 ✅ + A4 ✅ (both done → ready/unblocked); **blocks** nothing hard — it's a leaf enhancement whose better checkpoint would only *enable* an optional refreshed E1/A5/S2 re-run + a v2 release, not gate them. Goal: beat A4's 0.670 IoU / 0.793 Occ-Recall via staged fine-tune on Indian OSM tiles (+ optional SpaceNet-3). Needs a GPU run (Akshat). Recommendation lives in the A6 row.
 
 **2026-06-24 (Akshat — A5 walking skeleton)**
 - Done: **A5 ✅** — `src/pipeline/run_pipeline.py` chains the whole pipeline in one command: imagery + checkpoint → P1 `predict` → P2 `build_graph` → P3 `analyze` → P4 dashboard-contract check, **no manual steps**. Each stage is the teammates' code unchanged; the CLI is the integration glue. Verified **end-to-end on a real Panaji tile** (P1 5.13% road px → 100 nodes/77 edges → criticality + resilience → P4 columns match) and with a deterministic orchestration test that injects a synthetic-mask segmenter so P2→P3→P4 is tested without the 190 MB checkpoint (`tests/test_run_pipeline.py`). Pipeline backbone is now closed end-to-end.
