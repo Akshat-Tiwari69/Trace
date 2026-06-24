@@ -4,7 +4,7 @@
 >
 > **Reading order for an agent:** §0 Identify yourself → §1 Operating Protocol → §2 Rules → your lane in §6 Task Board. Everything else is reference.
 
-**Last updated:** 2026-06-24 · **Phase:** Build in progress (P1 pipeline + segmentation, P2/P3 graph & resilience landed; dashboard + integration next) · **Overall:** 🟢 on track
+**Last updated:** 2026-06-24 · **Phase:** Build (P1 segmentation **A4 ✅ complete + released**; P2/P3 graph & resilience + dashboard F1/F2 landed; **A5 end-to-end integration next**) · **Overall:** 🟢 on track
 
 ---
 
@@ -125,7 +125,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **A1** | ✅ | Environment + pinned `requirements.txt` + `SETUP.md` | — | A3, everyone's setup | core libs import on a clean env; `requirements.txt` + `SETUP.md` committed — verified on Akshat's Windows machine: `pip install -r requirements.txt` succeeds, `import streamlit, folium, networkx, skimage, sknw, rasterio, osmnx` → `CPU env OK` |
 | **A2** | ✅ | Repo skeleton (`src/`, `data/`, `notebooks/`, `.gitignore`) | — | A3, F1, S1 outputs | dirs exist; `data/raw`+`models/` gitignored; `data/sample/` placeholder present — created `src/pipeline/{p1_segment,p2_graph,p3_analysis}`, `src/app`, `data/{raw,interim,processed,outputs,sample}`, `models/`, `notebooks/` with `.gitkeep`; `.gitignore` ignores `data/raw|interim|processed|outputs/*` + `models/*` (kept placeholders via `dir/*` + negated `.gitkeep`) |
 | **A3** | ✅ | Data pipeline: download/cache + tiling + **OSM→mask** script | A1, A2 | A4 | produces aligned `{aoi}_mask`-style labels in `data/interim/`; QC'd on 1 tile — `src/pipeline/p1_segment/{osm_mask,build_dataset}.py`: osmnx→rasterio metric-grid masks, m-buffered roads, 256px tiling, GPKG cache, JSON alignment manifest; verified on Panaji (4310×3343 @1m/px, 5.65% road px, 238 tiles, strictly {0,1}); 9 offline unit tests pass |
-| **A4** | ✅ | Fine-tune segmentation (SegFormer/U-Net) — Colab/Kaggle notebook | A3 | S2, A5, E1 | model outputs a real road mask; IoU/Occlusion-Recall logged — **verified result (mit_b3+U-Net @512px, full-res sliding-window+Hann val + flip-TTA): peak IoU 0.672, deployed at occlusion-aware thr 0.24 → IoU 0.663 / Occlusion-Recall 0.805**. (mit_b0 baseline was 0.547 on the easier centre-crop eval.) `notebooks/train_segmentation.ipynb` **rebuilt with verified upgrades — SCSE-attention U-Net, EMA weights, ComboLoss (BCE+Dice+Lovász+clDice ramp), richer aug, flip+multi-scale TTA** — every component CPU-verified; **expected to beat 0.672, pending a fresh Kaggle run for the number.** P1 API extended (`build_model(arch, decoder_attention_type)`, `ComboLoss`, `load_checkpoint` reads arch from meta); checkpoint stores `encoder`/`arch`/`decoder_attention_type`/`threshold` so `predict.py` rebuilds it unchanged; gitignored. 62 CPU unit tests pass |
+| **A4** | ✅ | Fine-tune segmentation (SegFormer/U-Net) — Colab/Kaggle notebook | A3 | S2, A5, E1 | **COMPLETE.** Final model: **SegFormer MiT-B3 + SCSE U-Net (EMA), 47.5M params, 30 epochs**, DeepGlobe Roads. Full-res sliding-window+Hann validation → **flip+multi-scale TTA IoU 0.6699** (best single-view EMA 0.6638); occlusion-aware deploy **thr 0.44 → clean IoU 0.6617 / Occlusion-Recall 0.793** (selection written into checkpoint `meta`). Recipe: ComboLoss (BCE+Dice+Lovász+clDice ramp), road-aware crops, rich aug, discriminative LR, warmup+cosine. **Checkpoint released:** https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v1 (asset `deepglobe_mit_b3_scse_512px_best.pt`, ~190 MB; local `models/` gitignored). `load_checkpoint` rebuilds the SCSE arch from `meta`; `predict.py` / S2 `run_real_mask` deploy it unchanged (smoke-tested on the real file). P1→P2→P3 integration verified on the §4 contracts. 68 CPU unit tests pass. (Honest note vs the 0.672 Codex baseline: a statistical tie, ~0.002 behind on raw IoU; the gain is rigor + integration.) |
 | **A5** | 🔒 | Walking skeleton → end-to-end integration on 1 tile | A4, S2, F2 | X1 | one tile flows P1→P2→P3→P4 without manual steps |
 
 ### Shaivi — graph + resilience (CPU, no GPU)
@@ -201,16 +201,23 @@ flowchart TD
 ## §9 · Status Snapshot
 
 - **Docs:** ✅ 11/11 complete. **Build:** in progress.
-- **Done:** A1–A3 ✅ (env, skeleton, OSM→mask pipeline) · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience, committed `data/sample/`) · A4 ✅ (segmentation on DeepGlobe — mit_b3@512px: peak IoU 0.672; ships at occlusion-aware thr 0.24 → IoU 0.663 / Occlusion-Recall 0.805).
-- **In flight:** F1/F2 🔄 (Saanvi dashboard PRs #19/#20 — #20 changes-requested). **Ready:** S2 (real masks — A4 checkpoint exists now), E1 (eval).
-- **Next convergence:** A4 checkpoint feeds S2 (real masks) + E1; F1→F2; then **A5** end-to-end integration (needs A4 + S2 + F2).
-- **Top risk to clear early:** A5 integration is the last big convergence — all three lanes (A4 ✅, S2, F2) must land first.
+- **Done:** A1–A3 ✅ (env, skeleton, OSM→mask pipeline) · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience, committed `data/sample/`) · **A4 ✅ COMPLETE** (DeepGlobe road seg — **MiT-B3 + SCSE U-Net, EMA**: flip+scale-TTA IoU **0.670**, deploy thr 0.44 → IoU 0.662 / Occ-Recall 0.793; checkpoint released as **`a4-roadseg-v1`**) · F1 ✅ + F2 ✅ (Saanvi dashboard, PRs #19/#20 merged) · S1 follow-ups ✅ (#24) · S2 consume-path ✅ (#25).
+- **Ready now:** **A5** end-to-end integration (A4 ✅ + S2 path ✅ + F2 ✅ all landed) · S2 final numbers (real predicted mask now obtainable from the released checkpoint) · E1 (eval).
+- **Next convergence:** released A4 checkpoint → `predict.py` mask → S2 `run_real_mask` real numbers + E1; then **A5** walking skeleton wires P1→P2→P3→P4 on one tile.
+- **Top risk to clear early:** A5 is the last big convergence — all three lanes (A4 ✅, S2 ✅ code, F2 ✅) are now in `dev`, so A5 is unblocked.
 
 ---
 
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-24 (cont. 4 — Akshat: A4 COMPLETE + all PRs merged + integration verified)**
+- **A4 ✅ COMPLETE.** Final Kaggle GPU run (30 epochs): **SegFormer MiT-B3 + SCSE U-Net, EMA weights** — full-res sliding-window+Hann val → **flip+multi-scale TTA IoU 0.6699** (best single-view EMA 0.6638); occlusion-aware deploy **thr 0.44 → clean IoU 0.6617 / Occlusion-Recall 0.793**, written into the checkpoint `meta`. EMA-lag made early epochs read ~0.05, unstick at e4 (0.379), climb to plateau (e16 0.642 → e24 0.659 → e30 0.664). Honest vs the 0.672 Codex baseline: a **statistical tie, ~0.002 behind** on raw IoU — the real gain is engineering rigor (every component CPU-verified pre-ship) + full pipeline integration, not the leaderboard number.
+- **Checkpoint distributed via GitHub Release** (chosen over a Kaggle Dataset, so teammates stay on GitHub): https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v1 — asset `deepglobe_mit_b3_scse_512px_best.pt` (~190 MB, EMA, meta-driven). `load_checkpoint` **smoke-tested on the real file**: rebuilds the SCSE U-Net from `meta` and runs `predict_mask`. Local `models/` stays gitignored (release assets live outside the git tree, so the gitignore-checkpoints rule holds).
+- **All four open PRs reviewed + merged to `dev`:** #19 F1 + #20 F2 (Saanvi dashboard), #24 S1 follow-ups + #25 S2 consume-path (Shaivi). Recovered #20 after a stacked-branch auto-close; resolved the #24/#25 Tracker daily-log conflicts as a union. **68 CPU unit tests green on integrated `dev`.**
+- **Integration verified end-to-end:** P1→P2→P3→(P4 inputs) line up on the §4 contracts — `predict_large` mask → `build_graph` heal → `analyze` → criticality.csv schema matches the dashboard contract; resilience sanity held (targeted RI 0.000 < random 0.364).
+- Next: **A5** walking skeleton — now fully unblocked (A4 ✅ + S2 path ✅ + F2 ✅). Shaivi can pull the release → `predict.py` on a real tile → `run_real_mask` for S2's real numbers; coordinate the pixel-space/geo-transform (manifest) handoff she flagged.
 
 **2026-06-24 (Shaivi — S1 review follow-ups)**
 - Done: addressed the second-pass Copilot review on the (now-merged) S1 PR #10, in branch `shaivi/S1-review-followups`:
