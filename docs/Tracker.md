@@ -125,7 +125,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **A1** | ✅ | Environment + pinned `requirements.txt` + `SETUP.md` | — | A3, everyone's setup | core libs import on a clean env; `requirements.txt` + `SETUP.md` committed — verified on Akshat's Windows machine: `pip install -r requirements.txt` succeeds, `import streamlit, folium, networkx, skimage, sknw, rasterio, osmnx` → `CPU env OK` |
 | **A2** | ✅ | Repo skeleton (`src/`, `data/`, `notebooks/`, `.gitignore`) | — | A3, F1, S1 outputs | dirs exist; `data/raw`+`models/` gitignored; `data/sample/` placeholder present — created `src/pipeline/{p1_segment,p2_graph,p3_analysis}`, `src/app`, `data/{raw,interim,processed,outputs,sample}`, `models/`, `notebooks/` with `.gitkeep`; `.gitignore` ignores `data/raw|interim|processed|outputs/*` + `models/*` (kept placeholders via `dir/*` + negated `.gitkeep`) |
 | **A3** | ✅ | Data pipeline: download/cache + tiling + **OSM→mask** script | A1, A2 | A4 | produces aligned `{aoi}_mask`-style labels in `data/interim/`; QC'd on 1 tile — `src/pipeline/p1_segment/{osm_mask,build_dataset}.py`: osmnx→rasterio metric-grid masks, m-buffered roads, 256px tiling, GPKG cache, JSON alignment manifest; verified on Panaji (4310×3343 @1m/px, 5.65% road px, 238 tiles, strictly {0,1}); 9 offline unit tests pass |
-| **A4** | ✅ | Fine-tune segmentation (SegFormer/U-Net) — Colab/Kaggle notebook | A3 | S2, A5, E1 | model outputs a real road mask; IoU/Occlusion-Recall logged — **best model: mit_b3+U-Net @512px on DeepGlobe (road-aware crops, full-res sliding-window+Hann val, flip-TTA, discriminative LR, grad-accum, topology loss last 5 ep): full-res flip-TTA val IoU 0.672 · Dice 0.804 · threshold 0.48 · Occlusion-Recall 0.752**. (Earlier mit_b0 baseline was 0.547 on the easier centre-crop eval.) `notebooks/train_segmentation.ipynb` (Kaggle-optimized) uses the P1 API; checkpoint `models/deepglobe_mit_b3_512px_best.pt` (gitignored; meta carries `encoder`+`threshold`, so `predict.py`/`load_checkpoint` load it unchanged); 55 CPU unit tests pass |
+| **A4** | ✅ | Fine-tune segmentation (SegFormer/U-Net) — Colab/Kaggle notebook | A3 | S2, A5, E1 | model outputs a real road mask; IoU/Occlusion-Recall logged — **best model: mit_b3+U-Net @512px on DeepGlobe (road-aware crops, full-res sliding-window+Hann val, flip-TTA, discriminative LR, grad-accum, topology loss last 5 ep). Peak full-res flip-TTA IoU 0.672 @ thr 0.48; ships with an occlusion-aware deploy threshold (max occlusion-recall within 0.01 IoU of peak) → thr 0.24: IoU 0.663 · Occlusion-Recall 0.805 · Dice ~0.80**. (Earlier mit_b0 baseline was 0.547 on the easier centre-crop eval.) `notebooks/train_segmentation.ipynb` (Kaggle-optimized) uses the P1 API; checkpoint `models/deepglobe_mit_b3_512px_best.pt` (gitignored; meta carries `encoder`+`threshold`, so `predict.py`/`load_checkpoint` load it unchanged); 55 CPU unit tests pass |
 | **A5** | 🔒 | Walking skeleton → end-to-end integration on 1 tile | A4, S2, F2 | X1 | one tile flows P1→P2→P3→P4 without manual steps |
 
 ### Shaivi — graph + resilience (CPU, no GPU)
@@ -201,7 +201,7 @@ flowchart TD
 ## §9 · Status Snapshot
 
 - **Docs:** ✅ 11/11 complete. **Build:** in progress.
-- **Done:** A1–A3 ✅ (env, skeleton, OSM→mask pipeline) · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience, committed `data/sample/`) · A4 ✅ (segmentation on DeepGlobe — best mit_b3@512px: full-res flip-TTA IoU 0.672 / Dice 0.804 / Occlusion-Recall 0.752).
+- **Done:** A1–A3 ✅ (env, skeleton, OSM→mask pipeline) · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience, committed `data/sample/`) · A4 ✅ (segmentation on DeepGlobe — mit_b3@512px: peak IoU 0.672; ships at occlusion-aware thr 0.24 → IoU 0.663 / Occlusion-Recall 0.805).
 - **In flight:** F1/F2 🔄 (Saanvi dashboard PRs #19/#20 — #20 changes-requested). **Ready:** S2 (real masks — A4 checkpoint exists now), E1 (eval).
 - **Next convergence:** A4 checkpoint feeds S2 (real masks) + E1; F1→F2; then **A5** end-to-end integration (needs A4 + S2 + F2).
 - **Top risk to clear early:** A5 integration is the last big convergence — all three lanes (A4 ✅, S2, F2) must land first.
@@ -211,6 +211,9 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-24 (cont.)**
+- Done: **A4 occlusion-aware deploy threshold** — cell 9 now sweeps the threshold and picks the one that maximises Occlusion-Recall while staying within 0.01 IoU of the peak. Result: deploy **thr 0.24 → IoU 0.663 / Occlusion-Recall 0.805** (vs peak IoU 0.672 @ thr 0.48 with Occ-Recall 0.752). Recovers the occlusion-robustness story for only −0.009 IoU; the chosen threshold is written into the checkpoint `meta`, so `predict.py` deploys at 0.24 automatically.
 
 **2026-06-24**
 - Done: **A4 accuracy upgrade** — replaced `notebooks/train_segmentation.ipynb` with a Kaggle-optimized **mit_b3 @512px** recipe (road-aware crop sampling, full-resolution sliding-window + Hann-blended validation, flip-TTA, discriminative LR, gradient accumulation, warmup+cosine, topology loss in the last 5 epochs, coverage-stratified split). Best **full-res flip-TTA val IoU 0.672 · Dice 0.804 · threshold 0.48 · Occlusion-Recall 0.752** — up from the 0.547 centre-crop baseline, and at/above typical DeepGlobe published IoU. Uses the existing P1 API (`build_model`/`DiceBCELoss`/`occlusion_recall`); checkpoint meta carries `encoder`+`threshold` so `predict.py` loads it unchanged.
