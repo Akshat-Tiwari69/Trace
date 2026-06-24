@@ -7,6 +7,7 @@ data/raw/*
 data/interim/*
 data/processed/*
 data/outputs/*
+data/finetune/*
 models/*
 
 # ...but keep directory placeholders so the skeleton survives a clone
