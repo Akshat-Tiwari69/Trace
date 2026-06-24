@@ -67,6 +67,13 @@ def test_global_efficiency_k_sample():
     assert math.isfinite(est) and est > 0
 
 
+def test_global_efficiency_rejects_nonpositive_k():
+    # k <= 0 would make the sample empty and the normaliser 0 → guard it
+    for bad in (0, -1):
+        with pytest.raises(ValueError):
+            global_efficiency(_barbell(), k=bad)
+
+
 def test_global_efficiency_finite_when_disconnected():
     """The whole reason we use this metric: no division by infinity."""
     g = nx.Graph()

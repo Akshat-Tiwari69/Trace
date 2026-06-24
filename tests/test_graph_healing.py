@@ -138,16 +138,20 @@ def test_simulate_occlusion_patch_is_exact_size():
     out = simulate_occlusion(mask, n_patches=1, patch_px=11, seed=7)
     assert out is not mask  # returns a copy
 
-    # Replicate the (seeded) centre choice to compute the expected clamped window.
-    rng = np.random.default_rng(7)
-    road_yx = np.argwhere(mask > 0)
-    cy, cx = road_yx[rng.integers(0, len(road_yx), size=1)][0]
-    half = 11 // 2
-    y0, x0 = max(0, cy - half), max(0, cx - half)
-    expected = mask[y0 : y0 + 11, x0 : x0 + 11].size
-
+    # The window is clamped inward at borders, so on a 60×60 image an 11-px patch
+    # is always exactly 11×11 regardless of where its centre landed.
     removed = int((mask > 0).sum() - (out > 0).sum())
-    assert removed == expected  # old 2·half slicing would zero 10×10, not 11×11
+    assert removed == 11 * 11  # old 2·half slicing would zero 10×10
+
+
+def test_simulate_occlusion_patch_exact_at_corner():
+    """Even centred at the very corner, the clamped window stays patch_px²."""
+    mask = np.zeros((40, 40), dtype=np.uint8)
+    mask[0, 0] = 1  # the only road pixel → every patch centres on the corner
+    out = simulate_occlusion(mask, n_patches=1, patch_px=7, seed=0)
+    # the 7×7 window is shifted fully inside the image (rows/cols 0..6)
+    assert (out[0:7, 0:7] == 0).all()
+    assert mask.sum() - out.sum() == 1  # only the single road pixel was zeroed
 
 
 def test_simulate_occlusion_zero_patches_returns_copy():

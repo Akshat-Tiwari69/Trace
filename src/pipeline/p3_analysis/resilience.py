@@ -49,6 +49,9 @@ def global_efficiency(
     """
     import networkx as nx
 
+    if k is not None and k <= 0:
+        raise ValueError("k must be a positive sample size (or None for exact)")
+
     n = graph.number_of_nodes()
     if n < 2:
         return 0.0
@@ -82,8 +85,12 @@ def resilience_index(
     Returns a dict with the baseline/perturbed efficiencies, the finite
     ``resilience_index`` ratio, and ``largest_cc_fraction`` (how much of the
     network is still in one piece). Operates on a copy — the input is untouched.
+
     ``k`` forwards to :func:`global_efficiency` for k-sample estimation on large
-    graphs (baseline and perturbed use the same ``k`` so the ratio is consistent).
+    graphs. Note both efficiencies are then estimates from *independently* sampled
+    sources (the baseline and perturbed graphs have different node sets), so the
+    ratio is approximate and noisier; use ``k=None`` (default) for an exact,
+    directly-comparable ratio.
     """
     base = (
         global_efficiency(graph, weight, k=k)
