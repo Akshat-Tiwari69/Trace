@@ -62,7 +62,22 @@ Reference points from the literature to contextualize our numbers (full citation
 | SpaceNet 3 baseline (U-Net + skeletonize + sknw) | APLS ≈ 0.49 |
 | SpaceNet 3 winner ("albu") | APLS ≈ 0.666 |
 | Cautionary point | a mask at F1 = 0.72 can score APLS = 0.25 — pixels ≠ topology |
-| **Our baselines** | *to be filled after first runs* |
+| **Our baselines** | seg: A4 IoU **0.670**, Occlusion-Recall **0.793** @thr 0.44 (DeepGlobe val) · graph: see below |
+
+### Graph-lane first numbers (S1 sample — `panaji_demo`, OSM-derived w/ simulated occlusion)
+
+Reproduce with `python -m src.pipeline.p3_analysis.evaluate` (reads the committed
+`data/sample/` graph; writes `panaji_demo_graph_eval.json` + `_resilience_curve.png`).
+
+| Metric | Value | Notes |
+|---|---|---|
+| Graph size | 630 nodes, 749 edges | 19 healed/bridged edges (2.5%) |
+| **Connectivity Ratio** | **+15.1%** | largest connected component 524 → 603 nodes after MST/Union-Find healing (components 29 → 10) |
+| Top "Gatekeeper" node | betweenness **0.511** | node 45; top-5 all ≈ 0.44–0.51 |
+| Baseline global efficiency | 0.0012 | metric units (1/m); only ratios are interpretable |
+| **Resilience: targeted vs random** | mean RI **0.674 vs 0.860** over 40 removals | targeted (high-betweenness-first) ablation degrades the network **far faster** than random ⇒ betweenness finds genuine chokepoints ✓ |
+
+*Numbers are on the OSM stand-in (S1); the same `evaluate` runs unchanged on a real predicted-mask graph (S2) once a tile is available.*
 
 ## Target Scores
 
