@@ -4,7 +4,7 @@
 >
 > **Reading order for an agent:** §0 Identify yourself → §1 Operating Protocol → §2 Rules → your lane in §6 Task Board. Everything else is reference.
 
-**Last updated:** 2026-06-23 · **Phase:** Build in progress (P1 pipeline + P2/P3 graph & resilience landed; segmentation training next) · **Overall:** 🟢 on track
+**Last updated:** 2026-06-24 · **Phase:** Build in progress (P1 pipeline + segmentation, P2/P3 graph & resilience landed; dashboard + integration next) · **Overall:** 🟢 on track
 
 ---
 
@@ -125,7 +125,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **A1** | ✅ | Environment + pinned `requirements.txt` + `SETUP.md` | — | A3, everyone's setup | core libs import on a clean env; `requirements.txt` + `SETUP.md` committed — verified on Akshat's Windows machine: `pip install -r requirements.txt` succeeds, `import streamlit, folium, networkx, skimage, sknw, rasterio, osmnx` → `CPU env OK` |
 | **A2** | ✅ | Repo skeleton (`src/`, `data/`, `notebooks/`, `.gitignore`) | — | A3, F1, S1 outputs | dirs exist; `data/raw`+`models/` gitignored; `data/sample/` placeholder present — created `src/pipeline/{p1_segment,p2_graph,p3_analysis}`, `src/app`, `data/{raw,interim,processed,outputs,sample}`, `models/`, `notebooks/` with `.gitkeep`; `.gitignore` ignores `data/raw|interim|processed|outputs/*` + `models/*` (kept placeholders via `dir/*` + negated `.gitkeep`) |
 | **A3** | ✅ | Data pipeline: download/cache + tiling + **OSM→mask** script | A1, A2 | A4 | produces aligned `{aoi}_mask`-style labels in `data/interim/`; QC'd on 1 tile — `src/pipeline/p1_segment/{osm_mask,build_dataset}.py`: osmnx→rasterio metric-grid masks, m-buffered roads, 256px tiling, GPKG cache, JSON alignment manifest; verified on Panaji (4310×3343 @1m/px, 5.65% road px, 238 tiles, strictly {0,1}); 9 offline unit tests pass |
-| **A4** | ✅ | Fine-tune segmentation (SegFormer/U-Net) — Colab/Kaggle notebook | A3 | S2, A5, E1 | model outputs a real road mask; IoU/Occlusion-Recall logged — **trained on DeepGlobe (Kaggle T4, 15 epochs, mit_b0+U-Net, DiceBCE, CoarseDropout occlusion aug, cosine LR): val IoU 0.547 · Dice 0.703 · Occlusion-Recall 0.897**. Checkpoint `models/segformer_mitb0_deepglobe.pt` (gitignored; saved off-device). `notebooks/train_segmentation.ipynb` + `p1_segment/{model,dataset,losses,metrics,train}.py`; `predict_mask` is the P2-facing API; 28 CPU unit tests pass |
+| **A4** | ✅ | Fine-tune segmentation (SegFormer/U-Net) — Colab/Kaggle notebook | A3 | S2, A5, E1 | model outputs a real road mask; IoU/Occlusion-Recall logged — **verified result (mit_b3+U-Net @512px, full-res sliding-window+Hann val + flip-TTA): peak IoU 0.672, deployed at occlusion-aware thr 0.24 → IoU 0.663 / Occlusion-Recall 0.805**. (mit_b0 baseline was 0.547 on the easier centre-crop eval.) `notebooks/train_segmentation.ipynb` **rebuilt with verified upgrades — SCSE-attention U-Net, EMA weights, ComboLoss (BCE+Dice+Lovász+clDice ramp), richer aug, flip+multi-scale TTA** — every component CPU-verified; **expected to beat 0.672, pending a fresh Kaggle run for the number.** P1 API extended (`build_model(arch, decoder_attention_type)`, `ComboLoss`, `load_checkpoint` reads arch from meta); checkpoint stores `encoder`/`arch`/`decoder_attention_type`/`threshold` so `predict.py` rebuilds it unchanged; gitignored. 62 CPU unit tests pass |
 | **A5** | 🔒 | Walking skeleton → end-to-end integration on 1 tile | A4, S2, F2 | X1 | one tile flows P1→P2→P3→P4 without manual steps |
 
 ### Shaivi — graph + resilience (CPU, no GPU)
@@ -201,9 +201,9 @@ flowchart TD
 ## §9 · Status Snapshot
 
 - **Docs:** ✅ 11/11 complete. **Build:** in progress.
-- **Done:** A1–A3 ✅ (env, skeleton, OSM→mask pipeline) · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience, committed `data/sample/`) · A4 ✅ (segmentation fine-tuned on DeepGlobe: val IoU 0.547 / Dice 0.703 / Occlusion-Recall 0.897) · F1 ✅ (dashboard scaffold on the S1 sample).
-- **In flight:** None. **Ready:** S2 (real masks — A4 checkpoint exists now), E1 (eval), F2 (full dashboard simulation).
-- **Next convergence:** A4 checkpoint feeds S2 (real masks) + E1; F2; then **A5** end-to-end integration (needs A4 + S2 + F2).
+- **Done:** A1–A3 ✅ (env, skeleton, OSM→mask pipeline) · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience, committed `data/sample/`) · A4 ✅ (segmentation on DeepGlobe — mit_b3@512px: peak IoU 0.672; ships at occlusion-aware thr 0.24 → IoU 0.663 / Occlusion-Recall 0.805).
+- **In flight:** F1/F2 🔄 (Saanvi dashboard PRs #19/#20 — #20 changes-requested). **Ready:** S2 (real masks — A4 checkpoint exists now), E1 (eval).
+- **Next convergence:** A4 checkpoint feeds S2 (real masks) + E1; F1→F2; then **A5** end-to-end integration (needs A4 + S2 + F2).
 - **Top risk to clear early:** A5 integration is the last big convergence — all three lanes (A4 ✅, S2, F2) must land first.
 
 ---
@@ -216,6 +216,16 @@ flowchart TD
 - Done: **F1 ✅** — rebuilt the Streamlit + Folium dashboard on the committed S1 sample artifacts. The 65/35 layout renders 760 roads by endpoint criticality with a Viridis legend, labels 64 critical junctions, and distinguishes healed links with dashed lines.
 - Verified: installed `requirements.txt` globally under Python 3.12 (no virtual environment); imports pass; Streamlit health check passes; browser render shows 637 junctions / 760 road links with no console errors.
 - Next: open the F1 PR into `dev`, then F2 after Akshat reviews/merges it.
+**2026-06-24 (cont. 2)**
+- Done: **A4 notebook rebuilt for max accuracy** — `notebooks/train_segmentation.ipynb` now uses **SegFormer mit_b3 + SCSE-attention U-Net**, **EMA** weights (evaluated + exported), **ComboLoss = BCE + Dice + Lovász-hinge + soft-clDice (ramped)**, richer augmentation (ShiftScaleRotate/blur/noise/CLAHE), and **flip + multi-scale TTA**, on top of the prior sliding-window/Hann val + occlusion-aware threshold infra. Extended the P1 API to support it: `build_model(arch, decoder_attention_type)`, `losses.ComboLoss`/`lovasz_hinge`, and `load_checkpoint` now reads `arch`/`decoder_attention_type` from `meta` (+`weights_only=False`) so the SCSE checkpoint reloads cleanly. **Verified which decoders actually build with the MiT encoder** (Unet/MAnet/FPN yes; UnetPlusPlus/DeepLabV3+ no) and CPU-dry-ran every notebook function (TTA, EMA, ComboLoss, occlusion selection). 62 unit tests pass. **Honest note: not GPU-benchmarked — expected to beat 0.672, but the real number needs Akshat's Kaggle run.**
+
+**2026-06-24 (cont.)**
+- Done: **A4 occlusion-aware deploy threshold** — cell 9 now sweeps the threshold and picks the one that maximises Occlusion-Recall while staying within 0.01 IoU of the peak. Result: deploy **thr 0.24 → IoU 0.663 / Occlusion-Recall 0.805** (vs peak IoU 0.672 @ thr 0.48 with Occ-Recall 0.752). Recovers the occlusion-robustness story for only −0.009 IoU; the chosen threshold is written into the checkpoint `meta`, so `predict.py` deploys at 0.24 automatically.
+
+**2026-06-24**
+- Done: **A4 accuracy upgrade** — replaced `notebooks/train_segmentation.ipynb` with a Kaggle-optimized **mit_b3 @512px** recipe (road-aware crop sampling, full-resolution sliding-window + Hann-blended validation, flip-TTA, discriminative LR, gradient accumulation, warmup+cosine, topology loss in the last 5 epochs, coverage-stratified split). Best **full-res flip-TTA val IoU 0.672 · Dice 0.804 · threshold 0.48 · Occlusion-Recall 0.752** — up from the 0.547 centre-crop baseline, and at/above typical DeepGlobe published IoU. Uses the existing P1 API (`build_model`/`DiceBCELoss`/`occlusion_recall`); checkpoint meta carries `encoder`+`threshold` so `predict.py` loads it unchanged.
+- Caveat: occlusion-recall reads lower (0.752 vs 0.90 earlier) — different eval protocol (512px/sliding-window) + lighter occlusion aug; bump `occlusion_probability` if robustness is prioritised over raw IoU.
+- Next: save the mit_b3 checkpoint as a Kaggle Dataset for Shaivi (S2) + A5 reuse.
 
 **2026-06-23 (cont. 2)**
 - Done: **P1 inference CLI** (`src/pipeline/p1_segment/predict.py` + `predict_large` in `model.py`) — turns imagery + a trained checkpoint into the §4 contract artifact `data/interim/{aoi}_mask.png` by tiling/stitching (reuses A3's `tile_array`). This is the bridge from A4's model to S2's graph build. 55 tests pass (added `predict_large` coverage). Verified end-to-end on a dummy checkpoint.
