@@ -212,6 +212,14 @@ flowchart TD
 
 > Copy the block each working day. Newest on top.
 
+**2026-06-24 (Shaivi — S1 review follow-ups)**
+- Done: addressed the second-pass Copilot review on the (now-merged) S1 PR #10, in branch `shaivi/S1-review-followups`:
+  - `spike_osm.simulate_occlusion` — fixed off-by-one so a patch is exactly `patch_px×patch_px` (was `2·half`); regenerated `data/sample/` (29→10 components, +19 bridges, +15.1% connectivity; targeted RI 0.638 < random 0.816).
+  - `resilience.global_efficiency` — added optional `k`-sample source estimation (forwarded through `resilience_index`/`ablation_curve` + new `analyze --efficiency-k`) so the O(N·E log V) all-pairs recompute can't hang on very large AOIs (TRD perf / RiskRegister T-3). Default stays exact, so artifacts don't drift.
+  - `test_resilience` — compute betweenness once in `test_largest_cc_fraction_reported`.
+  - Tests: +3 (occlusion exact-size, zero-patch copy, efficiency k-sample); P2/P3 suite 23/23 green.
+- Next: S2 — now unblocked (A4 landed, P1 `predict.py` produces the mask artifact); run the same `build_graph`/`analyze` on a real predicted mask → `data/processed/`.
+
 **2026-06-24 (Shaivi — S2 started)**
 - Done: built the **S2 consume-path** in branch `shaivi/S2-real-mask`. `p2_graph/run_real_mask.py` runs the *same* `build_graph` → `analyze` engine on a real predicted mask (`data/interim/{aoi}_mask.png` from `predict.py`), writing to `data/processed/` (not the committed sample set). Smoke-tested offline on a synthetic pixel-space predicted-style mask (`tests/test_s2_real_mask.py`): heals the punched gap and emits criticality. P2/P3+S2 suite 31/31 green.
 - Open question (coordinate w/ Akshat): `predict.py` reads RGB via OpenCV and **drops the geo-transform**, so predicted masks are **pixel-space** — fine for S2's graph/criticality numbers, but the on-map dashboard demo needs the tile's geo-transform to ride along (a manifest beside the mask). Not faking it; flagging the handoff.

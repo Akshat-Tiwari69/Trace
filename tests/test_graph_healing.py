@@ -8,6 +8,7 @@ hand (no skeletonisation, no network) so the healing logic is tested in isolatio
 from __future__ import annotations
 
 import networkx as nx
+import numpy as np
 import pytest
 
 from src.pipeline.p2_graph.healing import UnionFind, heal_graph
@@ -16,6 +17,7 @@ from src.pipeline.p2_graph.skeleton_graph import (
     _annotate_degree_and_type,
     prune_degenerate_edges,
 )
+from src.pipeline.p2_graph.spike_osm import simulate_occlusion
 
 
 # --------------------------------------------------------------------------- #
@@ -128,6 +130,34 @@ def test_prune_removes_self_loops_and_short_edges():
     assert g.has_edge(0, 1)                       # the real road survives
     assert 2 not in g.nodes                       # orphaned self-loop node dropped
     assert not any(u == v for u, v in g.edges())  # no self-loops remain
+
+
+def test_simulate_occlusion_patch_is_exact_size():
+    """A patch zeroes an exactly patch_px×patch_px window (not 2·half)."""
+    mask = np.ones((60, 60), dtype=np.uint8)
+    out = simulate_occlusion(mask, n_patches=1, patch_px=11, seed=7)
+    assert out is not mask  # returns a copy
+
+    # The window is clamped inward at borders, so on a 60×60 image an 11-px patch
+    # is always exactly 11×11 regardless of where its centre landed.
+    removed = int((mask > 0).sum() - (out > 0).sum())
+    assert removed == 11 * 11  # old 2·half slicing would zero 10×10
+
+
+def test_simulate_occlusion_patch_exact_at_corner():
+    """Even centred at the very corner, the clamped window stays patch_px²."""
+    mask = np.zeros((40, 40), dtype=np.uint8)
+    mask[0, 0] = 1  # the only road pixel → every patch centres on the corner
+    out = simulate_occlusion(mask, n_patches=1, patch_px=7, seed=0)
+    # the 7×7 window is shifted fully inside the image (rows/cols 0..6)
+    assert (out[0:7, 0:7] == 0).all()
+    assert mask.sum() - out.sum() == 1  # only the single road pixel was zeroed
+
+
+def test_simulate_occlusion_zero_patches_returns_copy():
+    mask = np.ones((5, 5), dtype=np.uint8)
+    out = simulate_occlusion(mask, n_patches=0, patch_px=3)
+    assert out is not mask and np.array_equal(out, mask)  # copy, unchanged
 
 
 def test_heal_prefers_straight_over_kinked():

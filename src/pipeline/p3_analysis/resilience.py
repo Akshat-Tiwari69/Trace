@@ -29,24 +29,48 @@ if TYPE_CHECKING:
     import networkx as nx
 
 
-def global_efficiency(graph: "nx.Graph", weight: str = "length_m") -> float:
+def global_efficiency(
+    graph: "nx.Graph",
+    weight: str = "length_m",
+    k: int | None = None,
+    seed: int = 42,
+) -> float:
     """Weighted global efficiency of ``graph`` (finite even when disconnected).
 
-    Returns 0.0 for graphs with fewer than two nodes. Uses Dijkstra from every
+    Returns 0.0 for graphs with fewer than two nodes. Runs Dijkstra from each
     source; unreachable pairs contribute 0 (the whole reason this metric is used).
+
+    Exact cost is all-pairs Dijkstra — O(N·(E log V)) — which is fine for a city
+    sub-region but becomes the bottleneck on very large graphs (``docs/TRD.md``
+    performance; ``RiskRegister.md`` T-3). Pass ``k`` to estimate efficiency from
+    ``k`` randomly sampled sources instead of all N (the same k-sample trick used
+    for approximate betweenness); ``k=None`` (default) stays exact so committed
+    artifacts don't drift.
     """
     import networkx as nx
+
+    if k is not None and k <= 0:
+        raise ValueError("k must be a positive sample size (or None for exact)")
 
     n = graph.number_of_nodes()
     if n < 2:
         return 0.0
 
+    nodes = list(graph.nodes)
+    if k is not None and k < n:
+        sources = random.Random(seed).sample(nodes, k)
+        norm = k * (n - 1)  # unbiased estimate: mean per-source efficiency
+    else:
+        sources = nodes
+        norm = n * (n - 1)
+
     total = 0.0
-    for source, lengths in nx.all_pairs_dijkstra_path_length(graph, weight=weight):
+    for source in sources:
+        lengths = nx.single_source_dijkstra_path_length(graph, source, weight=weight)
         for target, dist in lengths.items():
             if source != target and dist > 0:
                 total += 1.0 / dist
-    return total / (n * (n - 1))
+    return total / norm
 
 
 def resilience_index(
@@ -54,18 +78,29 @@ def resilience_index(
     removed_nodes: list[int],
     weight: str = "length_m",
     baseline_efficiency: float | None = None,
+    k: int | None = None,
 ) -> dict:
     """Resilience after removing ``removed_nodes``: ``E(perturbed)/E(baseline)``.
 
     Returns a dict with the baseline/perturbed efficiencies, the finite
     ``resilience_index`` ratio, and ``largest_cc_fraction`` (how much of the
     network is still in one piece). Operates on a copy — the input is untouched.
+
+    ``k`` forwards to :func:`global_efficiency` for k-sample estimation on large
+    graphs. Note both efficiencies are then estimates from *independently* sampled
+    sources (the baseline and perturbed graphs have different node sets), so the
+    ratio is approximate and noisier; use ``k=None`` (default) for an exact,
+    directly-comparable ratio.
     """
-    base = global_efficiency(graph, weight) if baseline_efficiency is None else baseline_efficiency
+    base = (
+        global_efficiency(graph, weight, k=k)
+        if baseline_efficiency is None
+        else baseline_efficiency
+    )
 
     perturbed = graph.copy()
     perturbed.remove_nodes_from(removed_nodes)
-    eff = global_efficiency(perturbed, weight)
+    eff = global_efficiency(perturbed, weight, k=k)
 
     ri = (eff / base) if base > 0 else 0.0
     return {
@@ -120,17 +155,19 @@ def ablation_curve(
     steps: int | None = None,
     weight: str = "length_m",
     seed: int = 42,
+    k: int | None = None,
 ) -> list[AblationPoint]:
     """Remove nodes one at a time and trace how efficiency degrades.
 
     ``order='targeted'`` removes highest-betweenness nodes first (needs
     ``betweenness``); ``order='random'`` removes in a shuffled order. The pair of
     curves is the targeted-vs-random sanity check in ``docs/Evaluation.md`` —
-    targeted should fall faster.
+    targeted should fall faster. ``k`` forwards to :func:`global_efficiency` for
+    k-sample estimation, so the per-step recompute stays cheap on large graphs.
     """
     import networkx as nx
 
-    base = global_efficiency(graph, weight)
+    base = global_efficiency(graph, weight, k=k)
     nodes = list(graph.nodes)
 
     if order == "targeted":
@@ -151,7 +188,7 @@ def ablation_curve(
     working = graph.copy()
     for i, node in enumerate(sequence, start=1):
         working.remove_node(node)
-        eff = global_efficiency(working, weight)
+        eff = global_efficiency(working, weight, k=k)
         curve.append(
             AblationPoint(
                 n_removed=i,
