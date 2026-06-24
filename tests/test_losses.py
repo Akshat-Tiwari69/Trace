@@ -56,3 +56,27 @@ def test_soft_cldice_rewards_matching_topology():
     bad = torch.zeros(1, 1, 32, 32)
     bad[..., :, 16] = 1.0                          # perpendicular road (wrong topology)
     assert soft_cldice(good, target) < soft_cldice(bad, target)
+
+
+def test_lovasz_hinge_lower_for_correct_prediction():
+    from src.pipeline.p1_segment.losses import lovasz_hinge
+    target = (torch.rand(2, 1, 16, 16) > 0.5).float()
+    good = torch.where(target > 0.5, 10.0, -10.0)  # confident correct logits
+    assert lovasz_hinge(good, target) < lovasz_hinge(-good, target)
+
+
+def test_combo_loss_runs_and_differentiable():
+    from src.pipeline.p1_segment.losses import ComboLoss
+    loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=0.1)
+    logits = torch.randn(2, 1, 32, 32, requires_grad=True)
+    target = (torch.rand(2, 1, 32, 32) > 0.5).float()
+    loss = loss_fn(logits, target)
+    assert loss.ndim == 0 and torch.isfinite(loss)
+    loss.backward()
+    assert logits.grad is not None
+
+
+def test_combo_loss_rejects_negative_weight():
+    from src.pipeline.p1_segment.losses import ComboLoss
+    with pytest.raises(ValueError):
+        ComboLoss(lovasz_weight=-0.1)
