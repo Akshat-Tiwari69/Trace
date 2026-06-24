@@ -1,0 +1,129 @@
+"""A5 walking skeleton: one command, P1→P2→P3→P4 on a single tile (task A5).
+
+Chains the released pieces end-to-end with **no manual steps**::
+
+    imagery + checkpoint --[P1 predict]----> binary road mask
+                         --[P2 build_graph]-> healed routable graph
+                         --[P3 analyze]-----> criticality + resilience
+                         --[P4 check]-------> dashboard-ready artifacts
+
+P4 here is the *seam*, not the UI: the dashboard (Saanvi's lane) reads
+`{aoi}_graph.geojson` + `{aoi}_criticality.csv`, so the skeleton verifies those
+land with the contracted columns rather than editing the app. The single CLI is
+the integration glue Akshat owns; each stage is the teammates' code, unchanged.
+
+Example::
+
+    python -m src.pipeline.run_pipeline --image data/raw/tile.jpg \
+        --checkpoint models/deepglobe_mit_b3_scse_512px_best.pt --aoi mytile
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Callable
+
+from src.pipeline.p2_graph.build_graph import build_graph
+from src.pipeline.p2_graph.config import GraphConfig
+from src.pipeline.p3_analysis.analyze import analyze
+
+# P4 contract: the columns the dashboard reads from the criticality CSV (§4).
+DASHBOARD_CRITICALITY_COLUMNS = ["node_id", "betweenness", "rank", "is_critical", "x", "y"]
+
+
+def segment(image_path: str | Path, checkpoint: str | Path, aoi: str, interim_dir: str | Path,
+            tile_size: int = 512, threshold: float | None = None,
+            device: str = "cpu") -> tuple[Path, float]:
+    """P1: predict a road mask from imagery → ``data/interim/{aoi}_mask.png``.
+
+    Threshold defaults to the checkpoint's deploy threshold (its ``meta``).
+    """
+    import cv2
+
+    from src.pipeline.p1_segment.model import load_checkpoint, predict_large
+    from src.pipeline.p1_segment.osm_mask import save_binary_png
+
+    bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+    if bgr is None:
+        raise SystemExit(f"could not read image: {image_path}")
+    image = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    model, meta = load_checkpoint(checkpoint, map_location=device)
+    thr = threshold if threshold is not None else float(meta.get("threshold", 0.5))
+    mask = predict_large(model, image, tile_size=tile_size, device=device, threshold=thr)
+    out = Path(interim_dir) / f"{aoi}_mask.png"
+    save_binary_png(mask, out)
+    return out, float(mask.mean())
+
+
+def verify_dashboard_ready(cfg: GraphConfig) -> dict[str, Any]:
+    """P4 seam: confirm the P3 artifacts match what the dashboard consumes."""
+    crit = cfg.processed_dir / f"{cfg.aoi}_criticality.csv"
+    header = ""
+    if crit.exists():
+        text = crit.read_text(encoding="utf-8")
+        header = text.splitlines()[0] if text.strip() else ""
+    return {
+        "criticality_csv": str(crit),
+        "columns_match": header.split(",") == DASHBOARD_CRITICALITY_COLUMNS,
+        "geojson": str(cfg.geojson_path),
+        "geojson_exists": cfg.geojson_path.exists(),
+    }
+
+
+def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
+        interim_dir: str | Path = "data/interim", processed_dir: str | Path = "data/processed",
+        resolution_m: float = 1.0, tile_size: int = 512, threshold: float | None = None,
+        device: str = "cpu", curve_steps: int = 25,
+        segment_fn: Callable[..., tuple[Path, float]] = segment) -> dict[str, Any]:
+    """Run the whole pipeline on one tile and return a summary dict.
+
+    ``segment_fn`` is injectable so the P2→P4 orchestration can be tested without
+    a real checkpoint; production uses the default :func:`segment` (P1).
+    """
+    cfg = GraphConfig(aoi=aoi, interim_dir=Path(interim_dir),
+                      processed_dir=Path(processed_dir), resolution_m=resolution_m)
+
+    print(f"[A5] end-to-end pipeline for '{aoi}'")
+    print("[P1] segment imagery → road mask")
+    mask_path, coverage = segment_fn(image_path, checkpoint, aoi, interim_dir, tile_size, threshold, device)
+    print(f"     → {mask_path}  ({coverage:.2%} road px)")
+
+    print("[P2] mask → healed routable graph")
+    graph, report = build_graph(cfg)
+
+    print("[P3] criticality + global-efficiency resilience")
+    analysis = analyze(cfg, curve_steps=curve_steps)
+
+    print("[P4] dashboard-ready check (artifact contract, not the UI)")
+    p4 = verify_dashboard_ready(cfg)
+    print(f"     criticality columns match: {p4['columns_match']} | geojson present: {p4['geojson_exists']}")
+
+    print(f"\nA5 ✓ one tile flowed P1→P2→P3→P4: "
+          f"{graph.number_of_nodes()} nodes / {graph.number_of_edges()} edges → {processed_dir}")
+    return {
+        "aoi": aoi, "mask": str(mask_path), "road_fraction": coverage,
+        "nodes": graph.number_of_nodes(), "edges": graph.number_of_edges(),
+        "bridges_added": report.bridges_added, "analysis": analysis, "p4": p4,
+    }
+
+
+def main() -> None:
+    import argparse
+
+    p = argparse.ArgumentParser(description="A5 walking skeleton: P1→P2→P3→P4 on one tile.")
+    p.add_argument("--image", required=True, help="RGB satellite tile (jpg/png/3-band tif)")
+    p.add_argument("--checkpoint", required=True, help="trained .pt (Release a4-roadseg-v1)")
+    p.add_argument("--aoi", required=True, help="AOI id for all artifact filenames")
+    p.add_argument("--resolution-m", type=float, default=1.0, help="m/px (pixel-space masks)")
+    p.add_argument("--tile-size", type=int, default=512)
+    p.add_argument("--threshold", type=float, default=None, help="override; default = checkpoint meta")
+    p.add_argument("--device", default="cpu")
+    p.add_argument("--curve-steps", type=int, default=25)
+    args = p.parse_args()
+    run(args.image, args.checkpoint, args.aoi, resolution_m=args.resolution_m,
+        tile_size=args.tile_size, threshold=args.threshold, device=args.device,
+        curve_steps=args.curve_steps)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,62 @@
+"""Tests for the E1 graph-evaluation: GeoJSON round-trip + report generation."""
+
+from __future__ import annotations
+
+import json
+
+import networkx as nx
+
+from src.pipeline.p2_graph.graph_io import (
+    graph_to_geojson,
+    load_geojson_graph,
+    save_geojson,
+)
+from src.pipeline.p3_analysis.evaluate import _healing_metrics, evaluate
+
+
+def _bridged_graph() -> nx.Graph:
+    """Two triangles joined by a single *bridged* edge (2—3)."""
+    g = nx.Graph()
+    for a, b in [(0, 1), (1, 2), (0, 2), (3, 4), (4, 5), (3, 5)]:
+        g.add_edge(a, b, length_m=1.0, is_bridged=False)
+    g.add_edge(2, 3, length_m=1.0, is_bridged=True)  # the healed bridge
+    for n in g.nodes:
+        g.nodes[n]["x"], g.nodes[n]["y"] = float(n), 0.0
+    return g
+
+
+def test_geojson_roundtrip_preserves_graph(tmp_path):
+    g = _bridged_graph()
+    path = tmp_path / "rt_graph.geojson"
+    save_geojson(g, path)
+    back = load_geojson_graph(path)
+
+    assert back.number_of_nodes() == g.number_of_nodes()
+    assert back.number_of_edges() == g.number_of_edges()
+    assert back.edges[2, 3]["is_bridged"] is True
+    assert back.edges[0, 1]["length_m"] == 1.0
+
+
+def test_healing_metrics_reconstructs_connectivity():
+    g = _bridged_graph()
+    h = _healing_metrics(g)
+    # removing the single bridge splits 6 nodes into 3 + 3
+    assert h["bridges_added"] == 1
+    assert h["components_before_heal"] == 2
+    assert h["components_after_heal"] == 1
+    assert h["largest_cc_before_heal"] == 3
+    assert h["largest_cc_after_heal"] == 6
+    assert h["connectivity_ratio_pct"] == 100.0  # 3 -> 6 nodes
+
+
+def test_evaluate_writes_report_and_plot(tmp_path):
+    save_geojson(_bridged_graph(), tmp_path / "tiny_graph.geojson")
+    report = evaluate("tiny", sample_dir=tmp_path, curve_steps=3, top_n=3)
+
+    assert (tmp_path / "tiny_graph_eval.json").exists()
+    assert (tmp_path / "tiny_resilience_curve.png").exists()
+    # report carries the headline sections
+    assert report["graph"]["bridged_edges"] == 1
+    assert report["resilience"]["targeted_degrades_faster"] is True
+    on_disk = json.loads((tmp_path / "tiny_graph_eval.json").read_text())
+    assert on_disk["healing"]["connectivity_ratio_pct"] == 100.0

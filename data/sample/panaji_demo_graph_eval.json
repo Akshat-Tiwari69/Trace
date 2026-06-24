@@ -1,0 +1,53 @@
+{
+  "aoi": "panaji_demo",
+  "graph": {
+    "nodes": 630,
+    "edges": 749,
+    "bridged_edges": 19,
+    "bridged_pct": 2.54
+  },
+  "healing": {
+    "bridges_added": 19,
+    "components_before_heal": 29,
+    "components_after_heal": 10,
+    "largest_cc_before_heal": 524,
+    "largest_cc_after_heal": 603,
+    "connectivity_ratio_pct": 15.08
+  },
+  "criticality": {
+    "top_nodes": [
+      {
+        "node_id": 45,
+        "betweenness": 0.5109
+      },
+      {
+        "node_id": 29,
+        "betweenness": 0.4483
+      },
+      {
+        "node_id": 11,
+        "betweenness": 0.4423
+      },
+      {
+        "node_id": 19,
+        "betweenness": 0.4405
+      },
+      {
+        "node_id": 24,
+        "betweenness": 0.4392
+      }
+    ],
+    "max_betweenness": 0.5109,
+    "mean_betweenness": 0.05017
+  },
+  "resilience": {
+    "baseline_global_efficiency": 0.001199,
+    "ablation_steps": 40,
+    "targeted_ri_end": 0.6331,
+    "random_ri_end": 0.6498,
+    "targeted_minus_random_gap": 0.0166,
+    "targeted_mean_ri": 0.6743,
+    "random_mean_ri": 0.8602,
+    "targeted_degrades_faster": true
+  }
+}
