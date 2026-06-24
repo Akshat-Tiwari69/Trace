@@ -53,7 +53,8 @@ def test_s2_runs_on_pixelspace_predicted_mask(tmp_path):
     assert any(e["properties"]["is_bridged"] for e in edges)
 
     # P3 output exists with the contracted columns and ranked rows
-    rows = list(csv.DictReader((processed / f"{aoi}_criticality.csv").open()))
+    with (processed / f"{aoi}_criticality.csv").open(encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
     assert len(rows) == len(nodes)
     assert set(rows[0]) >= {"node_id", "betweenness", "rank", "is_critical"}
     assert int(rows[0]["rank"]) == 1  # sorted, highest betweenness first

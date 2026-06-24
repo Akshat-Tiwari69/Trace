@@ -52,14 +52,14 @@ def run(
     print("[2/2] betweenness + ablation + global-efficiency resilience")
     summary = analyze(cfg, critical_fraction=critical_fraction, k=k, curve_steps=curve_steps)
 
-    print(f"\nS2 complete for '{cfg.aoi}' -> data/processed/")
+    print(f"\nS2 complete for '{cfg.aoi}' -> {cfg.processed_dir}")
     return summary
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="S2: heal + analyse a real predicted mask.")
     p.add_argument("--aoi", required=True, help="AOI id (matches data/interim/{aoi}_mask.png)")
-    p.add_argument("--gap-max-m", type=float, default=40.0, help="max bridge length")
+    p.add_argument("--gap-max-m", type=float, default=40.0, help="max bridge length (m)")
     p.add_argument("--angle-max-deg", type=float, default=60.0, help="max road turn (deg)")
     p.add_argument("--resolution-m", type=float, default=1.0,
                    help="m/px for pixel-space masks (sets length_m scale; ignored if a manifest exists)")
