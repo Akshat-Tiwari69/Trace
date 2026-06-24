@@ -132,13 +132,13 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | ID | Status | Task | Waits on | Blocks | Done when |
 |---|---|---|---|---|---|
 | **S1** | ✅ | Graph/resilience spike on an **OSM graph** | — (starts now) | F1 (sample), S2 | osmnx→skeleton→sknw→**MST/Union-Find healing**→betweenness→ablation→**global-efficiency RI** run end-to-end; exports `data/sample/{aoi}_graph.geojson` + `_criticality.csv` — **implemented + verified** (`src/pipeline/p2_graph/{skeleton_graph,healing,graph_io,build_graph,spike_osm}.py`, `p3_analysis/{criticality,resilience,analyze}.py`): angle-aware MST/Union-Find healing, weighted global-efficiency RI; spike on Panaji w/ simulated occlusion → 30→8 components (+22 bridges), targeted RI 0.642 < random 0.703; sample emitted; 15 unit tests green. **Merged (PR #10).** |
-| **S2** | ⏳ | Run healing + criticality on **real predicted masks** | A4 (mask) ✅ | A5, E1 | same pipeline consumes P1 mask → `data/processed/` graph + criticality — **unblocked: A4 trained, `predict_mask` + checkpoint available** |
+| **S2** | 🔄 | Run healing + criticality on **real predicted masks** | A4 (mask) ✅ | A5, E1 | same pipeline consumes P1 mask → `data/processed/` graph + criticality — **unblocked: A4 trained, `predict_mask` + checkpoint available**. Consume-path **built + smoke-tested** (`p2_graph/run_real_mask.py` → `build_graph`+`analyze` on a predicted mask; `tests/test_s2_real_mask.py` green). **Pending a real predicted-mask artifact** (checkpoint+tile or Akshat's committed mask) for final numbers. Note: predicted masks are **pixel-space** (predict.py drops geo-transform) — for the on-map dashboard demo the tile's geo-transform/manifest must travel with the mask (coordinate w/ P1). |
 
 ### Saanvi — dashboard (CPU, off `data/sample/`)
 | ID | Status | Task | Waits on | Blocks | Done when |
 |---|---|---|---|---|---|
-| **F1** | 🔄 | Dashboard env + scaffold on sample artifacts | uses S1 sample (mock OK until then) | F2 | Streamlit+folium app loads `data/sample/`, renders roads coloured by criticality + legend; map ~65% / panel ~35% per `Design.md` |
-| **F2** | ⏳ | Full dashboard: click-to-disable sim + rerouting + travel-time + charts | F1 | A5 | clicking a node disables it, reroutes, shows RI drop + travel-time %, updates instantly |
+| **F1** | ✅ | Dashboard env + scaffold on sample artifacts | uses S1 sample (mock OK until then) | F2 | Streamlit+folium app loads `data/sample/`, renders roads coloured by criticality + legend; map ~65% / panel ~35% per `Design.md` |
+| **F2** | ✅ | Full dashboard: click-to-disable sim + rerouting + travel-time + charts | F1 | A5 | clicking a node disables it, reroutes, shows RI drop + travel-time %, updates instantly |
 
 ### Shared / final
 | ID | Status | Task | Owner | Waits on |
@@ -220,6 +220,21 @@ flowchart TD
   - Tests: +3 (occlusion exact-size, zero-patch copy, efficiency k-sample); P2/P3 suite 23/23 green.
 - Next: S2 — now unblocked (A4 landed, P1 `predict.py` produces the mask artifact); run the same `build_graph`/`analyze` on a real predicted mask → `data/processed/`.
 
+**2026-06-24 (Shaivi — S2 started)**
+- Done: built the **S2 consume-path** in branch `shaivi/S2-real-mask`. `p2_graph/run_real_mask.py` runs the *same* `build_graph` → `analyze` engine on a real predicted mask (`data/interim/{aoi}_mask.png` from `predict.py`), writing to `data/processed/` (not the committed sample set). Smoke-tested offline on a synthetic pixel-space predicted-style mask (`tests/test_s2_real_mask.py`): heals the punched gap and emits criticality. P2/P3+S2 suite 31/31 green.
+- Open question (coordinate w/ Akshat): `predict.py` reads RGB via OpenCV and **drops the geo-transform**, so predicted masks are **pixel-space** — fine for S2's graph/criticality numbers, but the on-map dashboard demo needs the tile's geo-transform to ride along (a manifest beside the mask). Not faking it; flagging the handoff.
+- Blockers / waiting on: a **real predicted-mask artifact** — the trained checkpoint + a tile (then `predict.py` → my pipeline), or a committed predicted mask from A4. The code is ready; only the real input is missing for final numbers.
+- Next: obtain a real predicted mask, run `run_real_mask`, record numbers, then PR S2 into `dev`.
+
+**2026-06-23 (Saanvi, F2)**
+- Done: **F2 ✅** — added map-click junction selection, node-ablation simulation using the locked global-efficiency RI, exact same-speed route-length impact, orange rerouting, red disabled states, reset/layer/scenario controls, and live travel-impact/delay-contributor charts per `Design.md`.
+- Verified: top-ranked junction 45 updates RI 1.000→0.976 and representative route 161 m→449 m (+178.6%); top-five critical-node sweep handles finite detours and route cuts; browser closure/reset flows pass with no console errors; 55 tests pass.
+- PR: F2 is stacked on the open F1 PR branch; request Akshat's review, then retarget F2 to `dev` when F1 merges.
+
+**2026-06-23 (Saanvi)**
+- Done: **F1 ✅** — rebuilt the Streamlit + Folium dashboard on the committed S1 sample artifacts. The 65/35 layout renders 760 roads by endpoint criticality with a Viridis legend, labels 64 critical junctions, and distinguishes healed links with dashed lines.
+- Verified: installed `requirements.txt` globally under Python 3.12 (no virtual environment); imports pass; Streamlit health check passes; browser render shows 637 junctions / 760 road links with no console errors.
+- Next: open the F1 PR into `dev`, then F2 after Akshat reviews/merges it.
 **2026-06-24 (cont. 2)**
 - Done: **A4 notebook rebuilt for max accuracy** — `notebooks/train_segmentation.ipynb` now uses **SegFormer mit_b3 + SCSE-attention U-Net**, **EMA** weights (evaluated + exported), **ComboLoss = BCE + Dice + Lovász-hinge + soft-clDice (ramped)**, richer augmentation (ShiftScaleRotate/blur/noise/CLAHE), and **flip + multi-scale TTA**, on top of the prior sliding-window/Hann val + occlusion-aware threshold infra. Extended the P1 API to support it: `build_model(arch, decoder_attention_type)`, `losses.ComboLoss`/`lovasz_hinge`, and `load_checkpoint` now reads `arch`/`decoder_attention_type` from `meta` (+`weights_only=False`) so the SCSE checkpoint reloads cleanly. **Verified which decoders actually build with the MiT encoder** (Unet/MAnet/FPN yes; UnetPlusPlus/DeepLabV3+ no) and CPU-dry-ran every notebook function (TTA, EMA, ComboLoss, occlusion selection). 62 unit tests pass. **Honest note: not GPU-benchmarked — expected to beat 0.672, but the real number needs Akshat's Kaggle run.**
 
