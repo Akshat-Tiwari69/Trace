@@ -6,6 +6,7 @@ Built with ``encoder_weights=None`` so tests never hit the network.
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import torch
 
 from src.pipeline.p1_segment.model import (
@@ -15,6 +16,39 @@ from src.pipeline.p1_segment.model import (
     predict_mask,
     save_checkpoint,
 )
+
+
+def test_build_model_scse_unet_forwards():
+    model = build_model(encoder_weights=None, decoder_attention_type="scse")
+    model.eval()
+    with torch.no_grad():
+        out = model(torch.randn(1, 3, 64, 64))
+    assert out.shape == (1, 1, 64, 64)
+
+
+def test_build_model_rejects_unknown_arch():
+    with pytest.raises(ValueError):
+        build_model(encoder_weights=None, arch="nope")
+
+
+def test_build_model_rejects_attention_on_non_unet():
+    with pytest.raises(ValueError):
+        build_model(encoder_weights=None, arch="fpn", decoder_attention_type="scse")
+
+
+def test_checkpoint_roundtrip_rebuilds_scse_arch(tmp_path):
+    # The scse decoder adds parameters; load_checkpoint must read arch from meta
+    # or load_state_dict would fail on mismatched keys.
+    model = build_model(encoder_weights=None, decoder_attention_type="scse")
+    image = (np.random.rand(64, 64, 3) * 255).astype(np.uint8)
+    before = predict_mask(model, image)
+    ckpt = tmp_path / "scse.pt"
+    save_checkpoint(model, ckpt, meta={"encoder": "mit_b0", "arch": "unet",
+                                       "decoder_attention_type": "scse"})
+    reloaded, meta = load_checkpoint(ckpt)
+    after = predict_mask(reloaded, image)
+    assert np.array_equal(before, after)
+    assert meta["decoder_attention_type"] == "scse"
 
 
 def test_build_and_forward_full_resolution():
