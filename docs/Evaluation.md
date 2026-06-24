@@ -64,6 +64,28 @@ Reference points from the literature to contextualize our numbers (full citation
 | Cautionary point | a mask at F1 = 0.72 can score APLS = 0.25 — pixels ≠ topology |
 | **Our baselines** | seg: A4 IoU **0.670**, Occlusion-Recall **0.793** @thr 0.44 (DeepGlobe val) · graph: see below |
 
+### Segmentation-lane numbers (A4 — DeepGlobe held-out validation)
+
+Reproduce with `python -m src.pipeline.p1_segment.evaluate` (reads the trained
+checkpoint's embedded validation metrics → `data/sample/segmentation_eval.json`).
+Add `--image <tile>` for a live qualitative inference demo + red overlay.
+
+| Metric | Value | Notes |
+|---|---|---|
+| Model | SegFormer MiT-B3 + SCSE U-Net (EMA), 47.5M params, 30 epochs | full-res sliding-window (Hann) validation |
+| **IoU** | **0.6699** (flip + multi-scale TTA) · 0.6638 best single-view | held-out DeepGlobe val |
+| **Occlusion-Recall** | **0.793** @ deploy thr 0.44 | the headline metric — recall on hidden roads |
+| Deploy threshold | 0.44 → clean IoU 0.6617 | occlusion-aware: max recall within 0.01 IoU of peak |
+| Checkpoint | GitHub Release `a4-roadseg-v1` | meta-driven; `load_checkpoint` rebuilds + deploys it |
+
+*Real-world spot-check (full P1→S2 dry-run on a live tile, not DeepGlobe): on an
+ESRI World-Imagery tile of tree-canopy-heavy Panaji (Altinho), the model recovered
+roads at 5.13% pixel coverage tracing the visible street network; the predicted-mask
+graph healed **38→23 components (+15 bridges, +50% connectivity)** and held the
+resilience sanity check (**targeted RI 0.503 < random 0.780**). Off-domain + heavy
+occlusion ⇒ a deliberately hard, sparse case — reported honestly per the
+error-analysis policy below; on open road grids the mask is far denser.*
+
 ### Graph-lane first numbers (S1 sample — `panaji_demo`, OSM-derived w/ simulated occlusion)
 
 Reproduce with `python -m src.pipeline.p3_analysis.evaluate` (reads the committed

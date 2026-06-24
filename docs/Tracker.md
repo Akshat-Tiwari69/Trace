@@ -126,13 +126,13 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **A2** | ✅ | Repo skeleton (`src/`, `data/`, `notebooks/`, `.gitignore`) | — | A3, F1, S1 outputs | dirs exist; `data/raw`+`models/` gitignored; `data/sample/` placeholder present — created `src/pipeline/{p1_segment,p2_graph,p3_analysis}`, `src/app`, `data/{raw,interim,processed,outputs,sample}`, `models/`, `notebooks/` with `.gitkeep`; `.gitignore` ignores `data/raw|interim|processed|outputs/*` + `models/*` (kept placeholders via `dir/*` + negated `.gitkeep`) |
 | **A3** | ✅ | Data pipeline: download/cache + tiling + **OSM→mask** script | A1, A2 | A4 | produces aligned `{aoi}_mask`-style labels in `data/interim/`; QC'd on 1 tile — `src/pipeline/p1_segment/{osm_mask,build_dataset}.py`: osmnx→rasterio metric-grid masks, m-buffered roads, 256px tiling, GPKG cache, JSON alignment manifest; verified on Panaji (4310×3343 @1m/px, 5.65% road px, 238 tiles, strictly {0,1}); 9 offline unit tests pass |
 | **A4** | ✅ | Fine-tune segmentation (SegFormer/U-Net) — Colab/Kaggle notebook | A3 | S2, A5, E1 | **COMPLETE.** Final model: **SegFormer MiT-B3 + SCSE U-Net (EMA), 47.5M params, 30 epochs**, DeepGlobe Roads. Full-res sliding-window+Hann validation → **flip+multi-scale TTA IoU 0.6699** (best single-view EMA 0.6638); occlusion-aware deploy **thr 0.44 → clean IoU 0.6617 / Occlusion-Recall 0.793** (selection written into checkpoint `meta`). Recipe: ComboLoss (BCE+Dice+Lovász+clDice ramp), road-aware crops, rich aug, discriminative LR, warmup+cosine. **Checkpoint released:** https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v1 (asset `deepglobe_mit_b3_scse_512px_best.pt`, ~190 MB; local `models/` gitignored). `load_checkpoint` rebuilds the SCSE arch from `meta`; `predict.py` / S2 `run_real_mask` deploy it unchanged (smoke-tested on the real file). P1→P2→P3 integration verified on the §4 contracts. 68 CPU unit tests pass. (Honest note vs the 0.672 Codex baseline: a statistical tie, ~0.002 behind on raw IoU; the gain is rigor + integration.) |
-| **A5** | 🔒 | Walking skeleton → end-to-end integration on 1 tile | A4, S2, F2 | X1 | one tile flows P1→P2→P3→P4 without manual steps |
+| **A5** | ⏳ | Walking skeleton → end-to-end integration on 1 tile | A4 ✅, S2 ✅, F2 ✅ | X1 | one tile flows P1→P2→P3→P4 without manual steps — **unblocked: all deps landed** |
 
 ### Shaivi — graph + resilience (CPU, no GPU)
 | ID | Status | Task | Waits on | Blocks | Done when |
 |---|---|---|---|---|---|
 | **S1** | ✅ | Graph/resilience spike on an **OSM graph** | — (starts now) | F1 (sample), S2 | osmnx→skeleton→sknw→**MST/Union-Find healing**→betweenness→ablation→**global-efficiency RI** run end-to-end; exports `data/sample/{aoi}_graph.geojson` + `_criticality.csv` — **implemented + verified** (`src/pipeline/p2_graph/{skeleton_graph,healing,graph_io,build_graph,spike_osm}.py`, `p3_analysis/{criticality,resilience,analyze}.py`): angle-aware MST/Union-Find healing, weighted global-efficiency RI; spike on Panaji w/ simulated occlusion → 30→8 components (+22 bridges), targeted RI 0.642 < random 0.703; sample emitted; 15 unit tests green. **Merged (PR #10).** |
-| **S2** | 🔄 | Run healing + criticality on **real predicted masks** | A4 (mask) ✅ | A5, E1 | same pipeline consumes P1 mask → `data/processed/` graph + criticality — **unblocked: A4 trained, `predict_mask` + checkpoint available**. Consume-path **built + smoke-tested** (`p2_graph/run_real_mask.py` → `build_graph`+`analyze` on a predicted mask; `tests/test_s2_real_mask.py` green). **Pending a real predicted-mask artifact** (checkpoint+tile or Akshat's committed mask) for final numbers. Note: predicted masks are **pixel-space** (predict.py drops geo-transform) — for the on-map dashboard demo the tile's geo-transform/manifest must travel with the mask (coordinate w/ P1). |
+| **S2** | ✅ | Run healing + criticality on **real predicted masks** | A4 (mask) ✅ | A5, E1 | same pipeline consumes P1 mask → `data/processed/` graph + criticality. Consume-path `p2_graph/run_real_mask.py` (+ `tests/test_s2_real_mask.py`). **Real-mask run done** (Akshat ran P1 `predict.py` on a live ESRI World-Imagery Panaji tile → `run_real_mask`): **100 nodes / 77 edges, 38→23 components (+15 bridges, +50% connectivity), top node 49, targeted RI 0.503 < random 0.780** ✓. Pixel-space (predict.py drops geo-transform); a georeferenced on-map dashboard demo still needs the tile's manifest to ride along — open P1↔dashboard handoff. |
 
 ### Saanvi — dashboard (CPU, off `data/sample/`)
 | ID | Status | Task | Waits on | Blocks | Done when |
@@ -143,7 +143,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 ### Shared / final
 | ID | Status | Task | Owner | Waits on |
 |---|---|---|---|---|
-| **E1** | 🔄 | Evaluation suite + ablations (`Evaluation.md`) | Akshat (seg) · Shaivi (graph) | A4, S2 — **graph side done**: `p3_analysis/evaluate.py` packages the graph numbers (connectivity ratio, criticality, targeted-vs-random resilience) → `data/sample/{aoi}_graph_eval.json` + resilience-curve PNG; numbers filled into `Evaluation.md`. Seg side (Akshat) outstanding. |
+| **E1** | ✅ | Evaluation suite + ablations (`Evaluation.md`) | Akshat (seg) · Shaivi (graph) | A4, S2 — **both lanes packaged.** Graph: `p3_analysis/evaluate.py` (connectivity, criticality, targeted-vs-random resilience). Seg: `p1_segment/evaluate.py` reads the A4 checkpoint meta → **IoU 0.670 (flip+scale TTA) / Occlusion-Recall 0.793 @thr 0.44** → `data/sample/segmentation_eval.json` + Evaluation.md seg subsection. Headline numbers + reproducible scripts done; the on/off **ablation** runs (occlusion, clDice — need GPU re-trains) remain optional future evidence. |
 | **X1** | ⏳ | Backup demo screen-capture | All | A5 |
 
 ### Bugs / Issues
@@ -201,10 +201,10 @@ flowchart TD
 ## §9 · Status Snapshot
 
 - **Docs:** ✅ 11/11 complete. **Build:** in progress.
-- **Done:** A1–A3 ✅ (env, skeleton, OSM→mask pipeline) · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience, committed `data/sample/`) · **A4 ✅ COMPLETE** (DeepGlobe road seg — **MiT-B3 + SCSE U-Net, EMA**: flip+scale-TTA IoU **0.670**, deploy thr 0.44 → IoU 0.662 / Occ-Recall 0.793; checkpoint released as **`a4-roadseg-v1`**) · F1 ✅ + F2 ✅ (Saanvi dashboard, PRs #19/#20 merged) · S1 follow-ups ✅ (#24) · S2 consume-path ✅ (#25).
-- **Ready now:** **A5** end-to-end integration (A4 ✅ + S2 path ✅ + F2 ✅ all landed) · S2 final numbers (real predicted mask now obtainable from the released checkpoint) · E1 (eval).
-- **Next convergence:** released A4 checkpoint → `predict.py` mask → S2 `run_real_mask` real numbers + E1; then **A5** walking skeleton wires P1→P2→P3→P4 on one tile.
-- **Top risk to clear early:** A5 is the last big convergence — all three lanes (A4 ✅, S2 ✅ code, F2 ✅) are now in `dev`, so A5 is unblocked.
+- **Done:** A1–A3 ✅ · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience) · **A4 ✅ COMPLETE** (DeepGlobe road seg — **MiT-B3 + SCSE U-Net, EMA**: flip+scale-TTA IoU **0.670**, deploy thr 0.44 → IoU 0.662 / Occ-Recall 0.793; released **`a4-roadseg-v1`**) · F1 ✅ + F2 ✅ (#19/#20) · S1 follow-ups ✅ (#24) · **S2 ✅** (consume-path #25 + real-mask run on a live Panaji tile: 100 nodes/77 edges, 38→23 components, targeted RI 0.503 < random 0.780) · **E1 ✅** (graph #27 + seg `p1_segment/evaluate.py`: IoU 0.670 / Occ-Recall 0.793 → `segmentation_eval.json`).
+- **Ready now:** **A5** end-to-end walking skeleton — the last big convergence; all deps (A4 ✅, S2 ✅, F2 ✅) are in `dev`.
+- **Parked (post-A5):** research additional training datasets (SpaceNet / OpenSatMap / OSM-India AOIs) to push seg accuracy beyond 0.670.
+- **Top risk to clear early:** A5 wiring + the pixel-space↔georeferenced handoff needed for a real on-map dashboard demo.
 
 ---
 
@@ -212,7 +212,13 @@ flowchart TD
 
 > Copy the block each working day. Newest on top.
 
-**2026-06-24 (Shaivi — E1 graph numbers for Akshat)**
+**2026-06-24 (Akshat — E1 seg side + S2 real-mask test)**
+- Done: **S2 real-mask run** (Shaivi's code, Akshat-tested — she's not set up for imagery). Pulled a live **ESRI World-Imagery** tile of tree-canopy Panaji (keyless XYZ stitch, no Kaggle needed), ran P1 `predict.py` with the released `a4-roadseg-v1` checkpoint → mask (5.13% road px) → `run_real_mask`: **100 nodes / 77 edges, components 38→23 (+15 bridges, +50% connectivity), top node 49, targeted RI 0.503 < random 0.780** ✓. Proves the full P1→P2→P3 chain on genuine model output; thesis holds on real, occluded imagery. S2 → ✅.
+- Done: **E1 seg side** — `src/pipeline/p1_segment/evaluate.py` packages the A4 validation metrics from the checkpoint `meta` → committed `data/sample/segmentation_eval.json` + Evaluation.md seg subsection (IoU **0.6699** flip+scale TTA, Occlusion-Recall **0.793** @thr 0.44). `--image` adds a live qualitative inference demo + overlay. +3 tests. E1 → ✅ (both lanes packaged; on/off ablations remain optional, need GPU re-trains).
+- Note (honest): the S2 numbers are on an **off-DeepGlobe, heavily-occluded** tile → a sparse/hard graph; reported as such in Evaluation.md, not oversold. Predicted masks are pixel-space — a georeferenced on-map demo still needs the geo-transform handoff.
+- Next: **A5** walking skeleton (one command P1→P2→P3→P4 on one tile); then research extra training datasets to push seg past 0.670.
+
+
 - Done: built `p3_analysis/evaluate.py` (+ `graph_io.load_geojson_graph`) — the **graph-lane evaluation** Akshat asked for. Reads the committed sample graph and reports: **connectivity ratio +15.1%** (largest CC 524→603, components 29→10 after healing), top "Gatekeeper" node betweenness **0.511**, and the resilience sanity check — **targeted ablation mean RI 0.674 vs random 0.860** over 40 removals (targeted hurts far more ⇒ betweenness finds real chokepoints). Writes `data/sample/panaji_demo_graph_eval.json` + `_resilience_curve.png`; numbers filled into `Evaluation.md`. +3 tests (39/39 green).
 - Note: numbers are on the S1 OSM stand-in; the same `evaluate` runs unchanged on the real S2 predicted-mask graph once a tile is available.
 - Next: hand numbers to Akshat for the eval report; E1 seg side is his.
