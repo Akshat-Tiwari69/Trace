@@ -126,7 +126,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **A2** | ✅ | Repo skeleton (`src/`, `data/`, `notebooks/`, `.gitignore`) | — | A3, F1, S1 outputs | dirs exist; `data/raw`+`models/` gitignored; `data/sample/` placeholder present — created `src/pipeline/{p1_segment,p2_graph,p3_analysis}`, `src/app`, `data/{raw,interim,processed,outputs,sample}`, `models/`, `notebooks/` with `.gitkeep`; `.gitignore` ignores `data/raw|interim|processed|outputs/*` + `models/*` (kept placeholders via `dir/*` + negated `.gitkeep`) |
 | **A3** | ✅ | Data pipeline: download/cache + tiling + **OSM→mask** script | A1, A2 | A4 | produces aligned `{aoi}_mask`-style labels in `data/interim/`; QC'd on 1 tile — `src/pipeline/p1_segment/{osm_mask,build_dataset}.py`: osmnx→rasterio metric-grid masks, m-buffered roads, 256px tiling, GPKG cache, JSON alignment manifest; verified on Panaji (4310×3343 @1m/px, 5.65% road px, 238 tiles, strictly {0,1}); 9 offline unit tests pass |
 | **A4** | ✅ | Fine-tune segmentation (SegFormer/U-Net) — Colab/Kaggle notebook | A3 | S2, A5, E1 | **COMPLETE.** Final model: **SegFormer MiT-B3 + SCSE U-Net (EMA), 47.5M params, 30 epochs**, DeepGlobe Roads. Full-res sliding-window+Hann validation → **flip+multi-scale TTA IoU 0.6699** (best single-view EMA 0.6638); occlusion-aware deploy **thr 0.44 → clean IoU 0.6617 / Occlusion-Recall 0.793** (selection written into checkpoint `meta`). Recipe: ComboLoss (BCE+Dice+Lovász+clDice ramp), road-aware crops, rich aug, discriminative LR, warmup+cosine. **Checkpoint released:** https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v1 (asset `deepglobe_mit_b3_scse_512px_best.pt`, ~190 MB; local `models/` gitignored). `load_checkpoint` rebuilds the SCSE arch from `meta`; `predict.py` / S2 `run_real_mask` deploy it unchanged (smoke-tested on the real file). P1→P2→P3 integration verified on the §4 contracts. 68 CPU unit tests pass. (Honest note vs the 0.672 Codex baseline: a statistical tie, ~0.002 behind on raw IoU; the gain is rigor + integration.) |
-| **A5** | ⏳ | Walking skeleton → end-to-end integration on 1 tile | A4 ✅, S2 ✅, F2 ✅ | X1 | one tile flows P1→P2→P3→P4 without manual steps — **unblocked: all deps landed** |
+| **A5** | ✅ | Walking skeleton → end-to-end integration on 1 tile | A4 ✅, S2 ✅, F2 ✅ | X1 | **DONE.** `src/pipeline/run_pipeline.py` — one command runs P1 `predict` → P2 `build_graph` → P3 `analyze` → P4 contract check, no manual steps. Verified end-to-end on a real Panaji tile (100 nodes/77 edges, dashboard columns match) + deterministic orchestration test (`tests/test_run_pipeline.py`). |
 
 ### Shaivi — graph + resilience (CPU, no GPU)
 | ID | Status | Task | Waits on | Blocks | Done when |
@@ -201,16 +201,20 @@ flowchart TD
 ## §9 · Status Snapshot
 
 - **Docs:** ✅ 11/11 complete. **Build:** in progress.
-- **Done:** A1–A3 ✅ · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience) · **A4 ✅ COMPLETE** (DeepGlobe road seg — **MiT-B3 + SCSE U-Net, EMA**: flip+scale-TTA IoU **0.670**, deploy thr 0.44 → IoU 0.662 / Occ-Recall 0.793; released **`a4-roadseg-v1`**) · F1 ✅ + F2 ✅ (#19/#20) · S1 follow-ups ✅ (#24) · **S2 ✅** (consume-path #25 + real-mask run on a live Panaji tile: 100 nodes/77 edges, 38→23 components, targeted RI 0.503 < random 0.780) · **E1 ✅** (graph #27 + seg `p1_segment/evaluate.py`: IoU 0.670 / Occ-Recall 0.793 → `segmentation_eval.json`).
-- **Ready now:** **A5** end-to-end walking skeleton — the last big convergence; all deps (A4 ✅, S2 ✅, F2 ✅) are in `dev`.
-- **Parked (post-A5):** research additional training datasets (SpaceNet / OpenSatMap / OSM-India AOIs) to push seg accuracy beyond 0.670.
-- **Top risk to clear early:** A5 wiring + the pixel-space↔georeferenced handoff needed for a real on-map dashboard demo.
+- **Done:** A1–A3 ✅ · S1 ✅ (P2 graph + healing, P3 criticality + global-efficiency resilience) · **A4 ✅ COMPLETE** (DeepGlobe road seg — **MiT-B3 + SCSE U-Net, EMA**: flip+scale-TTA IoU **0.670**, deploy thr 0.44 → IoU 0.662 / Occ-Recall 0.793; released **`a4-roadseg-v1`**) · F1 ✅ + F2 ✅ (#19/#20) · S1 follow-ups ✅ (#24) · **S2 ✅** (consume-path #25 + real-mask run on a live Panaji tile: 100 nodes/77 edges, 38→23 components, targeted RI 0.503 < random 0.780) · **E1 ✅** (graph #27 + seg `p1_segment/evaluate.py`: IoU 0.670 / Occ-Recall 0.793 → `segmentation_eval.json`) · **A5 ✅** (`run_pipeline.py` — one command P1→P2→P3→P4, verified on a real tile).
+- **Pipeline backbone closed end-to-end (A1–A5 ✅).** Remaining: optional polish + the parked dataset research.
+- **Parked (next):** research additional training datasets (SpaceNet / OpenSatMap / OSM-India AOIs) to push seg accuracy beyond 0.670.
+- **Open handoff:** pixel-space↔georeferenced (a real *on-map* dashboard demo needs the tile's geo-transform/manifest to ride with the mask).
 
 ---
 
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-24 (Akshat — A5 walking skeleton)**
+- Done: **A5 ✅** — `src/pipeline/run_pipeline.py` chains the whole pipeline in one command: imagery + checkpoint → P1 `predict` → P2 `build_graph` → P3 `analyze` → P4 dashboard-contract check, **no manual steps**. Each stage is the teammates' code unchanged; the CLI is the integration glue. Verified **end-to-end on a real Panaji tile** (P1 5.13% road px → 100 nodes/77 edges → criticality + resilience → P4 columns match) and with a deterministic orchestration test that injects a synthetic-mask segmenter so P2→P3→P4 is tested without the 190 MB checkpoint (`tests/test_run_pipeline.py`). Pipeline backbone is now closed end-to-end.
+- Next: (parked, per Akshat) research additional training datasets (SpaceNet / OpenSatMap / OSM-India) to push seg accuracy beyond 0.670.
 
 **2026-06-24 (Akshat — E1 seg side + S2 real-mask test)**
 - Done: **S2 real-mask run** (Shaivi's code, Akshat-tested — she's not set up for imagery). Pulled a live **ESRI World-Imagery** tile of tree-canopy Panaji (keyless XYZ stitch, no Kaggle needed), ran P1 `predict.py` with the released `a4-roadseg-v1` checkpoint → mask (5.13% road px) → `run_real_mask`: **100 nodes / 77 edges, components 38→23 (+15 bridges, +50% connectivity), top node 49, targeted RI 0.503 < random 0.780** ✓. Proves the full P1→P2→P3 chain on genuine model output; thesis holds on real, occluded imagery. S2 → ✅.
