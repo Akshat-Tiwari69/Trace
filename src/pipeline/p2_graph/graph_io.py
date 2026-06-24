@@ -105,3 +105,41 @@ def save_geojson(graph: "nx.Graph", path: Path) -> None:
     """Write the graph as a GeoJSON FeatureCollection."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text(json.dumps(graph_to_geojson(graph)))
+
+
+def load_geojson_graph(path: Path) -> "nx.Graph":
+    """Rebuild a NetworkX graph from a :func:`graph_to_geojson` FeatureCollection.
+
+    The inverse of :func:`graph_to_geojson`: node Point features restore
+    ``x, y, degree, type, betweenness, is_critical``; edge LineString features
+    restore ``length_m, is_bridged, edge_betweenness``. Lets the committed
+    ``data/sample/`` GeoJSON be re-analysed without the (gitignored) GraphML.
+    """
+    import networkx as nx
+
+    fc = json.loads(Path(path).read_text())
+    graph = nx.Graph()
+    for feat in fc["features"]:
+        props = feat["properties"]
+        if props.get("feature_type") == "node":
+            lon, lat = feat["geometry"]["coordinates"]
+            graph.add_node(
+                int(props["node_id"]),
+                x=float(lon),
+                y=float(lat),
+                degree=int(props.get("degree", 0)),
+                type=props.get("type", "intersection"),
+                betweenness=float(props.get("betweenness", 0.0)),
+                is_critical=bool(props.get("is_critical", False)),
+            )
+    for feat in fc["features"]:
+        props = feat["properties"]
+        if props.get("feature_type") == "edge":
+            graph.add_edge(
+                int(props["u"]),
+                int(props["v"]),
+                length_m=float(props.get("length_m", 0.0)),
+                is_bridged=bool(props.get("is_bridged", False)),
+                edge_betweenness=float(props.get("edge_betweenness", 0.0)),
+            )
+    return graph

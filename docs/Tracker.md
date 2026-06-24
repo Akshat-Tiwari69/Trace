@@ -143,7 +143,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 ### Shared / final
 | ID | Status | Task | Owner | Waits on |
 |---|---|---|---|---|
-| **E1** | 🔒 | Evaluation suite + ablations (`Evaluation.md`) | Akshat (seg) · Shaivi (graph) | A4, S2 |
+| **E1** | 🔄 | Evaluation suite + ablations (`Evaluation.md`) | Akshat (seg) · Shaivi (graph) | A4, S2 — **graph side done**: `p3_analysis/evaluate.py` packages the graph numbers (connectivity ratio, criticality, targeted-vs-random resilience) → `data/sample/{aoi}_graph_eval.json` + resilience-curve PNG; numbers filled into `Evaluation.md`. Seg side (Akshat) outstanding. |
 | **X1** | ⏳ | Backup demo screen-capture | All | A5 |
 
 ### Bugs / Issues
@@ -211,6 +211,11 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-24 (Shaivi — E1 graph numbers for Akshat)**
+- Done: built `p3_analysis/evaluate.py` (+ `graph_io.load_geojson_graph`) — the **graph-lane evaluation** Akshat asked for. Reads the committed sample graph and reports: **connectivity ratio +15.1%** (largest CC 524→603, components 29→10 after healing), top "Gatekeeper" node betweenness **0.511**, and the resilience sanity check — **targeted ablation mean RI 0.674 vs random 0.860** over 40 removals (targeted hurts far more ⇒ betweenness finds real chokepoints). Writes `data/sample/panaji_demo_graph_eval.json` + `_resilience_curve.png`; numbers filled into `Evaluation.md`. +3 tests (39/39 green).
+- Note: numbers are on the S1 OSM stand-in; the same `evaluate` runs unchanged on the real S2 predicted-mask graph once a tile is available.
+- Next: hand numbers to Akshat for the eval report; E1 seg side is his.
 
 **2026-06-24 (cont. 4 — Akshat: A4 COMPLETE + all PRs merged + integration verified)**
 - **A4 ✅ COMPLETE.** Final Kaggle GPU run (30 epochs): **SegFormer MiT-B3 + SCSE U-Net, EMA weights** — full-res sliding-window+Hann val → **flip+multi-scale TTA IoU 0.6699** (best single-view EMA 0.6638); occlusion-aware deploy **thr 0.44 → clean IoU 0.6617 / Occlusion-Recall 0.793**, written into the checkpoint `meta`. EMA-lag made early epochs read ~0.05, unstick at e4 (0.379), climb to plateau (e16 0.642 → e24 0.659 → e30 0.664). Honest vs the 0.672 Codex baseline: a **statistical tie, ~0.002 behind** on raw IoU — the real gain is engineering rigor (every component CPU-verified pre-ship) + full pipeline integration, not the leaderboard number.
