@@ -132,7 +132,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | ID | Status | Task | Waits on | Blocks | Done when |
 |---|---|---|---|---|---|
 | **S1** | ✅ | Graph/resilience spike on an **OSM graph** | — (starts now) | F1 (sample), S2 | osmnx→skeleton→sknw→**MST/Union-Find healing**→betweenness→ablation→**global-efficiency RI** run end-to-end; exports `data/sample/{aoi}_graph.geojson` + `_criticality.csv` — **implemented + verified** (`src/pipeline/p2_graph/{skeleton_graph,healing,graph_io,build_graph,spike_osm}.py`, `p3_analysis/{criticality,resilience,analyze}.py`): angle-aware MST/Union-Find healing, weighted global-efficiency RI; spike on Panaji w/ simulated occlusion → 30→8 components (+22 bridges), targeted RI 0.642 < random 0.703; sample emitted; 15 unit tests green. **Merged (PR #10).** |
-| **S2** | ⏳ | Run healing + criticality on **real predicted masks** | A4 (mask) ✅ | A5, E1 | same pipeline consumes P1 mask → `data/processed/` graph + criticality — **unblocked: A4 trained, `predict_mask` + checkpoint available** |
+| **S2** | 🔄 | Run healing + criticality on **real predicted masks** | A4 (mask) ✅ | A5, E1 | same pipeline consumes P1 mask → `data/processed/` graph + criticality — **unblocked: A4 trained, `predict_mask` + checkpoint available**. Consume-path **built + smoke-tested** (`p2_graph/run_real_mask.py` → `build_graph`+`analyze` on a predicted mask; `tests/test_s2_real_mask.py` green). **Pending a real predicted-mask artifact** (checkpoint+tile or Akshat's committed mask) for final numbers. Note: predicted masks are **pixel-space** (predict.py drops geo-transform) — for the on-map dashboard demo the tile's geo-transform/manifest must travel with the mask (coordinate w/ P1). |
 
 ### Saanvi — dashboard (CPU, off `data/sample/`)
 | ID | Status | Task | Waits on | Blocks | Done when |
@@ -211,6 +211,12 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-24 (Shaivi — S2 started)**
+- Done: built the **S2 consume-path** in branch `shaivi/S2-real-mask`. `p2_graph/run_real_mask.py` runs the *same* `build_graph` → `analyze` engine on a real predicted mask (`data/interim/{aoi}_mask.png` from `predict.py`), writing to `data/processed/` (not the committed sample set). Smoke-tested offline on a synthetic pixel-space predicted-style mask (`tests/test_s2_real_mask.py`): heals the punched gap and emits criticality. P2/P3+S2 suite 31/31 green.
+- Open question (coordinate w/ Akshat): `predict.py` reads RGB via OpenCV and **drops the geo-transform**, so predicted masks are **pixel-space** — fine for S2's graph/criticality numbers, but the on-map dashboard demo needs the tile's geo-transform to ride along (a manifest beside the mask). Not faking it; flagging the handoff.
+- Blockers / waiting on: a **real predicted-mask artifact** — the trained checkpoint + a tile (then `predict.py` → my pipeline), or a committed predicted mask from A4. The code is ready; only the real input is missing for final numbers.
+- Next: obtain a real predicted mask, run `run_real_mask`, record numbers, then PR S2 into `dev`.
 
 **2026-06-23 (Saanvi, F2)**
 - Done: **F2 ✅** — added map-click junction selection, node-ablation simulation using the locked global-efficiency RI, exact same-speed route-length impact, orange rerouting, red disabled states, reset/layer/scenario controls, and live travel-impact/delay-contributor charts per `Design.md`.
