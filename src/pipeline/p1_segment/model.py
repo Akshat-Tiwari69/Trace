@@ -120,23 +120,41 @@ def _to_chw_tensor(image: np.ndarray) -> torch.Tensor:
 
 
 @torch.no_grad()
+def _dihedral_tta_prob(net: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
+    """Mean sigmoid over the 8 D4 symmetries (4 rotations × optional h-flip).
+
+    Aerial roads have no canonical orientation, so averaging the prediction over
+    the dihedral group is a cheap, retrain-free accuracy boost (task A7). Each
+    transform is undone before averaging so the probabilities line up.
+    """
+    probs = []
+    for k in range(4):  # 0/90/180/270° rotations
+        xr = torch.rot90(x, k, dims=(2, 3))
+        probs.append(torch.rot90(torch.sigmoid(net(xr)), -k, dims=(2, 3)))
+        xf = torch.flip(xr, dims=(3,))  # + horizontal flip
+        probs.append(torch.rot90(torch.flip(torch.sigmoid(net(xf)), dims=(3,)), -k, dims=(2, 3)))
+    return torch.stack(probs).mean(dim=0)
+
+
+@torch.no_grad()
 def predict_mask(
     model: torch.nn.Module,
     image: np.ndarray,
     device: str = "cpu",
     threshold: float = 0.5,
+    tta: bool = False,
 ) -> np.ndarray:
     """Predict a binary {0,1} road mask for one RGB tile (``predict(tile)``).
 
     ``image`` is ``HxWx3`` (uint8 0–255 or float 0–1). Returns a ``uint8``
-    ``HxW`` mask of 0/1, the §4 contract shape P2 consumes.
+    ``HxW`` mask of 0/1, the §4 contract shape P2 consumes. ``tta`` averages over
+    the 8 D4 symmetries (retrain-free; ~8× compute).
     """
     net = _unwrap(model).to(device)
     net.eval()
     x = _to_chw_tensor(image).to(device)
-    logits = net(x)
-    prob = torch.sigmoid(logits)[0, 0].cpu().numpy()
-    return (prob >= threshold).astype(np.uint8)
+    prob = _dihedral_tta_prob(net, x) if tta else torch.sigmoid(net(x))
+    return (prob[0, 0].cpu().numpy() >= threshold).astype(np.uint8)
 
 
 @torch.no_grad()
@@ -146,12 +164,14 @@ def predict_large(
     tile_size: int = 256,
     device: str = "cpu",
     threshold: float = 0.5,
+    tta: bool = False,
 ) -> np.ndarray:
     """Predict a binary {0,1} road mask for a whole (large) RGB image.
 
     The model only sees ``tile_size`` windows, so tile the image, predict each
     tile, and stitch the results back to the original ``HxW`` — the §4 contract
     ``data/interim/{aoi}_mask.png`` that P2 consumes. Reuses A3's ``tile_array``.
+    ``tta`` applies D4 test-time augmentation per tile.
     """
     from src.pipeline.p1_segment.osm_mask import tile_array
 
@@ -159,7 +179,7 @@ def predict_large(
     h, w = image.shape[:2]
     full = np.zeros((h, w), dtype=np.uint8)
     for t in tile_array(image, tile_size):
-        pred = predict_mask(net, t.data, device=device, threshold=threshold)
+        pred = predict_mask(net, t.data, device=device, threshold=threshold, tta=tta)
         th, tw = min(tile_size, h - t.y0), min(tile_size, w - t.x0)
         full[t.y0 : t.y0 + th, t.x0 : t.x0 + tw] = pred[:th, :tw]  # drop padding
     return full
