@@ -45,6 +45,7 @@ class FineTuneConfig:
     init_checkpoint: str | Path          # the v1 checkpoint to start from
     finetune_dir: str | Path             # data/finetune (DeepGlobe-format Indian pairs)
     deepglobe_dir: str | Path | None = None   # mix in DeepGlobe to avoid forgetting
+    deepglobe_subset: int | None = None  # cap the DeepGlobe anchor (None = all)
     out_path: str | Path = "models/road_v2.pt"
     image_size: int = 512
     batch_size: int = 2
@@ -70,7 +71,10 @@ def gather_pairs(cfg: FineTuneConfig) -> tuple[list, list]:
     val = indian[:n_val]                          # validate on held-out Indian pairs
     train = indian[n_val:] * cfg.finetune_oversample
     if cfg.deepglobe_dir:
-        train += pair_deepglobe(cfg.deepglobe_dir)   # mix DeepGlobe in to retain it
+        dg = pair_deepglobe(cfg.deepglobe_dir)       # mix DeepGlobe in to retain it
+        if cfg.deepglobe_subset and len(dg) > cfg.deepglobe_subset:
+            dg = rng.sample(dg, cfg.deepglobe_subset)  # bounded anchor for a quick run
+        train += dg
     rng.shuffle(train)
     return train, val
 
@@ -120,6 +124,8 @@ def main() -> None:
     p.add_argument("--init", required=True, help="v1 checkpoint to start from")
     p.add_argument("--finetune-dir", default="data/finetune", help="DeepGlobe-format Indian pairs")
     p.add_argument("--deepglobe-dir", default=None, help="DeepGlobe train dir to mix in (recommended)")
+    p.add_argument("--deepglobe-subset", type=int, default=None, help="cap the DeepGlobe anchor (None = all)")
+    p.add_argument("--crops-per-image", type=int, default=4, help="random crops per source image / epoch")
     p.add_argument("--out", default="models/road_v2.pt")
     p.add_argument("--image-size", type=int, default=512)
     p.add_argument("--batch-size", type=int, default=2)
@@ -130,8 +136,9 @@ def main() -> None:
     args = p.parse_args()
     finetune(FineTuneConfig(
         init_checkpoint=args.init, finetune_dir=args.finetune_dir, deepglobe_dir=args.deepglobe_dir,
-        out_path=args.out, image_size=args.image_size, batch_size=args.batch_size, lr=args.lr,
-        epochs=args.epochs, finetune_oversample=args.oversample, device=args.device,
+        deepglobe_subset=args.deepglobe_subset, out_path=args.out, image_size=args.image_size,
+        batch_size=args.batch_size, lr=args.lr, epochs=args.epochs,
+        finetune_oversample=args.oversample, crops_per_image=args.crops_per_image, device=args.device,
     ))
 
 
