@@ -93,14 +93,16 @@ Reproduce with `python -m src.pipeline.p3_analysis.evaluate` (reads the committe
 
 | Metric | Value | Notes |
 |---|---|---|
-| Graph size | 489 nodes, 608 edges | after S3 simplification; 19 healed/bridged edges |
-| **Simplification (S3)** | **−22%** nodes (630 → 489) | 48 short stubs pruned + 93 degree-2 chain nodes collapsed; **all 10 components preserved** (lossless for routing) |
+| Graph size | 400 nodes, 474 edges | after S3 simplification + S4 consolidation; 19 healed/bridged edges |
+| **Simplification (S3)** | **−22%** nodes (630 → 489) | 48 short stubs pruned + 93 degree-2 chain nodes collapsed; lossless for routing |
+| **Consolidation (S4)** | **489 → 400** nodes | 51 near-duplicate junctions merged (tol 10 m); overpass-guarded (only merges along sub-tolerance edges) |
+| **Total node reduction** | **630 → 400 (−37%)** | **all 10 components preserved** throughout |
 | **Connectivity Ratio** | **+15.1%** | largest connected component grew after MST/Union-Find healing (components 29 → 10); build-time figure |
-| Top "Gatekeeper" node | betweenness **0.519** | node 45; top-5 all ≈ 0.38–0.52 |
+| Top "Gatekeeper" node | betweenness **0.488** | node 45; top-5 cluster near the centre |
 | Baseline global efficiency | 0.0013 | metric units (1/m); only ratios are interpretable |
-| **Resilience: targeted vs random** | mean RI **0.654 vs 0.898** over 40 removals | targeted (high-betweenness-first) ablation degrades the network **far faster** than random ⇒ betweenness finds genuine chokepoints ✓ |
+| **Resilience: targeted vs random** | mean RI **0.601 vs 0.731** over 40 removals | targeted (high-betweenness-first) ablation degrades the network **far faster** than random ⇒ betweenness finds genuine chokepoints ✓ |
 
-*Numbers are on the OSM stand-in (S1); the same `evaluate` runs unchanged on a real predicted-mask graph (S2). The graph is now S3-simplified — lighter geometry, identical connectivity.*
+*Numbers are on the OSM stand-in (S1); the same `evaluate` runs unchanged on a real predicted-mask graph (S2). The graph is now S3-simplified + S4-consolidated — 37% lighter, identical connectivity.*
 
 ## Target Scores
 

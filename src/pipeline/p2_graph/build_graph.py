@@ -24,7 +24,7 @@ import numpy as np
 from src.pipeline.p2_graph.config import GraphConfig
 from src.pipeline.p2_graph.graph_io import save_geojson, save_graphml
 from src.pipeline.p2_graph.healing import HealReport, heal_graph
-from src.pipeline.p2_graph.simplify import simplify_graph
+from src.pipeline.p2_graph.simplify import consolidate_graph, simplify_graph
 from src.pipeline.p2_graph.skeleton_graph import (
     mask_to_skeleton,
     prune_degenerate_edges,
@@ -98,6 +98,15 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
             "nodes_collapsed": simplify_report.nodes_collapsed,
         }
 
+    consolidate_report = None
+    if cfg.consolidate:
+        consolidate_report = consolidate_graph(graph, tol_m=cfg.consolidate_tol_m)
+        graph.graph["consolidate"] = {
+            "nodes_before": consolidate_report.nodes_before,
+            "nodes_after": consolidate_report.nodes_after,
+            "nodes_merged": consolidate_report.nodes_merged,
+        }
+
     if crs is not None:
         reproject_graph_to_wgs84(graph, crs)
 
@@ -113,6 +122,12 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
             f"| {simplify_report.stubs_pruned} stubs pruned, "
             f"{simplify_report.nodes_collapsed} degree-2 collapsed "
             f"| components preserved {simplify_report.components_before}->{simplify_report.components_after}\n"
+        )
+    if consolidate_report is not None:
+        simplify_line += (
+            f"  consolidate: nodes {consolidate_report.nodes_before}->{consolidate_report.nodes_after} "
+            f"| {consolidate_report.nodes_merged} near-duplicate junctions merged "
+            f"(tol {cfg.consolidate_tol_m:.0f} m)\n"
         )
     print(
         f"[{cfg.aoi}] graph: {graph.number_of_nodes()} nodes, "

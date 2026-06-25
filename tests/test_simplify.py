@@ -7,6 +7,8 @@ import pytest
 
 from src.pipeline.p2_graph.simplify import (
     collapse_degree2_nodes,
+    consolidate_graph,
+    consolidate_nearby_nodes,
     prune_short_stubs,
     simplify_graph,
 )
@@ -109,3 +111,47 @@ def test_simplify_drops_counts_preserves_components():
     assert report.components_after == before_components   # connectivity preserved
     assert 99 not in g.nodes                              # stub gone
     assert nx.is_connected(g)                             # still one piece
+
+
+# --------------------------------------------------------------------------- #
+# S4 — near-duplicate node consolidation
+# --------------------------------------------------------------------------- #
+def test_consolidate_merges_near_duplicate_junction():
+    g = nx.Graph()
+    _edge(g, 0, (0, 0), 1, (1, 0))          # 1 m link: same junction, split in two
+    _edge(g, 0, (0, 0), 2, (-20, 0))        # 20 m road out of node 0
+    _edge(g, 1, (1, 0), 3, (21, 0))         # 20 m road out of node 1
+    _annotate_degree_and_type(g)
+
+    merged = consolidate_nearby_nodes(g, tol_m=5.0)
+    assert merged == 1
+    assert 1 not in g.nodes                  # 1 merged into 0
+    assert set(g.neighbors(0)) == {2, 3}     # both external edges rewired to keeper
+    assert nx.is_connected(g)
+
+
+def test_consolidate_overpass_guard():
+    """Nodes metres apart but with NO connecting edge (an overpass) must not merge."""
+    g = nx.Graph()
+    _edge(g, 0, (5.0, 5.0), 1, (5.5, 5.0))   # road A's two coincident nodes (0.5 m link)
+    _edge(g, 2, (5.0, 5.3), 3, (5.5, 5.3))   # road B crossing over, 0.3 m away — no link
+    _annotate_degree_and_type(g)
+
+    merged = consolidate_nearby_nodes(g, tol_m=2.0)
+    assert merged == 2                        # each road's own pair merges...
+    assert 0 in g.nodes and 2 in g.nodes      # ...but the two roads do NOT merge
+    assert not g.has_edge(0, 2)               # proximity alone never bridges grades
+
+
+def test_consolidate_graph_preserves_components():
+    g = nx.Graph()
+    _edge(g, 0, (0, 0), 1, (1, 0))            # near-dup pair (cluster A)
+    _edge(g, 1, (1, 0), 2, (30, 0))           # real road onward
+    _edge(g, 5, (0, 99), 6, (1, 99))          # a separate component, also a near-dup pair
+    _annotate_degree_and_type(g)
+
+    before = nx.number_connected_components(g)
+    report = consolidate_graph(g, tol_m=5.0)
+    assert report.nodes_after < report.nodes_before
+    assert report.nodes_merged >= 1
+    assert report.components_after == before   # never splits (or merges) components
