@@ -148,6 +148,7 @@ def evaluate(
             "bridged_pct": round(100.0 * n_bridged / max(1, graph.number_of_edges()), 2),
         },
         "simplify": graph.graph.get("simplify"),
+        "consolidate": graph.graph.get("consolidate"),
         "healing": healing,
         "criticality": {
             "top_nodes": top_nodes,
@@ -178,6 +179,10 @@ def _print_report(report: dict, json_path: Path, plot_path: Path) -> None:
         simp = (f"Simplify:     nodes {s['nodes_before']} -> {s['nodes_after']} "
                 f"(-{s['node_reduction_pct']}%) | {s['stubs_pruned']} stubs, "
                 f"{s['nodes_collapsed']} degree-2 collapsed (components preserved)\n")
+    if report.get("consolidate"):
+        cd = report["consolidate"]
+        simp += (f"Consolidate:  nodes {cd['nodes_before']} -> {cd['nodes_after']} "
+                 f"| {cd['nodes_merged']} near-duplicate junctions merged\n")
     print(
         f"\n=== Graph evaluation — {report['aoi']} ===\n"
         f"Graph:        {g['nodes']} nodes, {g['edges']} edges "

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from src.pipeline.p2_graph.healing import UnionFind
 from src.pipeline.p2_graph.skeleton_graph import _annotate_degree_and_type
 
 if TYPE_CHECKING:
@@ -136,4 +137,93 @@ def simplify_graph(graph: "nx.Graph", min_stub_len_m: float = 15.0) -> SimplifyR
         edges_before=e0, edges_after=graph.number_of_edges(),
         components_before=c0, components_after=c1,
         stubs_pruned=pruned, nodes_collapsed=collapsed,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# S4 — near-duplicate node consolidation
+# --------------------------------------------------------------------------- #
+def consolidate_nearby_nodes(graph: "nx.Graph", tol_m: float) -> int:
+    """Merge clusters of near-coincident junction nodes into one. Returns count merged.
+
+    A single physical intersection is often split by skeletonisation/healing into
+    several nodes a few metres apart, joined by **sub-tolerance edges**. We union
+    the endpoints of every edge shorter than ``tol_m`` into clusters and collapse
+    each cluster to its centroid, rewiring outside edges to the kept node.
+
+    **Overpass guard (Boeing 2025):** because we only merge along an *existing*
+    short edge, two roads that merely *cross* at different grades — which share no
+    edge between the levels — are never merged, even though their nodes may be
+    metres apart in projection. Proximity alone is not enough; a road link is
+    required.
+    """
+    uf = UnionFind(list(graph.nodes))
+    for u, v, data in graph.edges(data=True):
+        if u != v and float(data.get("length_m", np.inf)) < tol_m:
+            uf.union(u, v)
+
+    clusters: dict[int, list[int]] = {}
+    for n in graph.nodes:
+        clusters.setdefault(uf.find(n), []).append(n)
+
+    merged = 0
+    for members in clusters.values():
+        if len(members) < 2:
+            continue
+        keeper = min(members)
+        member_set = set(members)
+        cx = float(np.mean([graph.nodes[n]["x"] for n in members]))
+        cy = float(np.mean([graph.nodes[n]["y"] for n in members]))
+
+        for n in members:
+            if n == keeper:
+                continue
+            for m in list(graph.neighbors(n)):
+                if m in member_set:
+                    continue  # edge internal to the cluster → drop (would self-loop)
+                data = dict(graph.edges[n, m])
+                # keep the shorter of any parallel connection to the same outside node
+                if (not graph.has_edge(keeper, m)
+                        or data.get("length_m", np.inf)
+                        < graph.edges[keeper, m].get("length_m", np.inf)):
+                    graph.add_edge(keeper, m, **data)
+            graph.remove_node(n)
+
+        graph.nodes[keeper]["x"], graph.nodes[keeper]["y"] = cx, cy
+        merged += len(members) - 1
+    return merged
+
+
+@dataclasses.dataclass
+class ConsolidateReport:
+    """Before/after sizes for a consolidation pass."""
+
+    nodes_before: int
+    nodes_after: int
+    components_before: int
+    components_after: int
+    nodes_merged: int
+
+
+def consolidate_graph(graph: "nx.Graph", tol_m: float = 10.0) -> ConsolidateReport:
+    """Consolidate near-duplicate junctions, then tidy any new degree-2 nodes.
+
+    Preserves connectivity (merging along edges only contracts, never splits).
+    """
+    import networkx as nx
+
+    n0 = graph.number_of_nodes()
+    c0 = nx.number_connected_components(graph)
+
+    merged = consolidate_nearby_nodes(graph, tol_m)
+    collapse_degree2_nodes(graph)  # consolidation can expose new pass-through nodes
+    _annotate_degree_and_type(graph)
+
+    c1 = nx.number_connected_components(graph)
+    if c1 > c0:  # safety net
+        raise AssertionError(f"consolidation split the graph: {c0} -> {c1} components")
+
+    return ConsolidateReport(
+        nodes_before=n0, nodes_after=graph.number_of_nodes(),
+        components_before=c0, components_after=c1, nodes_merged=merged,
     )
