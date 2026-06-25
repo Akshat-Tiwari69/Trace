@@ -132,3 +132,69 @@ Use **Kaggle** and **Google Colab** for: (a) any 512²/1024² full-resolution ru
 ### (7) Phases II–IV are CPU-bound — confirmed
 
 Skeletonization (scikit-image), graph build (sknw/NetworkX), MST/Union-Find healing, betweenness centrality, node ablation, global-efficiency computation, and the Streamlit/Folium dashboard all run on CPU and are **not GPU-bottlenecked.** Betweenness centrality on large graphs is the heaviest CPU step (time- and resource-intensive for city-scale networks); we will mitigate with NetworkX's approximate (k-sample) betweenness if needed.
+
+---
+
+## v1 → v2 Improvement Roadmap (techniques & sources)
+
+> The **task rows** for everything below live in `Tracker.md` §6 (Akshat A7–A15, Shaivi S3–S11, Saanvi F3–F8, shared E2–E5). This section is the *researched technique detail + citations* behind them — kept here so the Tracker stays a task board, not a literature review. All proposals respect the §2 locked constraints (PyTorch, fine-tune pretrained only, global-efficiency only, Streamlit+Folium, CPU graph/dashboard, free/Colab GPU).
+
+### Current state & biggest opportunities
+
+v1 is a fully-closed end-to-end pipeline (A1–A5 ✅, E1 ✅): SegFormer MiT-B3 + SCSE U-Net (IoU 0.670 / Occlusion-Recall 0.793) → skimage/sknw + MST/Union-Find healing → betweenness + global-efficiency resilience → Streamlit+Folium dashboard. The model has **genuinely plateaued on DeepGlobe** — it sits right around the original D-LinkNet DeepGlobe winner's **0.6466 validation IoU** (Zhou, Zhang & Wu, CVPR 2018 Workshops). The biggest gains now come from a topology-aware loss (clDice), TTA/ensembling, and domain fine-tuning on Indian imagery — **not** from more DeepGlobe epochs.
+
+Where the new tasks aim:
+1. **Segmentation plateaued at ~0.670 IoU**, and pixel IoU is the *wrong* primary metric for a connectivity project — what matters is whether roads stay topologically connected. Pivot toward **connectivity/topology metrics** (clDice, APLS, relaxed/buffered IoU). Topology-aware SOTA is higher: TopoRF-Net (Fu et al., *Sensors* 2025, DOI:10.3390/sensors25247428) reports IoU 69.76% / F1 82.18% on DeepGlobe-Road — real headroom.
+2. **Inference-time gains are unbanked** — TTA/ensembling are nearly-free accuracy not wired into `predict.py`.
+3. **Occlusion robustness — the whole thesis — is under-tested** (one threshold + CoarseDropout, no systematic occlusion benchmark/ablation).
+4. **Domain gap:** DeepGlobe (Indonesia/Thailand/India @0.5m) → Indian basemap tiles. A6 is the right instinct; expand with self-training/pseudo-labeling + held-out Indian eval.
+5. **Graph quality un-scored** — no APLS/topology validation vs OSM, no degree-2 simplification or stub pruning.
+6. **Resilience is shallow** — plain betweenness + targeted/random only; no articulation points/bridges, demand weighting, or flood/elevation scenarios.
+7. **Dashboard** lacks large-graph perf hardening, multi-node (flood) failure, export/report.
+8. **No experiment tracking/config files** — results live in Tracker prose, which won't scale across many experiments.
+
+### §A — Segmentation (Akshat: A7–A15)
+- **Topology loss — soft-clDice.** Official PyTorch `jocpae/clDice` (Shit & Paetzold et al., CVPR 2021, arXiv:2003.07311); pip `monai.losses.SoftDiceclDiceLoss` (iter_=3, alpha=0.5). Combine `alpha*dice + (1-alpha)*soft_cldice`, α≈0.3–0.5 (paper's road experiments used α=0.4). On the Roads dataset, soft-clDice (α=0.4) achieved **β1 (Betti) Error 0.755 and Opt-Junction F1 0.916 vs soft-Dice's 1.408 and 0.766** — large topology gains. On crack segmentation, clDice added **+2.8–4.9pp Dice / +1.7–3.9pp clDice** over BCE (MDPI 2673-7590/5/4/177). *Caveat:* `soft_skel` loop is memory-hungry → smaller batch/patch on 16 GB GPUs.
+- **TTA — ttach (qubvel).** `SegmentationTTAWrapper(model, aliases.d4_transform())` = 8 dihedral augs (orientation-free aerial); multi-scale via `tta.Scale`. A U-Net tutorial measured **+1.33% F1 / +1.89% IoU** from TTA with no retraining (Idiot Developer). Expect ~+0.5–2 IoU.
+- **Occlusion augmentation — Albumentations.** `CoarseDropout` (Cutout/RandomErasing evolution), `GridDropout`/GridMask, `XYMasking`, `RandomShadow`, brightness/contrast/hue, elastic/grid distortion — Albumentations calls dropout-style transforms "among the highest-impact" because they "simulate real-world partial occlusion" (the tree/building/shadow mode this project targets).
+- **Architectures (smp).** Current MiT-B3+Unet is solid. Options: MiT-B4/B5, or ensemble with a complementary CNN backbone (SE-ResNeXt50, EfficientNet-b4/b5, ResNet101) under Unet/UnetPlusPlus/DeepLabV3+. **Note:** MiT encoders don't support Linknet/UnetPlusPlus in smp; CNN encoders do. D-LinkNet (2018 winner, dilated centre) is the canonical road arch.
+- **Connectivity-oriented refs:** CoANet (strip conv + connectivity attention; *non-commercial* license), CAFormer, D3FNet, TopoRF-Net (IoU 69.76 DeepGlobe). They show topology metrics (APLS/clDice) move even when pixel IoU barely does.
+- **Datasets past DeepGlobe:** SpaceNet Roads (0.3m, ~8000 km centerlines, 4 cities), Massachusetts Roads (1m, 1108 train), RoadTracer. Domain adaptation: **RoadDA** (arXiv:2108.12611, IEEE TGRS) stagewise GAN + adversarial self-training → **74.92% IoU / 85.81% F1, +15.52pp IoU over ADVENT**; **Topology-aware UDA** (arXiv:2309.15625, ISPRS J.) adds a skeleton head + connectivity pseudo-label refinement → **+7.5pp IoU** over the source model, beating competitors on SpaceNet→DeepGlobe by ≥6.6/6.7/9.8 in IoU/F1/APLS. A Sentinel-2+OSM dataset covers 7 Indian regions (Data in Brief 2025) but **10m only resolves major roads** → prefer sub-meter basemap tiles for narrow roads (why A6 uses Esri, not Sentinel-2), or teacher-student super-resolution (arXiv:2310.11622).
+- **Foundation models (optional, heavier):** Road-SAM (frequency adapters), SAM-Road (APLS SOTA on SpaceNet/City-Scale).
+- **Post-processing:** morphological open/close, connected-component area filtering, Otsu/threshold tuning, skeleton pruning, optional CRF.
+
+### §B — Graph build + healing (Shaivi: S3–S7)
+- **Skeletonization:** skimage `skeletonize` (Zhang/Lee) vs `medial_axis`; tune sknw extraction; simplify polylines with Douglas–Peucker (shapely `simplify`).
+- **Graph cleaning (OSMnx-style):** `consolidate_intersections(tolerance, rebuild_graph=True)` merges node clusters into true intersections; `simplify_graph` removes interstitial degree-2 nodes keeping geometry; prune short stubs; snap near-duplicate nodes. Boeing 2025 ("Topological Graph Simplification…," *Transactions in GIS*); `rebuild_graph=True` avoids merging spatially-close-but-topologically-remote nodes (overpasses).
+- **Smarter healing:** tune Euclidean+angular gap scoring; Bezier/spline interpolation for natural curves; junction/overpass handling.
+- **Graph scoring:** **APLS** (Van Etten/CosmiQ SpaceNet metric; open-source `apls`) + TOPO; connectivity ratio; topology accuracy vs OSM.
+
+### §C — Criticality + resilience (Shaivi: S8–S11)
+- **Beyond betweenness:** edge betweenness, current-flow/random-walk betweenness, **approximate k-sample** betweenness (`betweenness_centrality(k=...)`, Brandes/Riondato) for speed, **articulation points & bridges** (`nx.articulation_points`, `nx.bridges`), k-core, **percolation_centrality** (demand/state-weighted), population/demand-weighted centrality.
+- **Richer resilience:** targeted-vs-random curves (have these; add degree/weighted-degree per the Brazilian Federal Road Network study, arXiv:2412.15865), percolation analysis, multi-failure scenarios, recovery sequencing, **flood/elevation-based realistic failure** (remove low-elevation nodes), compare global-efficiency degradation across scenarios.
+- **Performance:** k-sample betweenness, caching, sparse representations.
+
+### §D — Dashboard (Saanvi: F3–F8)
+- **Performance:** `st.cache_data` for artifact loading, `st.cache_resource` for the graph object; simplify geometry before render; FastMarkerCluster for many markers; limit `st_folium` return keys.
+- **Interactivity:** draw-a-flood-polygon (Folium Draw plugin) → disable enclosed nodes → multi-node failure; before/after comparison; layer toggles; choropleth criticality heatmap.
+- **Visualization:** colorblind-safe ramp (Viridis already good); legend/tooltips; side charts; export GeoJSON/PDF report.
+- **Polish:** loading states, error handling, sample-data mode (present).
+
+### §E — Evaluation & rigor (shared: E2–E5)
+- **Metrics:** IoU, Dice, Occlusion-Recall, relaxed/buffered IoU (CCQ correctness/completeness/quality), APLS, connectivity ratio; held-out test set; vs published baselines (D-LinkNet 0.6466 DeepGlobe validation IoU).
+- **Ablations:** with/without clDice, with/without occlusion aug, with/without healing, targeted vs random.
+- **Tracking:** Weights & Biases free tier or simple CSV logging; YAML config files instead of hardcoded params; reproducibility (fixed seeds).
+
+### Recommended order
+1. **This week (free, high ROI):** A7 (TTA), A8 (occlusion aug), A9 (clDice weight), S3/S4 (graph cleaning), F3 (dashboard caching) — no new data, measurable gains.
+2. **Next:** finish A6, then A11→A12 (datasets + self-training) for the domain-gap win; S7/E2 to start scoring on APLS/connectivity (the metrics that actually matter here).
+3. **Then depth:** S8–S11 resilience + F4–F7 dashboard make the demo compelling; A13/A14/A15 are optional accuracy pushes.
+4. **Throughout:** stand up E5 (configs + tracking) *before* running many experiments; use E3/E4 ablations to prove each change helps.
+
+**Thresholds that change the plan:**
+- If clDice/occlusion ablations (E3) show no connectivity gain, drop them and pour effort into datasets (A11/A12).
+- If TTA (A7) gives < 0.5 IoU, keep it only if its runtime cost is acceptable.
+- If the A6 domain fine-tune underperforms v1 on an Indian val set, **don't release v2** — invest in self-training (A12) instead.
+- If a larger encoder (A14) or connectivity decoder (A15) doesn't beat MiT-B3 on *topology* metrics (not just IoU), don't adopt it.
+
+**Caveats:** quantitative gains cited above (clDice Betti/Opt-J F1, TTA +1.89% IoU, RoadDA +15.5pp, topology-aware UDA +7.5pp) come from *other datasets/papers* — indicative ranges to validate via E3/E4, not guarantees. clDice's soft-skeleton is memory-hungry (reduce batch/patch on free 16 GB T4/P100). CoANet code is non-commercial research license; respect dataset licenses (OSM ODbL, SpaceNet, OpenSatMap non-commercial) per §2.
