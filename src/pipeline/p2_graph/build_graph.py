@@ -24,6 +24,7 @@ import numpy as np
 from src.pipeline.p2_graph.config import GraphConfig
 from src.pipeline.p2_graph.graph_io import save_geojson, save_graphml
 from src.pipeline.p2_graph.healing import HealReport, heal_graph
+from src.pipeline.p2_graph.simplify import simplify_graph
 from src.pipeline.p2_graph.skeleton_graph import (
     mask_to_skeleton,
     prune_degenerate_edges,
@@ -77,18 +78,49 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
         angle_penalty_factor=cfg.angle_penalty_factor,
     )
 
+    # Stash the authoritative healing stats (measured now, pre-simplification) so
+    # the evaluator reports the true connectivity ratio rather than re-deriving it.
+    graph.graph["heal"] = {
+        "connectivity_ratio_pct": round(report.connectivity_ratio, 2),
+        "components_before": report.components_before,
+        "components_after": report.components_after,
+        "bridges_added": report.bridges_added,
+    }
+
+    simplify_report = None
+    if cfg.simplify:
+        simplify_report = simplify_graph(graph, min_stub_len_m=cfg.min_stub_len_m)
+        graph.graph["simplify"] = {
+            "nodes_before": simplify_report.nodes_before,
+            "nodes_after": simplify_report.nodes_after,
+            "node_reduction_pct": round(simplify_report.node_reduction_pct, 1),
+            "stubs_pruned": simplify_report.stubs_pruned,
+            "nodes_collapsed": simplify_report.nodes_collapsed,
+        }
+
     if crs is not None:
         reproject_graph_to_wgs84(graph, crs)
 
     save_graphml(graph, cfg.graphml_path)
     save_geojson(graph, cfg.geojson_path)
 
+    simplify_line = ""
+    if simplify_report is not None:
+        simplify_line = (
+            f"  simplify: nodes {simplify_report.nodes_before}->{simplify_report.nodes_after} "
+            f"(-{simplify_report.node_reduction_pct:.0f}%), edges "
+            f"{simplify_report.edges_before}->{simplify_report.edges_after} "
+            f"| {simplify_report.stubs_pruned} stubs pruned, "
+            f"{simplify_report.nodes_collapsed} degree-2 collapsed "
+            f"| components preserved {simplify_report.components_before}->{simplify_report.components_after}\n"
+        )
     print(
         f"[{cfg.aoi}] graph: {graph.number_of_nodes()} nodes, "
         f"{graph.number_of_edges()} edges | "
         f"components {report.components_before}->{report.components_after} | "
         f"+{report.bridges_added} bridges | "
         f"connectivity ratio +{report.connectivity_ratio:.1f}%\n"
+        f"{simplify_line}"
         f"  -> {cfg.graphml_path}\n"
         f"  -> {cfg.geojson_path}"
     )

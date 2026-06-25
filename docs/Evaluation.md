@@ -93,13 +93,14 @@ Reproduce with `python -m src.pipeline.p3_analysis.evaluate` (reads the committe
 
 | Metric | Value | Notes |
 |---|---|---|
-| Graph size | 630 nodes, 749 edges | 19 healed/bridged edges (2.5%) |
-| **Connectivity Ratio** | **+15.1%** | largest connected component 524 → 603 nodes after MST/Union-Find healing (components 29 → 10) |
-| Top "Gatekeeper" node | betweenness **0.511** | node 45; top-5 all ≈ 0.44–0.51 |
-| Baseline global efficiency | 0.0012 | metric units (1/m); only ratios are interpretable |
-| **Resilience: targeted vs random** | mean RI **0.674 vs 0.860** over 40 removals | targeted (high-betweenness-first) ablation degrades the network **far faster** than random ⇒ betweenness finds genuine chokepoints ✓ |
+| Graph size | 489 nodes, 608 edges | after S3 simplification; 19 healed/bridged edges |
+| **Simplification (S3)** | **−22%** nodes (630 → 489) | 48 short stubs pruned + 93 degree-2 chain nodes collapsed; **all 10 components preserved** (lossless for routing) |
+| **Connectivity Ratio** | **+15.1%** | largest connected component grew after MST/Union-Find healing (components 29 → 10); build-time figure |
+| Top "Gatekeeper" node | betweenness **0.519** | node 45; top-5 all ≈ 0.38–0.52 |
+| Baseline global efficiency | 0.0013 | metric units (1/m); only ratios are interpretable |
+| **Resilience: targeted vs random** | mean RI **0.654 vs 0.898** over 40 removals | targeted (high-betweenness-first) ablation degrades the network **far faster** than random ⇒ betweenness finds genuine chokepoints ✓ |
 
-*Numbers are on the OSM stand-in (S1); the same `evaluate` runs unchanged on a real predicted-mask graph (S2) once a tile is available.*
+*Numbers are on the OSM stand-in (S1); the same `evaluate` runs unchanged on a real predicted-mask graph (S2). The graph is now S3-simplified — lighter geometry, identical connectivity.*
 
 ## Target Scores
 
