@@ -65,6 +65,15 @@ def _healing_metrics(graph) -> dict:
 def _resilience_metrics(graph, bc: dict, curve_steps: int) -> tuple[dict, list, list]:
     """Targeted vs. random ablation; returns (summary, targeted_curve, random_curve)."""
     steps = min(curve_steps, max(0, graph.number_of_nodes() - 1))
+    base = round(global_efficiency(graph), 6)
+    if steps == 0:  # 0–1 nodes: nothing to ablate — return a zeroed summary
+        zero = {
+            "baseline_global_efficiency": base, "ablation_steps": 0,
+            "targeted_ri_end": 0.0, "random_ri_end": 0.0, "targeted_minus_random_gap": 0.0,
+            "targeted_mean_ri": 0.0, "random_mean_ri": 0.0, "targeted_degrades_faster": True,
+        }
+        return zero, [], []
+
     targeted = ablation_curve(graph, "targeted", betweenness=bc, steps=steps)
     random_curve = ablation_curve(graph, "random", steps=steps)
 
@@ -72,7 +81,7 @@ def _resilience_metrics(graph, bc: dict, curve_steps: int) -> tuple[dict, list, 
         return sum(p.resilience_index for p in curve) / len(curve)
 
     summary = {
-        "baseline_global_efficiency": round(global_efficiency(graph), 6),
+        "baseline_global_efficiency": base,
         "ablation_steps": steps,
         "targeted_ri_end": round(targeted[-1].resilience_index, 4),
         "random_ri_end": round(random_curve[-1].resilience_index, 4),

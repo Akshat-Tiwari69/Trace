@@ -141,5 +141,6 @@ def load_geojson_graph(path: Path) -> "nx.Graph":
                 length_m=float(props.get("length_m", 0.0)),
                 is_bridged=bool(props.get("is_bridged", False)),
                 edge_betweenness=float(props.get("edge_betweenness", 0.0)),
+                geometry=[list(c) for c in feat["geometry"]["coordinates"]],
             )
     return graph
