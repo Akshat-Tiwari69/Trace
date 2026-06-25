@@ -1,0 +1,10 @@
+{
+  "apls": 0.4463,
+  "apls_gt_to_prop": 0.335,
+  "apls_prop_to_gt": 0.6686,
+  "n_samples": 600,
+  "snap_tol_m": 15.0,
+  "aoi": "panaji_demo",
+  "graph_nodes": 630,
+  "osm_truth_nodes": 341
+}

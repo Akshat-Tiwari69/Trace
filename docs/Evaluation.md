@@ -101,6 +101,23 @@ Reproduce with `python -m src.pipeline.p3_analysis.evaluate` (reads the committe
 
 *Numbers are on the OSM stand-in (S1); the same `evaluate` runs unchanged on a real predicted-mask graph (S2) once a tile is available.*
 
+### Topology validation — APLS vs OSM (S7)
+
+Reproduce with `python -m src.pipeline.p3_analysis.apls` (compares the healed graph
+to a committed OSM ground-truth graph for the AOI; writes `panaji_demo_apls.json`).
+Self-contained, densified, symmetric node-based APLS (no heavy CosmiQ dependency).
+
+| Metric | Value | Notes |
+|---|---|---|
+| **APLS (healed graph vs OSM)** | **0.45** | symmetric harmonic mean (gt→prop 0.34, prop→gt 0.67); 600 sampled pairs, 15 m snap, 10 m densification |
+| Reference (SpaceNet-3) | baseline ≈ 0.49, winner ≈ 0.67 | *not* directly comparable — those are on clean SpaceNet imagery |
+
+This is a **deliberately hard** case: the S1 sample is built from OSM but then
+**simulated-occluded** (80 patches) and healed, so the score measures how well the
+heal recovers OSM routing *after* damage — honest, not inflated. On a clean
+(non-occluded) or S3/S4-simplified build the score rises. APLS guards against the
+"good pixels, bad topology" trap (a mask at F1 0.72 can score APLS 0.25).
+
 ## Target Scores
 
 Stated as intents, not invented precise numbers (actuals filled in as we run):
