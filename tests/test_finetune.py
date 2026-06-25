@@ -36,6 +36,19 @@ def test_gather_pairs_oversamples_and_splits(tmp_path):
     assert set(p[0] for p in val).isdisjoint(p[0] for p in train)  # no leakage
 
 
+def test_deepglobe_subset_caps_the_anchor(tmp_path):
+    ft, dg = tmp_path / "ft", tmp_path / "dg"
+    for i in range(4):
+        _write_pair(ft, f"city_{i}")
+    for i in range(20):
+        _write_pair(dg, f"dg_{i}")
+    cfg = FineTuneConfig(init_checkpoint="x", finetune_dir=ft, deepglobe_dir=dg,
+                         deepglobe_subset=5, finetune_oversample=1, val_fraction=0.25)
+    train, _ = gather_pairs(cfg)
+    # train = (4 - 1 val) indian ×1 + capped 5 DeepGlobe
+    assert len(train) == 3 + 5
+
+
 def test_finetune_runs_and_saves_a_better_metaed_checkpoint(tmp_path):
     ft = tmp_path / "finetune"
     for i in range(5):
