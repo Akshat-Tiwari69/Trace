@@ -31,7 +31,7 @@ from typing import Callable
 import numpy as np
 
 from src.pipeline.p1_segment.build_dataset import build_aoi_masks
-from src.pipeline.p1_segment.osm_mask import MaskConfig, save_binary_png, tile_array
+from src.pipeline.p1_segment.osm_mask import MaskConfig, tile_array
 
 ESRI_TILE = ("https://server.arcgisonline.com/ArcGIS/rest/services/"
              "World_Imagery/MapServer/tile/{z}/{y}/{x}")
@@ -143,7 +143,8 @@ def build_pairs(aoi: str, bbox: tuple[float, float, float, float], out_dir: str 
             continue
         stem = f"{aoi}_r{mt.row}_c{mt.col}"
         Image.fromarray(st.data).save(out / f"{stem}_sat.jpg", quality=92)
-        save_binary_png(mt.data, out / f"{stem}_mask.png")
+        # DeepGlobe convention is 0/255 (readers threshold at >127), not {0,1}.
+        Image.fromarray((mt.data * 255).astype(np.uint8), mode="L").save(out / f"{stem}_mask.png")
         kept += 1
     print(f"[{aoi}] kept {kept}/{len(mask_tiles)} road-bearing pairs -> {out}")
     return kept
