@@ -80,6 +80,7 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
                     "type": data.get("type", "intersection"),
                     "betweenness": float(data.get("betweenness", 0.0)),
                     "is_critical": bool(data.get("is_critical", False)),
+                    "is_articulation": bool(data.get("is_articulation", False)),
                 },
             }
         )
@@ -99,6 +100,7 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
                     "v": int(v),
                     "length_m": round(float(data.get("length_m", 0.0)), 3),
                     "is_bridged": bool(data.get("is_bridged", False)),
+                    "is_bridge": bool(data.get("is_bridge", False)),
                     "edge_betweenness": float(data.get("edge_betweenness", 0.0)),
                 },
             }
@@ -145,6 +147,7 @@ def load_geojson_graph(path: Path) -> "nx.Graph":
                 type=props.get("type", "intersection"),
                 betweenness=float(props.get("betweenness", 0.0)),
                 is_critical=bool(props.get("is_critical", False)),
+                is_articulation=bool(props.get("is_articulation", False)),
             )
     for feat in fc["features"]:
         props = feat["properties"]
@@ -154,6 +157,7 @@ def load_geojson_graph(path: Path) -> "nx.Graph":
                 int(props["v"]),
                 length_m=float(props.get("length_m", 0.0)),
                 is_bridged=bool(props.get("is_bridged", False)),
+                is_bridge=bool(props.get("is_bridge", False)),
                 edge_betweenness=float(props.get("edge_betweenness", 0.0)),
             )
     return graph
