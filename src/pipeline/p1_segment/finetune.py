@@ -60,6 +60,7 @@ class FineTuneConfig:
     epochs: int = 12
     finetune_oversample: int = 3
     crops_per_image: int = 1
+    occlusion: bool | str = True         # "heavy" = stronger occlusion aug (A8)
     val_fraction: float = 0.15
     deepglobe_iou_tolerance: float = 0.005   # max allowed DeepGlobe drop vs v1
     device: str = "cpu"
@@ -134,7 +135,7 @@ def finetune(cfg: FineTuneConfig) -> dict:
           f"encoder {'FROZEN' if frozen else f'lr×{cfg.encoder_lr_scale}'} | "
           f"train {len(train_pairs)} (anchor incl.) | val dg {len(deepglobe_val)}/ind {len(indian_val)}")
 
-    train_ds = RoadTileDataset(train_pairs, build_train_transform(cfg.image_size, occlusion=True),
+    train_ds = RoadTileDataset(train_pairs, build_train_transform(cfg.image_size, occlusion=cfg.occlusion),
                                crops_per_image=cfg.crops_per_image)
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True, num_workers=0)
     loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=0.1)
@@ -194,15 +195,19 @@ def main() -> None:
     p.add_argument("--epochs", type=int, default=12)
     p.add_argument("--oversample", type=int, default=3)
     p.add_argument("--crops-per-image", type=int, default=1)
+    p.add_argument("--occlusion", choices=["standard", "heavy", "none"], default="standard",
+                   help="occlusion augmentation strength (A8: 'heavy')")
     p.add_argument("--deepglobe-tol", type=float, default=0.005, help="max allowed DeepGlobe IoU drop vs v1")
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
+    occlusion = {"standard": True, "heavy": "heavy", "none": False}[args.occlusion]
     finetune(FineTuneConfig(
         init_checkpoint=args.init, finetune_dir=args.finetune_dir, deepglobe_dir=args.deepglobe_dir,
         deepglobe_subset=args.deepglobe_subset, deepglobe_val=args.deepglobe_val, out_path=args.out,
         image_size=args.image_size, batch_size=args.batch_size, lr=args.lr,
         encoder_lr_scale=args.encoder_lr_scale, epochs=args.epochs, finetune_oversample=args.oversample,
-        crops_per_image=args.crops_per_image, deepglobe_iou_tolerance=args.deepglobe_tol, device=args.device,
+        crops_per_image=args.crops_per_image, occlusion=occlusion,
+        deepglobe_iou_tolerance=args.deepglobe_tol, device=args.device,
     ))
 
 
