@@ -70,11 +70,40 @@ def annotate_criticality(
     return bc
 
 
+def annotate_cut_structure(graph: "nx.Graph") -> dict:
+    """Flag **articulation points** (nodes) and **bridge edges** — a second,
+    structural criticality layer alongside betweenness (``docs/Tracker.md`` S8).
+
+    An *articulation point* is a node whose removal disconnects the network; a
+    *bridge* is an edge whose removal does. These are the network's hard single
+    points of failure — distinct from "high traffic share" (betweenness): a node
+    can carry lots of traffic yet not be a cut node, and vice-versa. Sets
+    ``is_articulation`` on every node and ``is_bridge`` on every edge (in place),
+    and returns the counts.
+
+    Note: ``is_bridge`` (graph-theoretic cut edge) is **not** ``is_bridged`` (an
+    edge the healing step inferred) — different concepts, deliberately named
+    distinctly. Works on disconnected graphs (NetworkX handles each component).
+    """
+    import networkx as nx
+
+    articulation = set(nx.articulation_points(graph))
+    bridges = {frozenset(e) for e in nx.bridges(graph)}
+
+    for node_id in graph.nodes:
+        graph.nodes[node_id]["is_articulation"] = node_id in articulation
+    for u, v in graph.edges:
+        graph.edges[u, v]["is_bridge"] = frozenset((u, v)) in bridges
+
+    return {"n_articulation": len(articulation), "n_bridges": len(bridges)}
+
+
 def rank_table(graph: "nx.Graph", bc: dict[int, float]) -> list[dict]:
     """Build the ranked per-node criticality rows for ``{aoi}_criticality.csv``.
 
     Columns match the §4 contract: ``node_id, betweenness, rank, is_critical``
-    (plus ``x, y`` so the dashboard can place the ranked list on the map).
+    (plus ``is_articulation`` from :func:`annotate_cut_structure`, and ``x, y`` so
+    the dashboard can place the ranked list on the map).
     """
     ranked = sorted(bc, key=lambda n: bc[n], reverse=True)
     rows = []
@@ -86,6 +115,7 @@ def rank_table(graph: "nx.Graph", bc: dict[int, float]) -> list[dict]:
                 "betweenness": round(float(bc[node_id]), 6),
                 "rank": rank,
                 "is_critical": bool(data.get("is_critical", False)),
+                "is_articulation": bool(data.get("is_articulation", False)),
                 "x": round(float(data["x"]), 7),
                 "y": round(float(data["y"]), 7),
             }

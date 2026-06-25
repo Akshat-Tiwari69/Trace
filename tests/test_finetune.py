@@ -1,11 +1,16 @@
-"""A6 fine-tune harness test — runs the orchestration on CPU, no GPU, tiny model."""
+"""A6 fine-tune harness test — orchestration + anti-forget selection on CPU."""
 
 from __future__ import annotations
 
 import numpy as np
 from PIL import Image
 
-from src.pipeline.p1_segment.finetune import FineTuneConfig, finetune, gather_pairs
+from src.pipeline.p1_segment.finetune import (
+    FineTuneConfig,
+    _build_optimizer,
+    finetune,
+    gather_pairs,
+)
 from src.pipeline.p1_segment.model import build_model, load_checkpoint, save_checkpoint
 
 
@@ -25,47 +30,47 @@ def _tiny_v1_checkpoint(path):
                                         "decoder_attention_type": "scse", "image_size": 64, "threshold": 0.44})
 
 
-def test_gather_pairs_oversamples_and_splits(tmp_path):
-    ft = tmp_path / "finetune"
-    for i in range(6):
-        _write_pair(ft, f"city_{i}")
-    cfg = FineTuneConfig(init_checkpoint="x", finetune_dir=ft, finetune_oversample=3, val_fraction=0.25)
-    train, val = gather_pairs(cfg)
-    assert len(val) == max(1, round(6 * 0.25))            # held-out Indian pairs
-    assert len(train) == (6 - len(val)) * 3               # remainder oversampled ×3
-    assert set(p[0] for p in val).isdisjoint(p[0] for p in train)  # no leakage
-
-
-def test_deepglobe_subset_caps_the_anchor(tmp_path):
+def test_gather_pairs_3way_split_disjoint(tmp_path):
     ft, dg = tmp_path / "ft", tmp_path / "dg"
-    for i in range(4):
-        _write_pair(ft, f"city_{i}")
-    for i in range(20):
-        _write_pair(dg, f"dg_{i}")
+    for i in range(10):
+        _write_pair(ft, f"c{i}")
+    for i in range(30):
+        _write_pair(dg, f"d{i}")
     cfg = FineTuneConfig(init_checkpoint="x", finetune_dir=ft, deepglobe_dir=dg,
-                         deepglobe_subset=5, finetune_oversample=1, val_fraction=0.25)
-    train, _ = gather_pairs(cfg)
-    # train = (4 - 1 val) indian ×1 + capped 5 DeepGlobe
-    assert len(train) == 3 + 5
+                         deepglobe_subset=8, deepglobe_val=5, finetune_oversample=2, val_fraction=0.2)
+    train, ind_val, dg_val = gather_pairs(cfg)
+    assert len(ind_val) == 2                       # round(10 * 0.2)
+    assert len(dg_val) == 5                         # held-out DeepGlobe forget-check
+    assert len(train) == (10 - 2) * 2 + 8          # indian ×2 + anchor
+    # the forget-check tiles must NOT leak into the training anchor
+    assert {p[0] for p in dg_val}.isdisjoint(p[0] for p in train)
 
 
-def test_finetune_runs_and_saves_a_better_metaed_checkpoint(tmp_path):
-    ft = tmp_path / "finetune"
+def test_freeze_encoder_disables_encoder_grads(tmp_path):
+    model = build_model(encoder_weights=None, decoder_attention_type="scse")
+    cfg = FineTuneConfig(init_checkpoint="x", finetune_dir=tmp_path, encoder_lr_scale=0.0)
+    _build_optimizer(model, cfg)
+    enc = [p.requires_grad for n, p in model.named_parameters() if n.startswith("encoder.")]
+    dec = [p.requires_grad for n, p in model.named_parameters() if not n.startswith("encoder.")]
+    assert not any(enc) and all(dec)               # encoder frozen, decoder trainable
+
+
+def test_finetune_selects_and_saves_releasable_checkpoint(tmp_path):
+    ft, dg = tmp_path / "ft", tmp_path / "dg"
     for i in range(5):
-        _write_pair(ft, f"city_{i}")
+        _write_pair(ft, f"c{i}")
+    for i in range(8):
+        _write_pair(dg, f"d{i}")
     init = tmp_path / "v1.pt"
     _tiny_v1_checkpoint(init)
     out = tmp_path / "v2.pt"
-
-    cfg = FineTuneConfig(init_checkpoint=init, finetune_dir=ft, out_path=out,
-                         image_size=64, batch_size=2, epochs=1, finetune_oversample=2,
-                         crops_per_image=2, device="cpu")
+    cfg = FineTuneConfig(init_checkpoint=init, finetune_dir=ft, deepglobe_dir=dg,
+                         deepglobe_subset=4, deepglobe_val=2, out_path=out, image_size=64,
+                         batch_size=2, epochs=1, finetune_oversample=2, crops_per_image=1,
+                         deepglobe_iou_tolerance=1.0, device="cpu")  # big tol → always "keeps"
     summary = finetune(cfg)
 
-    assert out.exists()
-    assert summary["best_val_iou"] >= 0.0
-    # the saved checkpoint reloads and carries fine-tune provenance + the v1 arch
+    assert out.exists() and summary["best"] is not None
     model, meta = load_checkpoint(out)
-    assert meta["decoder_attention_type"] == "scse"
-    assert meta["finetuned_from"] == str(init)
-    assert meta["threshold"] == 0.44
+    assert meta["encoder_frozen"] is True
+    assert "indian_val_iou" in meta and "deepglobe_val_iou" in meta

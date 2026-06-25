@@ -21,7 +21,11 @@ from pathlib import Path
 
 from src.pipeline.p2_graph.config import GraphConfig
 from src.pipeline.p2_graph.graph_io import load_graphml, save_geojson
-from src.pipeline.p3_analysis.criticality import annotate_criticality, rank_table
+from src.pipeline.p3_analysis.criticality import (
+    annotate_criticality,
+    annotate_cut_structure,
+    rank_table,
+)
 from src.pipeline.p3_analysis.resilience import ablation_curve
 
 
@@ -53,6 +57,7 @@ def analyze(
     graph = load_graphml(cfg.graphml_path)
 
     bc = annotate_criticality(graph, k=k, critical_fraction=critical_fraction)
+    cut = annotate_cut_structure(graph)  # articulation points + bridge edges (S8)
     rows = rank_table(graph, bc)
 
     criticality_path = cfg.processed_dir / f"{cfg.aoi}_criticality.csv"
@@ -87,6 +92,7 @@ def analyze(
     print(
         f"[{cfg.aoi}] criticality: {len(rows)} nodes ranked | "
         f"top node {top['node_id']} (betweenness {top['betweenness']:.4f})\n"
+        f"  cut structure: {cut['n_articulation']} articulation points, {cut['n_bridges']} bridge edges\n"
         f"  resilience after {steps} removals - "
         f"targeted RI {targeted_end:.3f} vs random RI {random_end:.3f} "
         f"({'targeted degrades faster [ok]' if targeted_end <= random_end else 'check: random fell faster'})\n"

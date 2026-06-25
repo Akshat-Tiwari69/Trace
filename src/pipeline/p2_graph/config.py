@@ -28,6 +28,14 @@ class GraphConfig:
     angle_penalty_factor: float = 2.0  # how hard a turn is penalised vs. a straight run
     min_edge_len_m: float = 1.0        # drop degenerate sub-pixel edges below this
 
+    # --- simplification (S3): lighter graph, same connectivity ----------------
+    simplify: bool = True              # prune short stubs + collapse degree-2 chains
+    min_stub_len_m: float = 15.0       # trim degree-1 spurs shorter than this
+
+    # --- consolidation (S4): merge near-duplicate junctions -------------------
+    consolidate: bool = True           # merge node clusters joined by sub-tol edges
+    consolidate_tol_m: float = 10.0    # junctions joined by an edge shorter than this
+
     # --- grid fallback (used only when no alignment manifest is present) -------
     resolution_m: float = 1.0          # m/px; overridden by the manifest when available
 
