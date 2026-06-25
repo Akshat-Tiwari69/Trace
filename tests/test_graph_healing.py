@@ -193,6 +193,14 @@ def test_bridge_geometry_falls_back_to_straight():
     assert geom == [[0.0, 0.0], [3.0, 4.0]]                     # undefined heading → segment
 
 
+def test_bridge_geometry_is_magnitude_independent():
+    """A non-unit heading yields the same curve as its normalised version."""
+    p_u, p_v = np.array([0.0, 0.0]), np.array([10.0, 5.0])
+    unit = _bridge_geometry(p_u, p_v, np.array([1.0, 0.0]), np.array([-1.0, 0.0]))
+    scaled = _bridge_geometry(p_u, p_v, np.array([5.0, 0.0]), np.array([-9.0, 0.0]))
+    assert np.allclose(np.array(unit), np.array(scaled))
+
+
 def test_heal_draws_curved_bridge():
     """Healing an offset gap produces a multi-point curved bridge edge."""
     g = nx.Graph()

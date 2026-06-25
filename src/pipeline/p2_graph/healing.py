@@ -185,6 +185,18 @@ def find_candidate_bridges(
     return bridges
 
 
+def _unit(direction: np.ndarray | None) -> np.ndarray | None:
+    """Unit-length copy of ``direction``; ``None`` for a None/zero vector.
+
+    Normalising here makes :func:`_bridge_geometry` independent of the magnitude
+    of whatever heading it's handed (the Bézier handles scale only with the gap).
+    """
+    if direction is None:
+        return None
+    norm = float(np.hypot(*direction))
+    return None if norm < 1e-12 else np.asarray(direction, dtype=float) / norm
+
+
 def _bridge_geometry(
     p_u: np.ndarray,
     p_v: np.ndarray,
@@ -201,6 +213,7 @@ def _bridge_geometry(
     points fall on the segment). Falls back to a straight 2-point line when either
     heading is undefined.
     """
+    dir_u, dir_v = _unit(dir_u), _unit(dir_v)
     if dir_u is None or dir_v is None:
         return [list(map(float, p_u)), list(map(float, p_v))]
 
