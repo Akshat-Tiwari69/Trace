@@ -41,15 +41,26 @@ def _n_components(graph) -> int:
 
 
 def _healing_metrics(graph) -> dict:
-    """Recover the pre-heal state by dropping ``is_bridged`` edges, and compare.
+    """Healing connectivity numbers.
 
-    Connectivity Ratio = % increase in the largest connected component once the
-    inferred bridges are added back (``docs/Evaluation.md`` → Connectivity Ratio).
+    Prefers the **authoritative** build-time stats embedded in ``graph.graph['heal']``
+    (measured at heal time, before any simplification). Falls back to recovering
+    the pre-heal state by dropping ``is_bridged`` edges when no metadata is present
+    (``docs/Evaluation.md`` → Connectivity Ratio).
     """
+    meta = graph.graph.get("heal")
+    if meta:
+        return {
+            "bridges_added": meta["bridges_added"],
+            "components_before_heal": meta["components_before"],
+            "components_after_heal": meta["components_after"],
+            "connectivity_ratio_pct": meta["connectivity_ratio_pct"],
+            "source": "build-time",
+        }
+
     pre = graph.copy()
     bridges = [(u, v) for u, v, d in graph.edges(data=True) if d.get("is_bridged")]
     pre.remove_edges_from(bridges)
-
     largest_before, largest_after = _largest_cc(pre), _largest_cc(graph)
     ratio = 100.0 * (largest_after - largest_before) / largest_before if largest_before else 0.0
     return {
@@ -59,6 +70,7 @@ def _healing_metrics(graph) -> dict:
         "largest_cc_before_heal": largest_before,
         "largest_cc_after_heal": largest_after,
         "connectivity_ratio_pct": round(ratio, 2),
+        "source": "reconstructed",
     }
 
 
@@ -135,6 +147,8 @@ def evaluate(
             "bridged_edges": n_bridged,
             "bridged_pct": round(100.0 * n_bridged / max(1, graph.number_of_edges()), 2),
         },
+        "simplify": graph.graph.get("simplify"),
+        "consolidate": graph.graph.get("consolidate"),
         "healing": healing,
         "criticality": {
             "top_nodes": top_nodes,
@@ -156,13 +170,26 @@ def evaluate(
 def _print_report(report: dict, json_path: Path, plot_path: Path) -> None:
     g, h, c, r = report["graph"], report["healing"], report["criticality"], report["resilience"]
     top = ", ".join(f"{n['node_id']}({n['betweenness']:.3f})" for n in c["top_nodes"])
+    cc = ""
+    if "largest_cc_before_heal" in h:  # only the reconstructed path has these
+        cc = f"| largest CC {h['largest_cc_before_heal']} -> {h['largest_cc_after_heal']} "
+    simp = ""
+    if report.get("simplify"):
+        s = report["simplify"]
+        simp = (f"Simplify:     nodes {s['nodes_before']} -> {s['nodes_after']} "
+                f"(-{s['node_reduction_pct']}%) | {s['stubs_pruned']} stubs, "
+                f"{s['nodes_collapsed']} degree-2 collapsed (components preserved)\n")
+    if report.get("consolidate"):
+        cd = report["consolidate"]
+        simp += (f"Consolidate:  nodes {cd['nodes_before']} -> {cd['nodes_after']} "
+                 f"| {cd['nodes_merged']} near-duplicate junctions merged\n")
     print(
         f"\n=== Graph evaluation — {report['aoi']} ===\n"
         f"Graph:        {g['nodes']} nodes, {g['edges']} edges "
         f"({g['bridged_edges']} bridged, {g['bridged_pct']}%)\n"
+        f"{simp}"
         f"Healing:      components {h['components_before_heal']} -> {h['components_after_heal']} "
-        f"| largest CC {h['largest_cc_before_heal']} -> {h['largest_cc_after_heal']} "
-        f"| connectivity ratio +{h['connectivity_ratio_pct']}%\n"
+        f"{cc}| connectivity ratio +{h['connectivity_ratio_pct']}% ({h.get('source', '?')})\n"
         f"Criticality:  top junctions {top}\n"
         f"              max betweenness {c['max_betweenness']:.3f}, mean {c['mean_betweenness']:.5f}\n"
         f"Resilience:   baseline efficiency {r['baseline_global_efficiency']:.4f}\n"

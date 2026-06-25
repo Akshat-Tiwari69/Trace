@@ -63,9 +63,11 @@ def verify_dashboard_ready(cfg: GraphConfig) -> dict[str, Any]:
     if crit.exists():
         text = crit.read_text(encoding="utf-8")
         header = text.splitlines()[0] if text.strip() else ""
+    # Required columns must be present; extra columns (e.g. S8's is_articulation)
+    # are fine — the dashboard reads by name, so the contract only *grows*.
     return {
         "criticality_csv": str(crit),
-        "columns_match": header.split(",") == DASHBOARD_CRITICALITY_COLUMNS,
+        "columns_match": set(DASHBOARD_CRITICALITY_COLUMNS).issubset(header.split(",")),
         "geojson": str(cfg.geojson_path),
         "geojson_exists": cfg.geojson_path.exists(),
     }
