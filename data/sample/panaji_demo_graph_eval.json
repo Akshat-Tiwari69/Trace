@@ -1,53 +1,59 @@
 {
   "aoi": "panaji_demo",
   "graph": {
-    "nodes": 630,
-    "edges": 749,
+    "nodes": 489,
+    "edges": 608,
     "bridged_edges": 19,
-    "bridged_pct": 2.54
+    "bridged_pct": 3.12
+  },
+  "simplify": {
+    "nodes_before": 630,
+    "nodes_after": 489,
+    "node_reduction_pct": 22.4,
+    "stubs_pruned": 48,
+    "nodes_collapsed": 93
   },
   "healing": {
     "bridges_added": 19,
     "components_before_heal": 29,
     "components_after_heal": 10,
-    "largest_cc_before_heal": 524,
-    "largest_cc_after_heal": 603,
-    "connectivity_ratio_pct": 15.08
+    "connectivity_ratio_pct": 15.08,
+    "source": "build-time"
   },
   "criticality": {
     "top_nodes": [
       {
         "node_id": 45,
-        "betweenness": 0.5109
+        "betweenness": 0.5188
       },
       {
         "node_id": 29,
-        "betweenness": 0.4483
+        "betweenness": 0.4491
       },
       {
         "node_id": 11,
-        "betweenness": 0.4423
+        "betweenness": 0.4443
       },
       {
-        "node_id": 19,
-        "betweenness": 0.4405
+        "node_id": 32,
+        "betweenness": 0.4431
       },
       {
-        "node_id": 24,
-        "betweenness": 0.4392
+        "node_id": 201,
+        "betweenness": 0.38
       }
     ],
-    "max_betweenness": 0.5109,
-    "mean_betweenness": 0.05017
+    "max_betweenness": 0.5188,
+    "mean_betweenness": 0.050249
   },
   "resilience": {
-    "baseline_global_efficiency": 0.001199,
+    "baseline_global_efficiency": 0.001261,
     "ablation_steps": 40,
-    "targeted_ri_end": 0.6331,
-    "random_ri_end": 0.6498,
-    "targeted_minus_random_gap": 0.0166,
-    "targeted_mean_ri": 0.6743,
-    "random_mean_ri": 0.8602,
+    "targeted_ri_end": 0.5731,
+    "random_ri_end": 0.649,
+    "targeted_minus_random_gap": 0.0759,
+    "targeted_mean_ri": 0.6538,
+    "random_mean_ri": 0.8978,
     "targeted_degrades_faster": true
   }
 }
