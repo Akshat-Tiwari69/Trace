@@ -32,6 +32,9 @@ def save_graphml(graph: "nx.Graph", path: Path) -> None:
     for _, _, data in out.edges(data=True):
         if isinstance(data.get("geometry"), list):
             data["geometry"] = json.dumps(data["geometry"])
+    for key in ("heal", "simplify", "consolidate"):  # graph-level metadata → JSON string
+        if isinstance(out.graph.get(key), dict):
+            out.graph[key] = json.dumps(out.graph[key])
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     nx.write_graphml(out, str(path))
 
@@ -45,6 +48,9 @@ def load_graphml(path: Path) -> "nx.Graph":
         geom = data.get("geometry")
         if isinstance(geom, str):
             data["geometry"] = json.loads(geom)
+    for key in ("heal", "simplify", "consolidate"):  # decode graph-level metadata
+        if isinstance(graph.graph.get(key), str):
+            graph.graph[key] = json.loads(graph.graph[key])
     return graph
 
 
@@ -74,6 +80,7 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
                     "type": data.get("type", "intersection"),
                     "betweenness": float(data.get("betweenness", 0.0)),
                     "is_critical": bool(data.get("is_critical", False)),
+                    "is_articulation": bool(data.get("is_articulation", False)),
                 },
             }
         )
@@ -93,12 +100,19 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
                     "v": int(v),
                     "length_m": round(float(data.get("length_m", 0.0)), 3),
                     "is_bridged": bool(data.get("is_bridged", False)),
+                    "is_bridge": bool(data.get("is_bridge", False)),
                     "edge_betweenness": float(data.get("edge_betweenness", 0.0)),
                 },
             }
         )
 
-    return {"type": "FeatureCollection", "features": features}
+    fc = {"type": "FeatureCollection", "features": features}
+    # Carry build-time graph metadata (authoritative heal/simplify stats) so the
+    # evaluator reports true numbers instead of re-deriving them from the graph.
+    meta = {k: graph.graph[k] for k in ("heal", "simplify", "consolidate") if k in graph.graph}
+    if meta:
+        fc["meta"] = meta
+    return fc
 
 
 def save_geojson(graph: "nx.Graph", path: Path) -> None:
@@ -119,6 +133,8 @@ def load_geojson_graph(path: Path) -> "nx.Graph":
 
     fc = json.loads(Path(path).read_text())
     graph = nx.Graph()
+    for key, value in fc.get("meta", {}).items():  # restore build-time metadata
+        graph.graph[key] = value
     for feat in fc["features"]:
         props = feat["properties"]
         if props.get("feature_type") == "node":
@@ -131,6 +147,7 @@ def load_geojson_graph(path: Path) -> "nx.Graph":
                 type=props.get("type", "intersection"),
                 betweenness=float(props.get("betweenness", 0.0)),
                 is_critical=bool(props.get("is_critical", False)),
+                is_articulation=bool(props.get("is_articulation", False)),
             )
     for feat in fc["features"]:
         props = feat["properties"]
@@ -140,6 +157,7 @@ def load_geojson_graph(path: Path) -> "nx.Graph":
                 int(props["v"]),
                 length_m=float(props.get("length_m", 0.0)),
                 is_bridged=bool(props.get("is_bridged", False)),
+                is_bridge=bool(props.get("is_bridge", False)),
                 edge_betweenness=float(props.get("edge_betweenness", 0.0)),
             )
     return graph
