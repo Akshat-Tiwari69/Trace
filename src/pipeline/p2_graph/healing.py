@@ -83,6 +83,8 @@ class Bridge:
     distance_m: float
     angle_deg: float   # worst turn the road makes to follow this bridge (0 = straight)
     score: float       # distance penalised by the turn; lower is better
+    dir_u: "np.ndarray | None" = None  # outward road heading at u (for a curved bridge)
+    dir_v: "np.ndarray | None" = None  # outward road heading at v
 
 
 def _endpoint_direction(graph: "nx.Graph", node: int) -> np.ndarray | None:
@@ -178,9 +180,50 @@ def find_candidate_bridges(
         if worst > angle_max_deg:
             continue
         score = distance_m * (1.0 + angle_penalty_factor * (worst / 180.0))
-        bridges.append(Bridge(u, v, distance_m, worst, score))
+        bridges.append(Bridge(u, v, distance_m, worst, score, directions[u], directions[v]))
 
     return bridges
+
+
+def _bridge_geometry(
+    p_u: np.ndarray,
+    p_v: np.ndarray,
+    dir_u: np.ndarray | None,
+    dir_v: np.ndarray | None,
+    n_points: int = 9,
+) -> list[list[float]]:
+    """A smooth metric polyline from ``p_u`` to ``p_v`` honoring the road tangents.
+
+    Builds a cubic Bézier whose tangents leave ``p_u`` along ``dir_u`` (the road's
+    outward heading there) and arrive at ``p_v`` continuing ``p_v``'s road — so a
+    healed bridge looks like a natural road continuation, not a kinked straight
+    line. A collinear, facing-each-other gap stays a straight line (the control
+    points fall on the segment). Falls back to a straight 2-point line when either
+    heading is undefined.
+    """
+    if dir_u is None or dir_v is None:
+        return [list(map(float, p_u)), list(map(float, p_v))]
+
+    length = float(np.hypot(*(p_v - p_u)))
+    handle = length / 3.0  # classic Bézier handle length for a gentle curve
+    p1 = p_u + dir_u * handle           # leave u continuing its road into the gap
+    p2 = p_v + dir_v * handle           # arrive at v continuing its road (dir_v points outward)
+
+    ts = np.linspace(0.0, 1.0, n_points)
+    curve = [
+        (1 - t) ** 3 * p_u + 3 * (1 - t) ** 2 * t * p1
+        + 3 * (1 - t) * t**2 * p2 + t**3 * p_v
+        for t in ts
+    ]
+    return [[float(x), float(y)] for x, y in curve]
+
+
+def _polyline_length(points: list[list[float]]) -> float:
+    """Total metric length of a polyline."""
+    arr = np.asarray(points, dtype=float)
+    if len(arr) < 2:
+        return 0.0
+    return float(np.hypot(*np.diff(arr, axis=0).T).sum())
 
 
 # --------------------------------------------------------------------------- #
@@ -214,8 +257,11 @@ def heal_graph(
 
     Runs Kruskal's MST over the candidate bridges using a Union-Find: bridges
     are added cheapest-first, each only if it joins two still-separate
-    components. Added edges are straight metric segments flagged
-    ``is_bridged=True``; their endpoints are retyped ``bridged``.
+    components. Added edges are **smooth curves** that continue each road's
+    heading (:func:`_bridge_geometry`), flagged ``is_bridged=True``; their
+    endpoints are retyped ``bridged``. Bridge *selection* is unchanged — only the
+    drawn geometry is smoothed — so connectivity is identical to a straight-bridge
+    heal.
     """
     import networkx as nx
 
@@ -237,14 +283,15 @@ def heal_graph(
     added = 0
     for b in bridges:
         if uf.union(b.u, b.v):  # only if it actually merges two components
+            p_u = np.array([graph.nodes[b.u]["x"], graph.nodes[b.u]["y"]])
+            p_v = np.array([graph.nodes[b.v]["x"], graph.nodes[b.v]["y"]])
+            geometry = _bridge_geometry(p_u, p_v, b.dir_u, b.dir_v)
             graph.add_edge(
                 b.u,
                 b.v,
-                length_m=max(b.distance_m, 1e-6),  # weight must be > 0 (Schema)
-                geometry=[
-                    [graph.nodes[b.u]["x"], graph.nodes[b.u]["y"]],
-                    [graph.nodes[b.v]["x"], graph.nodes[b.v]["y"]],
-                ],
+                # weight = the (curved) bridge length, floored > 0 (Schema)
+                length_m=max(_polyline_length(geometry), 1e-6),
+                geometry=geometry,
                 is_bridged=True,
             )
             graph.nodes[b.u]["type"] = TYPE_BRIDGED
