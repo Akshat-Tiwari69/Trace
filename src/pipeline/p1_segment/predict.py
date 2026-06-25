@@ -29,6 +29,7 @@ def main() -> None:
     p.add_argument("--aoi", required=True, help="short AOI id -> data/interim/{aoi}_mask.png")
     p.add_argument("--tile-size", type=int, default=256)
     p.add_argument("--threshold", type=float, default=0.5)
+    p.add_argument("--tta", action="store_true", help="D4 test-time augmentation (8× compute, ~+IoU)")
     p.add_argument("--interim-dir", default="data/interim")
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
@@ -42,7 +43,7 @@ def main() -> None:
 
     model, meta = load_checkpoint(args.checkpoint, map_location=args.device)
     mask = predict_large(model, image, tile_size=args.tile_size,
-                         device=args.device, threshold=args.threshold)
+                         device=args.device, threshold=args.threshold, tta=args.tta)
 
     out = Path(args.interim_dir) / f"{args.aoi}_mask.png"
     save_binary_png(mask, out)

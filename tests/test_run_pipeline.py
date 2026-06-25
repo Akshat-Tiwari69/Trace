@@ -15,7 +15,7 @@ from src.pipeline.p1_segment.osm_mask import save_binary_png
 from src.pipeline.run_pipeline import DASHBOARD_CRITICALITY_COLUMNS, run
 
 
-def _fake_segment(image_path, checkpoint, aoi, interim_dir, tile_size, threshold, device):
+def _fake_segment(image_path, checkpoint, aoi, interim_dir, tile_size, threshold, device, tta=False):
     """Stand-in for P1: write a synthetic road grid mask at the contract path."""
     mask = np.zeros((256, 256), np.uint8)
     for r in (64, 128, 192):

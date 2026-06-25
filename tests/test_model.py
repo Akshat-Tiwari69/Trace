@@ -107,3 +107,21 @@ def test_checkpoint_roundtrip(tmp_path):
     after = predict_mask(reloaded, image)
     assert np.array_equal(before, after)        # weights preserved exactly
     assert meta["encoder"] == "mit_b0" and meta["iou"] == 0.5
+
+
+def test_predict_mask_tta_runs_and_is_binary_hw():
+    model = build_model(encoder_weights=None)
+    image = (np.random.rand(64, 64, 3) * 255).astype(np.uint8)
+    base = predict_mask(model, image)
+    tta = predict_mask(model, image, tta=True)            # D4 averaging path
+    assert tta.shape == base.shape == (64, 64)
+    assert tta.dtype == np.uint8
+    assert set(np.unique(tta)).issubset({0, 1})
+
+
+def test_predict_large_tta_runs():
+    model = build_model(encoder_weights=None)
+    image = (np.random.rand(300, 400, 3) * 255).astype(np.uint8)
+    mask = predict_large(model, image, tile_size=256, tta=True)
+    assert mask.shape == (300, 400) and mask.dtype == np.uint8
+    assert set(np.unique(mask)).issubset({0, 1})
