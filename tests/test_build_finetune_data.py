@@ -97,3 +97,43 @@ def test_corpus_is_disjoint_from_held_out_eval():
     for c_aoi, c_box in CORPUS_CITIES.items():
         for e_aoi, e_box in DEFAULT_CITIES.items():
             assert not _overlaps(c_box, e_box), f"{c_aoi} overlaps eval {e_aoi}"
+
+
+def test_tile_fetcher_retries_then_succeeds(monkeypatch):
+    """A couple of transient timeouts must NOT abort the fetch — it retries."""
+    import urllib.error
+    import urllib.request
+
+    from src.pipeline.p1_segment import build_finetune_data as bf
+
+    calls = {"n": 0}
+
+    class _Resp:
+        def read(self):
+            return b"TILEBYTES"
+
+    def flaky(req, timeout=30):
+        calls["n"] += 1
+        if calls["n"] < 3:                       # fail twice, then succeed
+            raise urllib.error.URLError("timed out")
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", flaky)
+    monkeypatch.setattr("time.sleep", lambda *_: None)   # no real backoff wait
+    assert bf._default_tile_fetcher(18, 1, 1) == b"TILEBYTES"
+    assert calls["n"] == 3
+
+
+def test_tile_fetcher_gives_up_after_retries(monkeypatch):
+    import urllib.error
+    import urllib.request
+
+    from src.pipeline.p1_segment import build_finetune_data as bf
+
+    def always_fail(req, timeout=30):
+        raise urllib.error.URLError("host down")
+
+    monkeypatch.setattr(urllib.request, "urlopen", always_fail)
+    monkeypatch.setattr("time.sleep", lambda *_: None)
+    with pytest.raises(urllib.error.URLError):
+        bf._default_tile_fetcher(18, 1, 1)
