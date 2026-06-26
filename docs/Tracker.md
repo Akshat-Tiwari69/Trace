@@ -151,7 +151,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **S8** | ✅ | **Articulation points & bridges** | — | F4 | **DONE + merged** (`criticality.annotate_cut_structure` → `analyze`): flags cut nodes/edges (single-points-of-failure) — distinct from betweenness. Emits `is_articulation` (→criticality.csv + geojson) + `is_bridge` (→geojson; distinct from `is_bridged`). 239 art. pts / 306 bridges on sample. 5 tests; A5 dashboard column-check relaxed to subset. |
 | **S9** | ⏳ | **Approximate k-sample betweenness + caching for large graphs** | — | — | Expose `betweenness_centrality(k=...)` with cached results; benchmark vs exact. Done when k-sample runs ≥ 5× faster on a large graph with rank correlation ≥ 0.9 vs exact, documented. |
 | **S10** | ⏳ | **Demand/population-weighted & percolation centrality** | — | — | Optional population/demand weight or `nx.percolation_centrality` so criticality reflects usage, not just topology. Done when weighted criticality is produced and compared to plain betweenness on sample. |
-| **S11** | ⏳ | **Flood / elevation-based failure scenario + comparison** | — | F5, E4 | Disable nodes below an elevation / inside a flood polygon and recompute the global-efficiency RI curve; compare targeted vs random vs flood. Done when a flood RI curve is written to `data/processed/`, re-runnable, tested. |
+| **S11** | 🔄 | **Flood / elevation-based failure scenario + comparison** | — | F5, E4 | Disable nodes below an elevation / inside a flood polygon and recompute the global-efficiency RI curve; compare targeted vs random vs flood. Done when a flood RI curve is written to `data/processed/`, re-runnable, tested. — **DONE** (`p3_analysis/flood.py` + CLI): `nodes_in_polygon` / `nodes_below_elevation` select the flooded set; `ablation_curve` gains a custom `sequence`; three-way RI curve **flood vs targeted vs random** written to `data/processed/{aoi}_flood_resilience.csv` + a committed plot. Default floods **around the top chokepoint** (planning worst-case; `--central` for the redundant-centre control). Result: end RI **flood 0.785 / random 0.428 / targeted 0.357** — a *localized* flood reroutes around (least damaging), distributed/targeted loss hurts most (honest finding; feeds F5 + E4). 6 unit tests. **PR pending.** |
 
 ### Saanvi — dashboard (CPU, off `data/sample/`)
 | ID | Status | Task | Waits on | Blocks | Done when |
@@ -242,6 +242,11 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-26 (Shaivi — S11 flood failure scenario)**
+- Done: `p3_analysis/flood.py` + CLI — flood/elevation failure scenario. `nodes_in_polygon` (shapely point-in-polygon, no DEM needed) / `nodes_below_elevation` select the flooded set; `ablation_curve` extended with a custom `sequence`; produces a **three-way RI curve (flood vs targeted vs random)** → `data/processed/{aoi}_flood_resilience.csv` (re-runnable) + a committed comparison plot. Default floods **around the top chokepoint** (planning worst-case); `--central` is the redundant-centre control. 6 unit tests.
+- Honest finding: end RI **flood 0.785 / random 0.428 / targeted 0.357** — a *localized* flood reroutes around its hole (least damaging), while distributed (random) and especially optimally-targeted chokepoint loss hurt far more. Good resilience story: the network absorbs localized floods but is vulnerable to targeted failure. Feeds **F5** (draw-a-flood-polygon) + **E4** (resilience ablation table).
+- Remaining Shaivi: S10 (optional, demand/percolation centrality), E2 graph-side (mostly done via S7), E4 (now unblocked by S11). S5/S9/S11 in review.
 
 **2026-06-26 (Akshat — A9 done: clDice-first rejected; recipe plateau confirmed)**
 - Done: **A9 ✅** — clDice-first fine-tune (clDice 0.1→0.3) measured on the **hard clDice topology score**: **0.827 → 0.772 (−0.055)** + IoU −0.078 → *worse on both*. Over-weighting clDice on an already-clDice-trained model destabilises it. Not adopted.
