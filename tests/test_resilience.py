@@ -194,3 +194,43 @@ def test_rank_table_includes_is_articulation():
     rows = rank_table(g, bc)
     assert "is_articulation" in rows[0]
     assert sum(r["is_articulation"] for r in rows) == 2
+
+
+# --------------------------------------------------------------------------- #
+# S9 — betweenness caching + k-sample benchmark
+# --------------------------------------------------------------------------- #
+def test_betweenness_cache_memoizes_and_matches_direct():
+    from src.pipeline.p3_analysis.criticality import BetweennessCache
+
+    g = _barbell()
+    cache = BetweennessCache()
+    first = cache.get(g)
+    assert len(cache) == 1
+    second = cache.get(g)            # same graph → cache hit, no new entry
+    assert len(cache) == 1
+    assert first == second == compute_betweenness(g)   # exact, not approximate
+
+
+def test_betweenness_cache_distinguishes_graphs():
+    from src.pipeline.p3_analysis.criticality import BetweennessCache
+
+    g = _barbell()
+    cache = BetweennessCache()
+    cache.get(g)
+    g2 = g.copy()
+    g2.remove_edge(2, 3)             # different structure → different fingerprint
+    cache.get(g2)
+    assert len(cache) == 2
+
+
+def test_benchmark_betweenness_tracks_exact_ranking():
+    import networkx as nx
+
+    from src.pipeline.p3_analysis.criticality import benchmark_betweenness
+
+    g = nx.convert_node_labels_to_integers(nx.grid_2d_graph(15, 15))
+    for u, v in g.edges:
+        g.edges[u, v]["length_m"] = 1.0
+    result = benchmark_betweenness(g, k=40)
+    assert set(result) >= {"speedup", "spearman", "exact_s", "ksample_s"}
+    assert result["spearman"] >= 0.8   # k-sample preserves the criticality ranking
