@@ -13,6 +13,11 @@ from src.pipeline.p3_analysis.criticality import (
     compute_betweenness,
     rank_table,
 )
+from src.pipeline.p3_analysis.flood import (
+    flood_comparison,
+    nodes_below_elevation,
+    nodes_in_polygon,
+)
 from src.pipeline.p3_analysis.resilience import (
     ablation_curve,
     global_efficiency,
@@ -29,4 +34,7 @@ __all__ = [
     "ablation_curve",
     "global_efficiency",
     "resilience_index",
+    "flood_comparison",
+    "nodes_below_elevation",
+    "nodes_in_polygon",
 ]
