@@ -149,7 +149,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **S6** | ✅ | **Smarter gap-healing: spline bridges** | — | — | **DONE + merged** (`healing.py`): bridges drawn as **cubic-Bézier curves** leaving each endpoint along the road heading; selection/scoring unchanged ⇒ connectivity identical (no regression); `length_m` uses the curved polyline. 17 healing tests. |
 | **S7** | ✅ | **APLS + topology validation against OSM** | — | E4 | **DONE + merged** (`p3_analysis/apls.py` + CLI): densified, symmetric node-based APLS vs a committed OSM ground-truth graph (offline-reproducible). Sample **APLS = 0.45** (gt→prop 0.34, prop→gt 0.67) vs SpaceNet baseline ≈0.49; in `Evaluation.md`. 4 tests. |
 | **S8** | ✅ | **Articulation points & bridges** | — | F4 | **DONE + merged** (`criticality.annotate_cut_structure` → `analyze`): flags cut nodes/edges (single-points-of-failure) — distinct from betweenness. Emits `is_articulation` (→criticality.csv + geojson) + `is_bridge` (→geojson; distinct from `is_bridged`). 239 art. pts / 306 bridges on sample. 5 tests; A5 dashboard column-check relaxed to subset. |
-| **S9** | ⏳ | **Approximate k-sample betweenness + caching for large graphs** | — | — | Expose `betweenness_centrality(k=...)` with cached results; benchmark vs exact. Done when k-sample runs ≥ 5× faster on a large graph with rank correlation ≥ 0.9 vs exact, documented. |
+| **S9** | 🔄 | **Approximate k-sample betweenness + caching for large graphs** | — | — | Expose `betweenness_centrality(k=...)` with cached results; benchmark vs exact. Done when k-sample runs ≥ 5× faster on a large graph with rank correlation ≥ 0.9 vs exact, documented. — **DONE** (`criticality.py`): `k=` already exposed; added `BetweennessCache` (memoize by structural fingerprint — dashboard reuses the baseline free, recomputes only on a perturbed graph) + `benchmark_betweenness` + `bench_betweenness` CLI. **Benchmark on a 2500-node grid: exact 25s vs k=150 1.5s → 16.6× faster, Spearman rank corr 0.98** (well past ≥5× / ≥0.9), committed to `betweenness_benchmark.json`. 3 unit tests. **PR pending.** |
 | **S10** | ⏳ | **Demand/population-weighted & percolation centrality** | — | — | Optional population/demand weight or `nx.percolation_centrality` so criticality reflects usage, not just topology. Done when weighted criticality is produced and compared to plain betweenness on sample. |
 | **S11** | ⏳ | **Flood / elevation-based failure scenario + comparison** | — | F5, E4 | Disable nodes below an elevation / inside a flood polygon and recompute the global-efficiency RI curve; compare targeted vs random vs flood. Done when a flood RI curve is written to `data/processed/`, re-runnable, tested. |
 
@@ -242,6 +242,11 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-26 (Shaivi — S9 fast k-sample betweenness + caching)**
+- Done: `criticality.py` — `BetweennessCache` (memoize betweenness by a structural graph fingerprint; the dashboard reuses the baseline as a free cache hit and only recomputes on a *perturbed* graph) + `benchmark_betweenness` + a `bench_betweenness` CLI. The `k=` approximation was already exposed (S1); this adds caching + the validated benchmark.
+- **Benchmark (2500-node grid): exact 25.2 s vs k=150 1.5 s → 16.6× faster, Spearman rank correlation 0.98** — well past the ≥5× / ≥0.9 bar, committed to `data/sample/betweenness_benchmark.json`. 3 unit tests; off `dev` (criticality.py + new CLI only).
+- **This completes the Shaivi graph backlog (S1–S9).** S5 (#54) in review; S9 PR up. Remaining cross-lane: E1 seg side (Akshat), E4 (APLS in eval suite), F3/F4 (dashboard consumes the lighter geometry + articulation layer).
 
 **2026-06-26 (Akshat — A9 done: clDice-first rejected; recipe plateau confirmed)**
 - Done: **A9 ✅** — clDice-first fine-tune (clDice 0.1→0.3) measured on the **hard clDice topology score**: **0.827 → 0.772 (−0.055)** + IoU −0.078 → *worse on both*. Over-weighting clDice on an already-clDice-trained model destabilises it. Not adopted.
