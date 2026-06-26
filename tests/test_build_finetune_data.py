@@ -12,12 +12,20 @@ import numpy as np
 import pytest
 
 from src.pipeline.p1_segment.build_finetune_data import (
+    CORPUS_CITIES,
     DEFAULT_CITIES,
     deg2num,
     fetch_imagery_mosaic,
     num2merc,
     warp_to_grid,
 )
+
+
+def _overlaps(a, b) -> bool:
+    """True if two (w, s, e, n) bboxes overlap."""
+    w1, s1, e1, n1 = a
+    w2, s2, e2, n2 = b
+    return w1 < e2 and w2 < e1 and s1 < n2 and s2 < n1
 
 
 def _solid_tile_bytes(color=(120, 80, 40)) -> bytes:
@@ -74,3 +82,18 @@ def test_default_cities_are_well_formed():
     for aoi, (w, s, e, n) in DEFAULT_CITIES.items():
         assert w < e and s < n, aoi          # valid bbox
         assert 68 < w < 98 and 6 < s < 36     # roughly within India's lon/lat span
+
+
+def test_corpus_cities_are_well_formed():
+    assert len(CORPUS_CITIES) >= 15           # a real corpus, not a handful
+    for aoi, (w, s, e, n) in CORPUS_CITIES.items():
+        assert w < e and s < n, aoi
+        assert 68 < w < 98 and 6 < s < 36, aoi
+
+
+def test_corpus_is_disjoint_from_held_out_eval():
+    """The corpus must NOT overlap the eval AOIs — else we'd train on our test set."""
+    assert set(CORPUS_CITIES) & set(DEFAULT_CITIES) == set()        # no shared ids
+    for c_aoi, c_box in CORPUS_CITIES.items():
+        for e_aoi, e_box in DEFAULT_CITIES.items():
+            assert not _overlaps(c_box, e_box), f"{c_aoi} overlaps eval {e_aoi}"
