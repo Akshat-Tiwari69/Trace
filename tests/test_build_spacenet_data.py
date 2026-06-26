@@ -7,15 +7,24 @@ import pytest
 from PIL import Image
 
 
-def _write_chip(img_dir, lbl_dir, chip: str, with_road: bool, size: int = 512):
-    """Write a synthetic SpaceNet-style GeoTIFF (16-bit, UTM 0.3 m) + GeoJSON road."""
+def _write_chip(img_dir, lbl_dir, chip: str, with_road: bool, size: int = 512,
+                geographic: bool = False):
+    """Write a synthetic SpaceNet-style GeoTIFF (16-bit, 0.3 m) + GeoJSON road.
+
+    ``geographic=True`` uses EPSG:4326 (degrees) like the real SpaceNet-5 chips —
+    the case that exposes degree-vs-metre buffering bugs.
+    """
     import geopandas as gpd
     import rasterio
     from rasterio.transform import from_origin
     from shapely.geometry import LineString
 
-    crs = "EPSG:32643"  # UTM 43N (Mumbai)
-    res, ox, oy = 0.3, 500_000.0, 2_000_000.0
+    if geographic:
+        crs = "EPSG:4326"                 # like real SpaceNet-5: lon/lat degrees
+        res, ox, oy = 0.3 / 111_320.0, 72.80, 19.10   # ~0.3 m in degrees, Mumbai-ish
+    else:
+        crs = "EPSG:32643"  # UTM 43N (Mumbai)
+        res, ox, oy = 0.3, 500_000.0, 2_000_000.0
     transform = from_origin(ox, oy, res, res)
     data = (np.random.rand(3, size, size) * 4000).astype(np.uint16)  # 16-bit imagery
     img_dir.mkdir(parents=True, exist_ok=True)
@@ -52,6 +61,20 @@ def test_convert_produces_deepglobe_pairs(tmp_path):
     # imagery is 8-bit RGB JPG of the tile size
     sat = np.asarray(Image.open(sats[0]).convert("RGB"))
     assert sat.shape == (512, 512, 3) and sat.dtype == np.uint8
+
+
+def test_geographic_crs_buffers_in_metres_not_degrees(tmp_path):
+    """Regression: real SpaceNet-5 chips are EPSG:4326 — the road buffer must be
+    metric, not degrees (degree-buffer → ~all-road masks; garbage labels)."""
+    from src.pipeline.p1_segment.build_spacenet_data import convert_spacenet
+
+    img_dir, lbl_dir, out = tmp_path / "PS-RGB", tmp_path / "geojson_roads_speed", tmp_path / "out"
+    _write_chip(img_dir, lbl_dir, "chip1", with_road=True, geographic=True)
+
+    n = convert_spacenet(img_dir, lbl_dir, out, buffer_m=8.0, scale=1.0, min_road_fraction=0.001)
+    assert n >= 1
+    frac = (np.asarray(Image.open(next(out.glob("*_mask.png"))).convert("L")) > 127).mean()
+    assert 0.0 < frac < 0.3, f"road fraction {frac:.3f} — buffered in degrees? (all-road bug)"
 
 
 def test_road_free_chip_is_skipped(tmp_path):

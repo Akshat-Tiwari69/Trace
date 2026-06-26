@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.pipeline.p1_segment.osm_mask import rasterize_roads, tile_array
+from src.pipeline.p1_segment.osm_mask import tile_array
 
 
 def _chip_key(name: str) -> str:
@@ -52,6 +52,30 @@ def _to_rgb8(bands: np.ndarray) -> np.ndarray:
             hi = lo + 1.0
         out[..., c] = np.clip((ch - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
     return out
+
+
+def _rasterize_roads_metric(roads, transform, width: int, height: int, crs, buffer_m: float) -> np.ndarray:
+    """Burn road centrelines buffered to ``buffer_m`` **metres** onto the image grid.
+
+    Unlike ``osm_mask.rasterize_roads`` (which buffers in the grid CRS — fine for a
+    metric UTM grid), SpaceNet chips are georeferenced in **EPSG:4326 (degrees)**, so
+    buffering in the grid CRS would apply ``buffer_m`` as *degrees* (~111 km/deg →
+    all-road masks). We buffer in the data's estimated UTM (metres) and reproject the
+    polygons back to the grid CRS before rasterising — correct for geographic *or*
+    projected grids.
+    """
+    from rasterio.features import rasterize
+
+    if roads.crs is None:
+        roads = roads.set_crs("EPSG:4326")
+    metric = roads.estimate_utm_crs()
+    buffered = roads.to_crs(metric).buffer(buffer_m / 2.0).to_crs(crs)
+    shapes = [(g, 1) for g in buffered if g is not None and not g.is_empty]
+    if not shapes:
+        return np.zeros((height, width), dtype=np.uint8)
+    burned = rasterize(shapes, out_shape=(height, width), transform=transform,
+                       fill=0, all_touched=True, dtype=np.uint8)
+    return (burned > 0).astype(np.uint8)
 
 
 def convert_spacenet(img_dir: str | Path, label_dir: str | Path, out_dir: str | Path,
@@ -84,9 +108,7 @@ def convert_spacenet(img_dir: str | Path, label_dir: str | Path, out_dir: str | 
         if len(roads) == 0:                          # empty centreline file → no road
             mask = np.zeros((height, width), dtype=np.uint8)
         else:
-            if roads.crs is None:
-                roads = roads.set_crs("EPSG:4326")
-            mask = rasterize_roads(roads, transform, width, height, crs, buffer_m=buffer_m)
+            mask = _rasterize_roads_metric(roads, transform, width, height, crs, buffer_m)
 
         img = _to_rgb8(bands)
         if scale != 1.0:                             # 0.3m -> ~0.5m to scale-match DeepGlobe
