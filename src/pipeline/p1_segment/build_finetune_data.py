@@ -94,12 +94,25 @@ def num2merc(x: float, y: float, z: int) -> tuple[float, float]:
 
 
 def _default_tile_fetcher(z: int, x: int, y: int) -> bytes:
-    """Fetch one Esri World-Imagery tile (keyless)."""
+    """Fetch one Esri World-Imagery tile (keyless), retrying transient network errors.
+
+    A multi-city corpus run issues thousands of tile requests; a single timed-out
+    tile must NOT abort the whole run, so retry a few times with linear backoff.
+    """
+    import time
+    import urllib.error
     import urllib.request
 
     req = urllib.request.Request(ESRI_TILE.format(z=z, x=x, y=y),
                                  headers={"User-Agent": "Mozilla/5.0 route-resilience-a6"})
-    return urllib.request.urlopen(req, timeout=30).read()
+    last: Exception | None = None
+    for attempt in range(4):
+        try:
+            return urllib.request.urlopen(req, timeout=30).read()
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last = exc
+            time.sleep(1.5 * (attempt + 1))
+    raise last  # type: ignore[misc]
 
 
 def fetch_imagery_mosaic(bbox: tuple[float, float, float, float], zoom: int,
@@ -206,12 +219,24 @@ def main() -> None:
         out_dir = args.out_dir or "data/finetune"
         label = "held-out eval set"
 
-    total = 0
+    total, built, skipped, failed = 0, 0, 0, []
     for aoi, bbox in cities.items():
-        total += build_pairs(aoi, bbox, out_dir, resolution_m=args.resolution_m,
-                             tile_size=args.tile_size, zoom=args.zoom,
-                             min_road_fraction=args.min_road_fraction)
-    print(f"\n{label}: {total} pairs across {len(cities)} AOIs -> {out_dir}")
+        if list(Path(out_dir).glob(f"{aoi}_r*_sat.jpg")):     # resume: this city is already built
+            print(f"[{aoi}] already present -> skip", flush=True)
+            skipped += 1
+            continue
+        try:
+            total += build_pairs(aoi, bbox, out_dir, resolution_m=args.resolution_m,
+                                 tile_size=args.tile_size, zoom=args.zoom,
+                                 min_road_fraction=args.min_road_fraction)
+            built += 1
+        except Exception as exc:                              # one city's failure must not abort the rest
+            print(f"[{aoi}] FAILED ({type(exc).__name__}: {exc}) -> skipping", flush=True)
+            failed.append(aoi)
+    print(f"\n{label}: {total} pairs | built {built}, skipped(done) {skipped}, "
+          f"failed {len(failed)} of {len(cities)} AOIs -> {out_dir}")
+    if failed:
+        print(f"  failed AOIs (re-run to retry — completed cities are skipped): {', '.join(failed)}")
 
 
 if __name__ == "__main__":
