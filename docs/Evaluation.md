@@ -114,7 +114,7 @@ The connectivity/topology scoreboard, consolidated — does the extracted graph
 | Metric | Owner | Value | Source |
 |---|---|---|---|
 | **Connectivity Ratio** | graph | **+15.1%** (largest CC after healing) | `evaluate` · S3/E1 |
-| **APLS** (vs OSM) | graph | **0.45** symmetric (densified, snap 15 m) | `apls` · S7 |
+| **APLS** (vs OSM) | graph | **0.40** symmetric (densified, snap 15 m) | `apls` · S7 |
 | **Relaxed / buffered IoU** | seg | *Akshat — released model, A7/A10* | `p1_segment` |
 
 Graph-side topology metrics (connectivity ratio + APLS) are **reported and
