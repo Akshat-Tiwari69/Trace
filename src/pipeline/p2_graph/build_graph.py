@@ -24,7 +24,11 @@ import numpy as np
 from src.pipeline.p2_graph.config import GraphConfig
 from src.pipeline.p2_graph.graph_io import save_geojson, save_graphml
 from src.pipeline.p2_graph.healing import HealReport, heal_graph
-from src.pipeline.p2_graph.simplify import consolidate_graph, simplify_graph
+from src.pipeline.p2_graph.simplify import (
+    consolidate_graph,
+    simplify_graph,
+    simplify_polylines,
+)
 from src.pipeline.p2_graph.skeleton_graph import (
     mask_to_skeleton,
     prune_degenerate_edges,
@@ -107,6 +111,15 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
             "nodes_merged": consolidate_report.nodes_merged,
         }
 
+    polyline_report = None
+    if cfg.simplify_geom:  # Douglas-Peucker in metric space, before reprojection
+        polyline_report = simplify_polylines(graph, tol_m=cfg.geom_tol_m)
+        graph.graph["polyline"] = {
+            "vertices_before": polyline_report.vertices_before,
+            "vertices_after": polyline_report.vertices_after,
+            "vertex_reduction_pct": round(polyline_report.vertex_reduction_pct, 1),
+        }
+
     if crs is not None:
         reproject_graph_to_wgs84(graph, crs)
 
@@ -128,6 +141,11 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
             f"  consolidate: nodes {consolidate_report.nodes_before}->{consolidate_report.nodes_after} "
             f"| {consolidate_report.nodes_merged} near-duplicate junctions merged "
             f"(tol {cfg.consolidate_tol_m:.0f} m)\n"
+        )
+    if polyline_report is not None:
+        simplify_line += (
+            f"  polyline: vertices {polyline_report.vertices_before}->{polyline_report.vertices_after} "
+            f"(-{polyline_report.vertex_reduction_pct:.0f}%) via Douglas-Peucker (tol {cfg.geom_tol_m} m)\n"
         )
     print(
         f"[{cfg.aoi}] graph: {graph.number_of_nodes()} nodes, "

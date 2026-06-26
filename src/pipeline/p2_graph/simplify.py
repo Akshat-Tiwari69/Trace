@@ -227,3 +227,52 @@ def consolidate_graph(graph: "nx.Graph", tol_m: float = 10.0) -> ConsolidateRepo
         nodes_before=n0, nodes_after=graph.number_of_nodes(),
         components_before=c0, components_after=c1, nodes_merged=merged,
     )
+
+
+# --------------------------------------------------------------------------- #
+# S5 — polyline geometry simplification (Douglas-Peucker)
+# --------------------------------------------------------------------------- #
+@dataclasses.dataclass
+class PolylineReport:
+    """Vertex counts before/after Douglas-Peucker simplification."""
+
+    vertices_before: int
+    vertices_after: int
+    edges: int
+
+    @property
+    def vertex_reduction_pct(self) -> float:
+        if self.vertices_before == 0:
+            return 0.0
+        return 100.0 * (self.vertices_before - self.vertices_after) / self.vertices_before
+
+
+def simplify_polylines(graph: "nx.Graph", tol_m: float) -> PolylineReport:
+    """Douglas-Peucker each edge's geometry to drop redundant vertices, in place.
+
+    Shapely's ``LineString.simplify`` removes points that lie within ``tol_m`` of
+    the line they sit on — a much lighter GeoJSON for the dashboard with the road
+    shape preserved (endpoints are always kept). This touches **geometry only**:
+    ``length_m`` (the routing weight) is left untouched, since the metric length is
+    more accurate than the corner-cutting simplified chord. Run in metric space
+    (before reprojection) so ``tol_m`` is true metres.
+    """
+    from shapely.geometry import LineString
+
+    before = after = 0
+    for _, _, data in graph.edges(data=True):
+        geom = data.get("geometry")
+        if not geom or len(geom) <= 2:
+            before += len(geom) if geom else 0
+            after += len(geom) if geom else 0
+            continue
+        before += len(geom)
+        simplified = LineString(geom).simplify(tol_m, preserve_topology=False)
+        coords = [[float(x), float(y)] for x, y in simplified.coords]
+        if len(coords) < 2:  # degenerate guard — keep the original endpoints
+            coords = [list(map(float, geom[0])), list(map(float, geom[-1]))]
+        data["geometry"] = coords
+        after += len(coords)
+
+    return PolylineReport(vertices_before=before, vertices_after=after,
+                          edges=graph.number_of_edges())

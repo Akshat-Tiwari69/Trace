@@ -5,12 +5,15 @@ from __future__ import annotations
 import networkx as nx
 import pytest
 
+from shapely.geometry import LineString
+
 from src.pipeline.p2_graph.simplify import (
     collapse_degree2_nodes,
     consolidate_graph,
     consolidate_nearby_nodes,
     prune_short_stubs,
     simplify_graph,
+    simplify_polylines,
 )
 from src.pipeline.p2_graph.skeleton_graph import _annotate_degree_and_type
 
@@ -155,3 +158,31 @@ def test_consolidate_graph_preserves_components():
     assert report.nodes_after < report.nodes_before
     assert report.nodes_merged >= 1
     assert report.components_after == before   # never splits (or merges) components
+
+
+# --------------------------------------------------------------------------- #
+# S5 — polyline simplification (Douglas-Peucker)
+# --------------------------------------------------------------------------- #
+def test_simplify_polylines_drops_near_collinear_vertices():
+    g = nx.Graph()
+    g.add_node(0, x=0.0, y=0.0)
+    g.add_node(1, x=10.0, y=0.0)
+    geom = [[0, 0], [2, 0.1], [4, 0.05], [6, 0.1], [8, 0.05], [10, 0]]  # jitter near x-axis
+    g.add_edge(0, 1, length_m=10.0, geometry=geom, is_bridged=False)
+
+    rep = simplify_polylines(g, tol_m=0.5)
+    new = g.edges[0, 1]["geometry"]
+    assert rep.vertices_after < rep.vertices_before
+    assert new[0] == [0.0, 0.0] and new[-1] == [10.0, 0.0]   # endpoints kept
+    assert g.edges[0, 1]["length_m"] == 10.0                 # routing weight untouched
+    assert LineString(new).hausdorff_distance(LineString(geom)) <= 0.5   # shape preserved
+
+
+def test_simplify_polylines_keeps_real_corner():
+    g = nx.Graph()
+    g.add_node(0, x=0.0, y=0.0)
+    g.add_node(1, x=10.0, y=10.0)
+    g.add_edge(0, 1, length_m=20.0, geometry=[[0, 0], [10, 0], [10, 10]], is_bridged=False)
+
+    simplify_polylines(g, tol_m=0.5)
+    assert len(g.edges[0, 1]["geometry"]) == 3   # the 90° corner is far from the chord → kept

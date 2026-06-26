@@ -97,6 +97,8 @@ Reproduce with `python -m src.pipeline.p3_analysis.evaluate` (reads the committe
 | **Simplification (S3)** | **−22%** nodes (630 → 489) | 48 short stubs pruned + 93 degree-2 chain nodes collapsed; lossless for routing |
 | **Consolidation (S4)** | **489 → 400** nodes | 51 near-duplicate junctions merged (tol 10 m); overpass-guarded (only merges along sub-tolerance edges) |
 | **Total node reduction** | **630 → 400 (−37%)** | **all 10 components preserved** throughout |
+| **Polyline simplification (S5)** | vertices **15.4k → 2.2k (−86%)** | Douglas-Peucker (1.5 m); GeoJSON 675 KB → 256 KB; shape preserved (Hausdorff ≤ tol), routing weights untouched |
+| **Cut structure (S8)** | **136** articulation points, **191** bridge edges | true single-points-of-failure — structural criticality distinct from betweenness |
 | **Connectivity Ratio** | **+15.1%** | largest connected component grew after MST/Union-Find healing (components 29 → 10); build-time figure |
 | Top "Gatekeeper" node | betweenness **0.488** | node 45; top-5 cluster near the centre |
 | Baseline global efficiency | 0.0013 | metric units (1/m); only ratios are interpretable |
@@ -112,7 +114,7 @@ Self-contained, densified, symmetric node-based APLS (no heavy CosmiQ dependency
 
 | Metric | Value | Notes |
 |---|---|---|
-| **APLS (healed graph vs OSM)** | **0.45** | symmetric harmonic mean (gt→prop 0.34, prop→gt 0.67); 600 sampled pairs, 15 m snap, 10 m densification |
+| **APLS (healed graph vs OSM)** | **0.40** | symmetric harmonic mean (gt→prop 0.30, prop→gt 0.62); 600 sampled pairs, 15 m snap, 10 m densification |
 | Reference (SpaceNet-3) | baseline ≈ 0.49, winner ≈ 0.67 | *not* directly comparable — those are on clean SpaceNet imagery |
 
 This is a **deliberately hard** case: the S1 sample is built from OSM but then

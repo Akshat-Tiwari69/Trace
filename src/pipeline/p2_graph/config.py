@@ -36,6 +36,10 @@ class GraphConfig:
     consolidate: bool = True           # merge node clusters joined by sub-tol edges
     consolidate_tol_m: float = 10.0    # junctions joined by an edge shorter than this
 
+    # --- polyline simplification (S5): lighter geometry, shape preserved ------
+    simplify_geom: bool = True         # Douglas-Peucker each edge's geometry
+    geom_tol_m: float = 1.5            # drop vertices within this of the line
+
     # --- grid fallback (used only when no alignment manifest is present) -------
     resolution_m: float = 1.0          # m/px; overridden by the manifest when available
 
