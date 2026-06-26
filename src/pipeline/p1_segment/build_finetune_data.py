@@ -40,12 +40,41 @@ _EARTH_CIRCUMFERENCE = 2 * math.pi * 6378137.0  # metres, EPSG:3857
 
 # Default domain-matched AOIs: drivable-road-dense Indian city patches.
 # (west, south, east, north) in lon/lat — small (~3–4 km) so one run is quick.
+# These 5 are the **held-out Indian eval set** (`data/finetune/`) — NEVER train on them.
 DEFAULT_CITIES: dict[str, tuple[float, float, float, float]] = {
     "panaji": (73.80, 15.47, 73.84, 15.50),
     "margao": (73.94, 15.27, 73.98, 15.30),
     "mumbai_bandra": (72.82, 19.04, 72.86, 19.07),
     "bengaluru_indiranagar": (77.63, 12.96, 77.66, 12.99),
     "delhi_cp": (77.20, 28.62, 77.24, 28.65),
+}
+
+# A16(a): the in-domain Indian OSM **corpus** — a large, geographically *disjoint*
+# roster (metros + tier-2/3 + east/NE) spanning Indian road morphology. These are
+# **weak/noisy** labels for pretrain + self-training (A12) ONLY — they must never
+# overlap the held-out eval AOIs above (a disjointness test enforces this). Built
+# to a SEPARATE dir (`data/raw/indian_corpus/`). ~0.03°×0.025° (~3 km) boxes.
+CORPUS_CITIES: dict[str, tuple[float, float, float, float]] = {
+    "kolkata_park_st": (88.340, 22.540, 88.370, 22.565),
+    "chennai_tnagar": (80.225, 13.035, 80.255, 13.060),
+    "hyderabad_banjara": (78.430, 17.410, 78.460, 17.435),
+    "ahmedabad_navrangpura": (72.550, 23.020, 72.580, 23.045),
+    "pune_shivajinagar": (73.830, 18.520, 73.860, 18.545),
+    "jaipur_cscheme": (75.790, 26.900, 75.820, 26.925),
+    "lucknow_hazratganj": (80.930, 26.840, 80.960, 26.865),
+    "kanpur_civillines": (80.330, 26.460, 80.360, 26.485),
+    "surat_adajan": (72.790, 21.180, 72.820, 21.205),
+    "nagpur_sitabuldi": (79.070, 21.130, 79.100, 21.155),
+    "kochi_mgroad": (76.270, 9.970, 76.300, 9.995),
+    "coimbatore_rspuram": (76.950, 11.000, 76.980, 11.025),
+    "indore_vijaynagar": (75.890, 22.740, 75.920, 22.765),
+    "bhopal_mpnagar": (77.420, 23.230, 77.450, 23.255),
+    "visakhapatnam_dwaraka": (83.290, 17.720, 83.320, 17.745),
+    "chandigarh_sec17": (76.770, 30.730, 76.800, 30.755),
+    "guwahati_paltanbazaar": (91.740, 26.170, 91.770, 26.195),
+    "patna_boring": (85.120, 25.600, 85.150, 25.625),
+    "bhubaneswar_saheednagar": (85.820, 20.280, 85.850, 20.305),
+    "dehradun_clocktower": (78.030, 30.320, 78.060, 30.345),
 }
 
 
@@ -152,9 +181,12 @@ def build_pairs(aoi: str, bbox: tuple[float, float, float, float], out_dir: str 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="A6: build OSM-labelled fine-tune pairs (image+mask).")
-    p.add_argument("--aoi", help="single AOI id (with --bbox); omit to build all DEFAULT_CITIES")
+    p.add_argument("--aoi", help="single AOI id (with --bbox); omit to build a --cities set")
     p.add_argument("--bbox", help="west,south,east,north (lon/lat) for a single --aoi")
-    p.add_argument("--out-dir", default="data/finetune")
+    p.add_argument("--cities", choices=["eval", "corpus"], default="eval",
+                   help="eval = 5 held-out AOIs (data/finetune); "
+                        "corpus = the disjoint Indian OSM corpus for A16a (data/raw/indian_corpus)")
+    p.add_argument("--out-dir", default=None, help="override; otherwise defaults by --cities")
     p.add_argument("--resolution-m", type=float, default=0.5)
     p.add_argument("--tile-size", type=int, default=512)
     p.add_argument("--zoom", type=int, default=18, help="Esri XYZ zoom (~0.6 m/px at z18)")
@@ -162,17 +194,24 @@ def main() -> None:
     args = p.parse_args()
 
     if args.aoi:
-        bbox = tuple(float(v) for v in args.bbox.split(","))
-        cities = {args.aoi: bbox}
+        cities = {args.aoi: tuple(float(v) for v in args.bbox.split(","))}
+        out_dir = args.out_dir or "data/finetune"
+        label = args.aoi
+    elif args.cities == "corpus":
+        cities = CORPUS_CITIES                       # weak labels → SEPARATE dir, never data/finetune
+        out_dir = args.out_dir or "data/raw/indian_corpus"
+        label = "Indian OSM corpus (A16a, weak labels — pretrain/self-train only)"
     else:
         cities = DEFAULT_CITIES
+        out_dir = args.out_dir or "data/finetune"
+        label = "held-out eval set"
 
     total = 0
     for aoi, bbox in cities.items():
-        total += build_pairs(aoi, bbox, args.out_dir, resolution_m=args.resolution_m,
+        total += build_pairs(aoi, bbox, out_dir, resolution_m=args.resolution_m,
                              tile_size=args.tile_size, zoom=args.zoom,
                              min_road_fraction=args.min_road_fraction)
-    print(f"\nA6 fine-tune set: {total} pairs across {len(cities)} AOIs -> {args.out_dir}")
+    print(f"\n{label}: {total} pairs across {len(cities)} AOIs -> {out_dir}")
 
 
 if __name__ == "__main__":
