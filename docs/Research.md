@@ -198,3 +198,49 @@ Where the new tasks aim:
 - If a larger encoder (A14) or connectivity decoder (A15) doesn't beat MiT-B3 on *topology* metrics (not just IoU), don't adopt it.
 
 **Caveats:** quantitative gains cited above (clDice Betti/Opt-J F1, TTA +1.89% IoU, RoadDA +15.5pp, topology-aware UDA +7.5pp) come from *other datasets/papers* — indicative ranges to validate via E3/E4, not guarantees. clDice's soft-skeleton is memory-hungry (reduce batch/patch on free 16 GB T4/P100). CoANet code is non-commercial research license; respect dataset licenses (OSM ODbL, SpaceNet, OpenSatMap non-commercial) per §2.
+
+---
+
+## Post-A11 Build Plan — Indian Road Extraction toward SOTA (external research, 2026-06-26)
+
+> Added after **A11 confirmed our core lesson empirically**: in-domain Indian data is the only real lever — foreign aerial data *hurt* the deployment target (`Retrospective-A6-A11.md`). This section turns that into a concrete, evidence-backed curriculum and **supersedes the v1→v2 roadmap §A "more datasets / bigger encoder" bullets** as the seg-lane direction. Sourced from an external SOTA review; citations are the review's (verify before relying). Respects §2 (PyTorch, fine-tune pretrained, Streamlit+Folium, free/Colab-or-credit GPU; resilience metric stays **global efficiency** — APLS here is the *road-extraction* metric, a separate thing).
+
+**The two highest-value moves** (per the review, consistent with our own evidence):
+1. **Graph/topology-first model** — the real objective is routing connectivity, and **APLS is the metric that matters**, not pixel IoU. Use a method that outputs a road *graph* directly.
+2. **Build a large in-domain Indian corpus** (OSM auto-labels over sub-meter basemaps **+ SpaceNet-5 Mumbai**), then exploit it with **topology-aware self-training** (A12).
+
+### Datasets — priority order (the #1 lever)
+1. **OSM-auto-labeled Indian corpus (core asset).** Rasterize OSM road vectors over sub-meter Esri/Google/Mapbox basemap tiles across many Indian cities + tier-2/3 towns + rural (target ~2–5k tiles). Tooling: `label-maker` (developmentseed), RoboSat, `osmnx`+`rasterio`/`gdal`, CosmiQ `solaris`/`apls`. Render road classes at different buffer widths (~15/10/5 px main/secondary/tertiary) to absorb OSM↔imagery misalignment. **Noisy/weak labels — pretrain + self-training only, NEVER evaluation.**
+2. **SpaceNet-5 Mumbai (AOI 8)** — *genuinely Indian*, 0.3 m WorldView-3 pan-sharpened RGB, vector centerline + speed labels, free, graph-ready (CC BY-SA 4.0). `aws s3 cp s3://spacenet-dataset/spacenet/SN5_roads/tarballs/SN5_roads_train_AOI_8_Mumbai.tar.gz .` — **the in-domain prize we aren't using.** (SpaceNet also has AOI 7 Moscow, AOI 9 San Juan.)
+3. **Hand-labeled Indian GT test set (non-negotiable for credible claims).** ~50–150 tiles as **vector centerlines** (so APLS is computable), diverse cities; pick by model-uncertainty / OSM-disagreement (active learning). The genuinely scarce resource.
+4. **Keep DeepGlobe as source/anchor** (already have it; itself sampled over Thailand/Indonesia/**India** @0.5 m — so part of the "domain gap" is sensor/resolution/urban-form, not pure geography).
+5. **Pretraining-diversity sets (India coverage UNCONFIRMED):** GRSet/GlobalRoadSet (47,210 samples, 121 cities, 1 m; `xiaoyan07/GRNet_GRSet`; Baidu Drive; CC BY-NC-SA) and Global-Scale (SAM-Road++, ~3,468 imgs @1 m). Graph pretrain only — **India not individually listed in either; verify city lists first.** **Do NOT use IDD** (street-level dashcam, not overhead).
+
+### Architecture — what to switch to (a *decision to make*, not yet committed)
+- **Primary recommendation: SAM-Road++** (`earth-insights/samroadplus`, CVPR 2025, arXiv:2411.16733) — frozen **SAM ViT-B** encoder + transformer topology decoder, predicts the road graph directly; SpaceNet APLS ≈ **73.4**; its "extended-line" strategy explicitly targets tree/building-shadow occlusion (our core challenge). Single-GPU, PyTorch, *pretrained encoder* → fits §2's "fine-tune pretrained." Simpler fallback: **SAM-Road** (`htcr/sam_road`, CVPRW 2024, APLS ≈ 71.6).
+- **Fallback seg stack (if graph-first is brittle on noisy Indian OSM):** swap MiT for a remote-sensing / DINOv2 foundation encoder (Prithvi, SatMAE, Scale-MAE, DOFA, Clay via **TerraTorch**; or DINOv2-Sat) + **CoANet** strip-conv connectivity (`mj129/CoANet`, non-commercial) + **soft-clDice trained from scratch** (our A9 failure was up-weighting it on a *converged* model — the gains need it from the start) → mask→graph→APLS.
+- **SOTA bars to beat:** seg IoU — SegRoadv2 ≈ 69.9 (our v1 0.670 already near-SOTA → DeepGlobe tuning is genuinely done); **graph APLS — SAM-Road 71.6 / SAM-Road++ 73.4 / RNGDet++ 67.7**; City-scale APLS ~68–70.
+
+### Curriculum (order matters)
+- **Stage 0 — pretrain the graph model on SpaceNet** (+ optional Global-Scale); *reproduce the published SpaceNet APLS first* to validate the pipeline + the CosmiQ `apls` metric end-to-end.
+- **Stage 1 — topology-aware self-training on the unlabeled Indian corpus (this IS A12):** **UniMatch / UniMatch V2** (`LiheYoung/UniMatch`) weak-to-strong consistency **+ connectivity-refined pseudo-labels** (skeleton-prediction aux task; drop discontinuous pseudo-labels). This is the technique behind the published cross-domain gains.
+- **Stage 2 (optional booster) — RoadDA** (`LANMNG/RoadDA`, IEEE TGRS, arXiv:2108.12611): stagewise GAN alignment then intra-domain adversarial self-training → 74.92 % IoU / 85.81 % F1 cross-domain (a documented adapt-without-forgetting recipe).
+- **Stage 3 — fine-tune on the small clean hand-labeled Indian GT**, retaining the DeepGlobe/SpaceNet anchor (anti-forgetting, exactly as A6 did).
+- **Do NOT fine-tune on the tiny clean set first.**
+
+### Compute ($350 GCP credit)
+`a2-highgpu-1g` (1× A100 40 GB) = **$3.673385/hr** whole-VM (us-central1) → **~95 on-demand A100-hrs**, or **~230–290 spot-hrs** (up to 91 % off; checkpoint frequently for preemption). Comfortably covers Stage-0 pretrain + several self-training rounds + fine-tunes. **One strong model, not an ensemble** — the gains are in data/curriculum. (GCP free-credit **GPU-quota = 0** gotcha still applies — request the increase first.)
+
+### Evaluation (paper-grade)
+- **Primary metric = APLS** (routing objective). Plus **CCQ** (correctness/completeness/quality = relaxed/buffered IoU), TOPO, connectivity ratio, occlusion-recall, IoU/Dice.
+- **Headline on the hand-labeled Indian GT** — never headline the OSM-agreement proxy (describe it explicitly as a domain-adaptation proxy). Also report DeepGlobe + SpaceNet held-out so reviewers can place us against published SOTA.
+- **Ablations:** backbone swap · +Indian-OSM pretrain · +self-training · +clean fine-tune · +topology-loss/connectivity — each must move APLS/CCQ.
+
+### Caveats
+- **GRSet / Global-Scale India coverage UNCONFIRMED** — pretraining diversity only; verify city lists (GRSet via Baidu Drive is awkward outside China).
+- **Licensing:** SpaceNet CC BY-SA 4.0 (commercial OK + attribution/share-alike) · DeepGlobe research-only · GRSet CC BY-NC-SA · basemap tiles carry provider terms (fine offline, risky to redistribute) · Maxar Open Data CC BY-NC 4.0 (India coverage is disaster-event-driven, sparse). Flag in any publication.
+- **OSM labels are noisy/misaligned in India** — excellent for pretrain/self-train, never for eval GT (hence the mandatory hand-labeled set).
+- **Self-training amplifies label noise** — confidence-threshold + connectivity-refine + validate each round on the clean Indian set to catch silent regressions.
+- Some 2026 numbers (LineGraph2Road, PathMamba) are author-reported, not independently verified. DeepGlobe resolution is cited inconsistently (0.5 m original; some papers say ~5 m for a val subset) — use 0.5 m and verify your tiles.
+
+**One-line direction:** *pretrain on graph data → self-train on many Indian OSM-weak tiles with connectivity-refined pseudo-labels → fine-tune on a small clean Indian set → score on APLS.* Task rows: Tracker **A12** (self-training), **A16** (Indian corpus + SpaceNet-5 Mumbai), **A17** (hand-labeled Indian GT / APLS), **A18** (SAM-Road++ spike).
