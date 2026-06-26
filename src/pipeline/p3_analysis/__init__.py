@@ -17,6 +17,10 @@ from src.pipeline.p3_analysis.flood import (
     flood_comparison,
     nodes_below_elevation,
     nodes_in_polygon,
+from src.pipeline.p3_analysis.percolation import (
+    compare_centralities,
+    percolation_centrality,
+    spatial_demand,
 )
 from src.pipeline.p3_analysis.resilience import (
     ablation_curve,
@@ -37,4 +41,7 @@ __all__ = [
     "flood_comparison",
     "nodes_below_elevation",
     "nodes_in_polygon",
+    "compare_centralities",
+    "percolation_centrality",
+    "spatial_demand",
 ]
