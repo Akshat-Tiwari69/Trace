@@ -106,6 +106,22 @@ Reproduce with `python -m src.pipeline.p3_analysis.evaluate` (reads the committe
 
 *Numbers are on the OSM stand-in (S1); the same `evaluate` runs unchanged on a real predicted-mask graph (S2). The graph is now S3-simplified + S4-consolidated — 37% lighter, identical connectivity.*
 
+### Topology metric suite (E2)
+
+The connectivity/topology scoreboard, consolidated — does the extracted graph
+*route* like the real network, not just *look* like it pixel-wise?
+
+| Metric | Owner | Value | Source |
+|---|---|---|---|
+| **Connectivity Ratio** | graph | **+15.1%** (largest CC after healing) | `evaluate` · S3/E1 |
+| **APLS** (vs OSM) | graph | **0.45** symmetric (densified, snap 15 m) | `apls` · S7 |
+| **Relaxed / buffered IoU** | seg | *Akshat — released model, A7/A10* | `p1_segment` |
+
+Graph-side topology metrics (connectivity ratio + APLS) are **reported and
+reproducible** (commands above); the buffered-IoU row is the segmentation lane's
+contribution. Together they catch the "good pixels, bad topology" failure mode
+(F1 0.72 → APLS 0.25) the project exists to avoid.
+
 ### Topology validation — APLS vs OSM (S7)
 
 Reproduce with `python -m src.pipeline.p3_analysis.apls` (compares the healed graph
