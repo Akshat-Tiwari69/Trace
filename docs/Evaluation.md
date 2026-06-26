@@ -123,6 +123,36 @@ heal recovers OSM routing *after* damage — honest, not inflated. On a clean
 (non-occluded) or S3/S4-simplified build the score rises. APLS guards against the
 "good pixels, bad topology" trap (a mask at F1 0.72 can score APLS 0.25).
 
+### Resilience ablations (E4)
+
+The design choices are only justified if turning them on/off *moves the number*.
+
+**Healing on vs off** — does MST/Union-Find healing actually make a more resilient
+network? (Reproduce: `python -m src.pipeline.p3_analysis.evaluate`; "off" = drop the
+`is_bridged` edges from the sample.)
+
+| | components | global efficiency |
+|---|---|---|
+| **Healing OFF** | 26 | 0.001008 |
+| **Healing ON** | **10** | **0.001105** |
+| Δ | −16 components | **+9.6% efficiency** · **+15.1% connectivity ratio** (build-time) |
+
+**Failure mode — targeted vs random vs flood** (same node count; reproduce:
+`python -m src.pipeline.p3_analysis.flood`):
+
+| Failure | end Resilience Index | reading |
+|---|---|---|
+| **Targeted** (highest-betweenness first) | **0.357** | most damaging — losing the real chokepoints |
+| **Random** (scattered) | 0.428 | distributed loss hurts more than a localized one |
+| **Flood** (spatial cluster around the top chokepoint) | 0.785 | least damaging — the network reroutes around a *localized* hole |
+
+**Reading:** healing measurably improves resilience; and the network is **robust to
+localized floods but vulnerable to targeted chokepoint failure** — exactly the
+distinction a disaster planner needs. (A flood of a *redundant* inland area, `--central`,
+is even more survivable, RI > 1.) The naive expectation "flood ≫ random" does **not**
+hold here because a contiguous flood mostly drowns low-importance local streets;
+reported honestly rather than fitted to the hypothesis.
+
 ## Target Scores
 
 Stated as intents, not invented precise numbers (actuals filled in as we run):
