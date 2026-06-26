@@ -1,0 +1,36 @@
+{
+  "spearman": 0.9775,
+  "top_n": 10,
+  "top_n_overlap": 0.7,
+  "top_betweenness": [
+    45,
+    29,
+    32,
+    11,
+    201,
+    96,
+    176,
+    89,
+    148,
+    168
+  ],
+  "top_percolation": [
+    45,
+    201,
+    29,
+    11,
+    32,
+    188,
+    129,
+    194,
+    96,
+    89
+  ],
+  "promoted_by_demand": [
+    188,
+    129,
+    194
+  ],
+  "aoi": "panaji_demo",
+  "demand": "spatial Gaussian @ se corner"
+}

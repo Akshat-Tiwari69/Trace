@@ -11,6 +11,11 @@ from src.pipeline.p3_analysis.criticality import (
     compute_betweenness,
     rank_table,
 )
+from src.pipeline.p3_analysis.percolation import (
+    compare_centralities,
+    percolation_centrality,
+    spatial_demand,
+)
 from src.pipeline.p3_analysis.resilience import (
     ablation_curve,
     global_efficiency,
@@ -25,4 +30,7 @@ __all__ = [
     "ablation_curve",
     "global_efficiency",
     "resilience_index",
+    "compare_centralities",
+    "percolation_centrality",
+    "spatial_demand",
 ]

@@ -150,7 +150,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **S7** | ✅ | **APLS + topology validation against OSM** | — | E4 | **DONE + merged** (`p3_analysis/apls.py` + CLI): densified, symmetric node-based APLS vs a committed OSM ground-truth graph (offline-reproducible). Sample **APLS = 0.45** (gt→prop 0.34, prop→gt 0.67) vs SpaceNet baseline ≈0.49; in `Evaluation.md`. 4 tests. |
 | **S8** | ✅ | **Articulation points & bridges** | — | F4 | **DONE + merged** (`criticality.annotate_cut_structure` → `analyze`): flags cut nodes/edges (single-points-of-failure) — distinct from betweenness. Emits `is_articulation` (→criticality.csv + geojson) + `is_bridge` (→geojson; distinct from `is_bridged`). 239 art. pts / 306 bridges on sample. 5 tests; A5 dashboard column-check relaxed to subset. |
 | **S9** | ⏳ | **Approximate k-sample betweenness + caching for large graphs** | — | — | Expose `betweenness_centrality(k=...)` with cached results; benchmark vs exact. Done when k-sample runs ≥ 5× faster on a large graph with rank correlation ≥ 0.9 vs exact, documented. |
-| **S10** | ⏳ | **Demand/population-weighted & percolation centrality** | — | — | Optional population/demand weight or `nx.percolation_centrality` so criticality reflects usage, not just topology. Done when weighted criticality is produced and compared to plain betweenness on sample. |
+| **S10** | 🔄 | **Demand/population-weighted & percolation centrality** | — | — | Optional population/demand weight or `nx.percolation_centrality` so criticality reflects usage, not just topology. Done when weighted criticality is produced and compared to plain betweenness on sample. — **DONE** (`p3_analysis/percolation.py` + CLI): demand-weighted `percolation_centrality` (synthetic spatial-Gaussian or degree demand) + `compare_centralities` vs plain betweenness → `data/sample/{aoi}_percolation.json`. On sample (population @ SE corner): **Spearman 0.978, top-10 overlap 70%** — topology dominates but demand-weighting **reshuffles** the order (node 201 jumps 5th→2nd; nodes 188/129/194 rise into the top-10 serving the populous area). Shows criticality reflects *usage*, not just structure. 4 unit tests. **PR pending.** |
 | **S11** | ⏳ | **Flood / elevation-based failure scenario + comparison** | — | F5, E4 | Disable nodes below an elevation / inside a flood polygon and recompute the global-efficiency RI curve; compare targeted vs random vs flood. Done when a flood RI curve is written to `data/processed/`, re-runnable, tested. |
 
 ### Saanvi — dashboard (CPU, off `data/sample/`)
@@ -242,6 +242,11 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-26 (Shaivi — E4 ablation table + S10 demand-weighted centrality)**
+- **E4 done** (docs): "Resilience ablations (E4)" in `Evaluation.md` — healing on/off (26→10 components, +9.6% efficiency / +15.1% connectivity) + failure-mode table (end RI targeted 0.357 < random 0.428 < flood 0.785). Honest reading: healing helps; network is robust to localized floods, vulnerable to targeted chokepoint loss. PR #57 (after S11 #56 for the flood CLI).
+- **S10 done** (`p3_analysis/percolation.py` + CLI): demand-weighted percolation centrality (`nx.percolation_centrality`, synthetic spatial demand) vs plain betweenness. On sample: **Spearman 0.978, top-10 overlap 70%** — topology dominates but demand-weighting reshuffles (node 201 5th→2nd; 188/129/194 promoted into the top-10 near the populous area). Criticality reflects usage, not just structure. 4 tests; comparison committed to `{aoi}_percolation.json`.
+- **This clears the entire Shaivi backlog (S1–S11 + E1/E4).** Open PRs: S5 #54, S9 #55, S11 #56, E4 #57, S10 (this).
 
 **2026-06-26 (Akshat — A9 done: clDice-first rejected; recipe plateau confirmed)**
 - Done: **A9 ✅** — clDice-first fine-tune (clDice 0.1→0.3) measured on the **hard clDice topology score**: **0.827 → 0.772 (−0.055)** + IoU −0.078 → *worse on both*. Over-weighting clDice on an already-clDice-trained model destabilises it. Not adopted.
