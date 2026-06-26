@@ -6,10 +6,22 @@ in ``docs/Tracker.md`` §8). CPU-only, classical Python.
 """
 
 from src.pipeline.p3_analysis.criticality import (
+    BetweennessCache,
     annotate_criticality,
     annotate_cut_structure,
+    benchmark_betweenness,
     compute_betweenness,
     rank_table,
+)
+from src.pipeline.p3_analysis.flood import (
+    flood_comparison,
+    nodes_below_elevation,
+    nodes_in_polygon,
+)
+from src.pipeline.p3_analysis.percolation import (
+    compare_centralities,
+    percolation_centrality,
+    spatial_demand,
 )
 from src.pipeline.p3_analysis.resilience import (
     ablation_curve,
@@ -18,11 +30,19 @@ from src.pipeline.p3_analysis.resilience import (
 )
 
 __all__ = [
+    "BetweennessCache",
     "annotate_criticality",
     "annotate_cut_structure",
+    "benchmark_betweenness",
     "compute_betweenness",
     "rank_table",
     "ablation_curve",
     "global_efficiency",
     "resilience_index",
+    "flood_comparison",
+    "nodes_below_elevation",
+    "nodes_in_polygon",
+    "compare_centralities",
+    "percolation_centrality",
+    "spatial_demand",
 ]

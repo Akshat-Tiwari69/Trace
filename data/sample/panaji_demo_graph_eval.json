@@ -55,9 +55,9 @@
     "baseline_global_efficiency": 0.001105,
     "ablation_steps": 40,
     "targeted_ri_end": 0.4912,
-    "random_ri_end": 0.5279,
+    "random_ri_end": 0.5278,
     "targeted_minus_random_gap": 0.0367,
-    "targeted_mean_ri": 0.6005,
+    "targeted_mean_ri": 0.6004,
     "random_mean_ri": 0.7312,
     "targeted_degrades_faster": true
   }

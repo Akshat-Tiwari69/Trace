@@ -1,0 +1,9 @@
+{
+  "n_nodes": 2500,
+  "n_edges": 4900,
+  "k": 150,
+  "exact_s": 25.164,
+  "ksample_s": 1.519,
+  "speedup": 16.6,
+  "spearman": 0.98
+}

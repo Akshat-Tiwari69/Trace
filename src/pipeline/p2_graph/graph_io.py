@@ -32,7 +32,7 @@ def save_graphml(graph: "nx.Graph", path: Path) -> None:
     for _, _, data in out.edges(data=True):
         if isinstance(data.get("geometry"), list):
             data["geometry"] = json.dumps(data["geometry"])
-    for key in ("heal", "simplify", "consolidate"):  # graph-level metadata → JSON string
+    for key in ("heal", "simplify", "consolidate", "polyline"):  # graph-level metadata → JSON string
         if isinstance(out.graph.get(key), dict):
             out.graph[key] = json.dumps(out.graph[key])
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -48,7 +48,7 @@ def load_graphml(path: Path) -> "nx.Graph":
         geom = data.get("geometry")
         if isinstance(geom, str):
             data["geometry"] = json.loads(geom)
-    for key in ("heal", "simplify", "consolidate"):  # decode graph-level metadata
+    for key in ("heal", "simplify", "consolidate", "polyline"):  # decode graph-level metadata
         if isinstance(graph.graph.get(key), str):
             graph.graph[key] = json.loads(graph.graph[key])
     return graph
@@ -109,7 +109,7 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
     fc = {"type": "FeatureCollection", "features": features}
     # Carry build-time graph metadata (authoritative heal/simplify stats) so the
     # evaluator reports true numbers instead of re-deriving them from the graph.
-    meta = {k: graph.graph[k] for k in ("heal", "simplify", "consolidate") if k in graph.graph}
+    meta = {k: graph.graph[k] for k in ("heal", "simplify", "consolidate", "polyline") if k in graph.graph}
     if meta:
         fc["meta"] = meta
     return fc
