@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import itertools
 from pathlib import Path
 from typing import Any
 
@@ -202,6 +201,14 @@ def _build_student(cfg: SelfTrainConfig):
                        decoder_attention_type=cfg.decoder_attention_type)
 
 
+def _cycle(loader):
+    """Infinitely cycle a DataLoader WITHOUT caching — unlike ``itertools.cycle``,
+    which retains every batch it yields to replay them → unbounded RAM growth."""
+    while True:
+        for batch in loader:
+            yield batch
+
+
 def train_selftrain(cfg: SelfTrainConfig) -> dict:
     torch.manual_seed(cfg.seed)
     device = cfg.device
@@ -236,9 +243,9 @@ def train_selftrain(cfg: SelfTrainConfig) -> dict:
     for epoch in range(1, cfg.epochs + 1):
         student.train()
         lam = cfg.consistency_weight * min(1.0, epoch / max(1, cfg.consistency_rampup_epochs))
-        unl_iter = itertools.cycle(unl_loader)         # cycle unlabeled to match labeled length
+        unl_iter = _cycle(unl_loader)                  # cycle unlabeled WITHOUT caching (itertools.cycle leaks RAM)
         run_sup = run_cons = 0.0
-        for images, masks in lab_loader:
+        for step, (images, masks) in enumerate(lab_loader):
             images, masks = images.to(device), masks.to(device)
             weak, strong = next(unl_iter)
             weak, strong = weak.to(device), strong.to(device)
@@ -267,12 +274,15 @@ def train_selftrain(cfg: SelfTrainConfig) -> dict:
             teacher.update(student)
             run_sup += float(sup.detach())
             run_cons += float(cons.detach())
+            if device != "cpu" and (step + 1) % 50 == 0:
+                torch.cuda.empty_cache()               # release reserved-but-unused mem (Windows has no expandable_segments → fragments)
 
         val = evaluate(teacher.module, val_loader, device, threshold=cfg.threshold)  # evaluate the teacher
         history.append({"epoch": epoch, "sup": run_sup / steps_per_epoch,
                         "cons": run_cons / steps_per_epoch, "lambda": lam, "val_iou": val["iou"]})
+        gpu = f" | GPU {torch.cuda.memory_reserved()/1e9:.1f}G" if device != "cpu" else ""
         print(f"epoch {epoch:02d} | sup {run_sup/steps_per_epoch:.4f} | cons {run_cons/steps_per_epoch:.4f} "
-              f"(λ {lam:.2f}) | teacher val IoU {val['iou']:.4f}", flush=True)
+              f"(λ {lam:.2f}) | teacher val IoU {val['iou']:.4f}{gpu}", flush=True)
         if val["iou"] > best_iou:
             best_iou = val["iou"]
             save_checkpoint(teacher.module, out, meta={
