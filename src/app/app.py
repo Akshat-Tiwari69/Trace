@@ -79,6 +79,15 @@ def load_sample_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     return features, criticality
 
 
+@st.cache_data
+def load_resilience_curve() -> pd.DataFrame | None:
+    """Load the resilience degradation curve (P3 contract) if available."""
+    path = REPO_ROOT / "data" / "sample" / "panaji_demo_resilience.csv"
+    if path.is_file():
+        return pd.read_csv(path)
+    return None
+
+
 def split_features(
     features: gpd.GeoDataFrame,
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
@@ -389,6 +398,7 @@ def render_panel(
     features: gpd.GeoDataFrame,
     criticality: pd.DataFrame,
     simulation: SimulationResult | None,
+    resilience_curve: pd.DataFrame | None = None,
 ) -> None:
     """Render controls, metrics, ranked hotspots, and live charts."""
     nodes, edges = split_features(features)
@@ -419,6 +429,7 @@ def render_panel(
     )
 
     st.subheader("Scenario controls")
+    view_mode = st.radio("View Mode", ["Interactive Map", "Side-by-Side Comparison"], horizontal=True, key="view_mode")
     st.selectbox("Region", ["Panaji demo"], disabled=True)
     scenario = st.selectbox("Scenario", ["Road closure", "Accident", "Flood"])
     # TODO: wire scenario-specific behavior into routing logic
@@ -464,6 +475,22 @@ def render_panel(
     else:
         st.info("No simulation running. Select a junction, then simulate its closure.")
 
+    if resilience_curve is not None:
+        st.subheader("Resilience Degradation Curve")
+        curve_data = resilience_curve.set_index("n_removed")
+        if "targeted_resilience_index" in curve_data.columns and "random_resilience_index" in curve_data.columns:
+            chart_data = curve_data.rename(columns={
+                "targeted_resilience_index": "Targeted failure",
+                "random_resilience_index": "Random failure"
+            })[["Targeted failure", "Random failure"]]
+        else:
+            chart_data = curve_data
+        st.line_chart(
+            chart_data,
+            color=["#ff4b4b", "#00d4ff"] if len(chart_data.columns) == 2 else None,
+            height=200,
+        )
+
     st.subheader("Top critical junctions")
     top_nodes = critical_nodes[["rank", "node_id", "betweenness"]].head(5).copy()
     top_nodes["betweenness"] = top_nodes["betweenness"].map(lambda value: f"{value:.3f}")
@@ -498,6 +525,7 @@ def main() -> None:
     try:
         features, criticality = load_sample_data()
         graph = graph_from_features(features)
+        resilience_curve = load_resilience_curve()
     except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
         st.error(f"Could not load the sample network: {error}")
         st.stop()
@@ -519,7 +547,8 @@ def main() -> None:
 
     show_critical = st.session_state.get("show_critical", True)
     show_healed = st.session_state.get("show_healed", True)
-    road_map = build_map(
+    show_spof = st.session_state.get("show_spof", False)
+    sim_map = build_map(
         features,
         criticality,
         graph,
@@ -527,22 +556,57 @@ def main() -> None:
         simulation,
         show_critical,
         show_healed,
+        show_spof,
     )
 
+    view_mode = st.session_state.get("view_mode", "Interactive Map")
     map_column, panel_column = st.columns([6.5, 3.5], gap="medium")
+    
     with map_column:
-        map_state = st_folium(
-            road_map,
-            height=760,
-            use_container_width=True,
-            returned_objects=["last_object_clicked"],
-            key=f"network_map_{disabled_node}_{show_critical}_{show_healed}",
-        )
+        if view_mode == "Side-by-Side Comparison":
+            baseline_map = build_map(
+                features,
+                criticality,
+                graph,
+                int(st.session_state["selected_node"]),
+                None,
+                show_critical,
+                show_healed,
+                show_spof,
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Baseline Network**")
+                st_folium(
+                    baseline_map,
+                    height=500,
+                    use_container_width=True,
+                    key=f"baseline_map_{disabled_node}_{show_critical}_{show_healed}_{show_spof}",
+                )
+            with col2:
+                st.markdown("**Post-Failure Network**")
+                map_state = st_folium(
+                    sim_map,
+                    height=500,
+                    use_container_width=True,
+                    returned_objects=["last_object_clicked"],
+                    key=f"network_map_{disabled_node}_{show_critical}_{show_healed}_{show_spof}",
+                )
+        else:
+            map_state = st_folium(
+                sim_map,
+                height=760,
+                use_container_width=True,
+                returned_objects=["last_object_clicked"],
+                key=f"network_map_{disabled_node}_{show_critical}_{show_healed}_{show_spof}",
+            )
+        
         st.caption(
             "Brighter roads connect more critical junctions · dashed = healed · "
             "orange = reroute · red = disabled"
         )
-    clicked = map_state.get("last_object_clicked") if map_state else None
+        
+    clicked = map_state.get("last_object_clicked") if 'map_state' in locals() and map_state else None
     click_signature = (
         (round(float(clicked["lat"]), 7), round(float(clicked["lng"]), 7))
         if clicked and "lat" in clicked and "lng" in clicked
@@ -557,7 +621,7 @@ def main() -> None:
             st.rerun()
 
     with panel_column:
-        render_panel(features, criticality, simulation)
+        render_panel(features, criticality, simulation, resilience_curve)
 
 
 if __name__ == "__main__":
