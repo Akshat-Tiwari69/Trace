@@ -1,0 +1,16 @@
+{
+  "n_test_chips": 127,
+  "n_test_tiles": 449,
+  "threshold": 0.44,
+  "image_size": 512,
+  "models": {
+    "deepglobe_mit_b3_scse_512px_best.pt": {
+      "iou": 0.3768379714966348,
+      "dice": 0.5392693689966623
+    },
+    "road_v2.pt": {
+      "iou": 0.37274447037319164,
+      "dice": 0.5356326433541501
+    }
+  }
+}
