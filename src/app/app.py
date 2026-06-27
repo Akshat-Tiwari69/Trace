@@ -5,6 +5,9 @@ from itertools import combinations
 from math import inf, isfinite
 from pathlib import Path
 
+import io
+from PIL import Image, ImageDraw, ImageFont
+
 import branca.colormap as cm
 import folium
 import geopandas as gpd
@@ -127,6 +130,53 @@ def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
             ),
         )
     return graph
+
+
+def generate_summary_png(criticality: pd.DataFrame, simulation: SimulationResult | None) -> bytes:
+    """Generate a one-page PNG summary of the network criticality and current resilience."""
+    img = Image.new("RGB", (800, 600), color=(18, 18, 18))
+    draw = ImageDraw.Draw(img)
+    try:
+        font = ImageFont.load_default()
+    except IOError:
+        font = None
+    
+    # Title
+    draw.text((30, 30), "Route Resilience - Network Summary Report", fill=(255, 255, 255), font=font)
+    
+    # Simulation Status
+    y_offset = 80
+    draw.text((30, y_offset), "Simulation Status:", fill=(200, 200, 200), font=font)
+    y_offset += 30
+    if simulation:
+        draw.text((50, y_offset), f"- Disabled Node: {simulation.disabled_node}", fill=(255, 75, 75), font=font)
+        y_offset += 25
+        draw.text((50, y_offset), f"- Resilience Index: {simulation.resilience_index:.4f}", fill=(0, 212, 255), font=font)
+        y_offset += 25
+        draw.text((50, y_offset), f"- Connected Component Size: {simulation.largest_cc_fraction * 100:.1f}%", fill=(255, 255, 255), font=font)
+        y_offset += 25
+        if simulation.route:
+            draw.text((50, y_offset), f"- Impact: {simulation.route.travel_time_delta_pct:+.1f}% travel time", fill=(255, 255, 255), font=font)
+    else:
+        draw.text((50, y_offset), "Baseline Network (No failure simulated).", fill=(255, 255, 255), font=font)
+        
+    # Criticality Table
+    y_offset += 60
+    draw.text((30, y_offset), "Top 10 Critical Junctions:", fill=(200, 200, 200), font=font)
+    y_offset += 30
+    draw.text((50, y_offset), f"{'Rank':<10} {'Node ID':<15} {'Betweenness':<15}", fill=(255, 255, 255), font=font)
+    y_offset += 20
+    draw.line([(50, y_offset), (350, y_offset)], fill=(100, 100, 100), width=1)
+    y_offset += 10
+    
+    top_nodes = criticality.head(10)
+    for _, row in top_nodes.iterrows():
+        draw.text((50, y_offset), f"{row['rank']:<10} {int(row['node_id']):<15} {row['betweenness']:.4f}", fill=(255, 255, 255), font=font)
+        y_offset += 25
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
 
 
 def path_length(graph: nx.Graph, path: tuple[int, ...] | list[int]) -> float:
@@ -494,7 +544,31 @@ def render_panel(
     st.subheader("Top critical junctions")
     top_nodes = critical_nodes[["rank", "node_id", "betweenness"]].head(5).copy()
     top_nodes["betweenness"] = top_nodes["betweenness"].map(lambda value: f"{value:.3f}")
-    st.dataframe(top_nodes, hide_index=True, use_container_width=True)
+    st.dataframe(
+        top_nodes,
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    st.subheader("Export / Report")
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        st.download_button(
+            label="Download GeoJSON",
+            data=features.to_json(),
+            file_name="network_export.geojson",
+            mime="application/geo+json",
+            use_container_width=True,
+        )
+    with col_dl2:
+        png_data = generate_summary_png(criticality, simulation)
+        st.download_button(
+            label="Download Summary PNG",
+            data=png_data,
+            file_name="resilience_summary.png",
+            mime="image/png",
+            use_container_width=True,
+        )
     st.caption(f"Network: {len(nodes):,} junctions · {len(edges):,} road links")
 
 

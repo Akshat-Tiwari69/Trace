@@ -171,7 +171,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **F4** | ✅ | **Surface articulation points / bridges in the UI** | S8 | — | Read the new criticality columns; add a layer/legend highlighting single-points-of-failure. Done when articulation nodes/bridges are visually distinct with tooltips, off the sample data. |
 | **F5** | ⏳ | **Draw-a-flood-polygon → multi-node failure simulation** | S11 | — | Folium Draw plugin; disable all nodes inside the drawn polygon; recompute RI + reroute. Done when drawing a polygon disables the enclosed nodes and updates RI/charts live. |
 | **F6** | ✅ | **Before/after comparison + resilience-curve side chart** | — | — | Side-by-side/toggle of baseline vs post-failure network + a resilience-degradation curve chart. Done when both views render and the curve matches P3 numbers. |
-| **F7** | ⏳ | **Export / report: download GeoJSON + summary PDF/PNG** | — | — | Download buttons for the current graph (GeoJSON) + a one-page summary (criticality table + RI). Done when downloads work from the running app. |
+| **F7** | ✅ | **Export / report: download GeoJSON + summary PDF/PNG** | — | — | Download buttons for the current graph (GeoJSON) + a one-page summary (criticality table + RI). Done when downloads work from the running app. |
 | **F8** | ⏳ | **Polish: loading states, error handling, colorblind-safe legend** | — | — | Spinners, graceful errors for missing artifacts, colorblind-safe ramp + legend. Done when the app degrades gracefully with no artifacts and passes a colorblind check. |
 
 ### Shared / final
@@ -251,6 +251,10 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-27 (Saanvi — F7 ✅)**
+- Done: **F7 ✅** — Implemented Export/Report section using `PIL` to generate a stylized PNG report of the current Resilience Index, connected component drop, and the top 10 criticality table. Added a `features.to_json()` GeoJSON download button. Opted for `PIL` over `wkhtmltopdf`/`matplotlib` to ensure zero-dependency, robust exporting.
+- Next: Open PR for F7. Move on to F8 Polish.
 
 **2026-06-27 (Saanvi — F6 ✅)**
 - Done: **F6 ✅** — Added a "View Mode" toggle to switch between standard Interactive Map and Side-by-Side Comparison modes. When active, it displays the baseline network alongside the post-failure simulation. Added a new native `st.line_chart` in the side panel to parse and display the P3 `resilience.csv` degradation curves (Targeted vs Random), matching the requested contract.
