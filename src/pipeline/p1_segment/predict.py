@@ -20,6 +20,7 @@ from pathlib import Path
 
 from src.pipeline.p1_segment.model import load_checkpoint, predict_large
 from src.pipeline.p1_segment.osm_mask import save_binary_png
+from src.pipeline.p1_segment.postprocess import postprocess_mask
 
 
 def main() -> None:
@@ -30,6 +31,12 @@ def main() -> None:
     p.add_argument("--tile-size", type=int, default=256)
     p.add_argument("--threshold", type=float, default=0.5)
     p.add_argument("--tta", action="store_true", help="D4 test-time augmentation (8× compute, ~+IoU)")
+    p.add_argument("--postprocess", action="store_true",
+                   help="A10 mask cleanup: drop tiny false components (+ optional close)")
+    p.add_argument("--min-component-size", type=int, default=50,
+                   help="min connected-component size in px to keep (with --postprocess)")
+    p.add_argument("--pp-close-radius", type=int, default=0,
+                   help="binary-close disk radius to bridge pin-hole gaps (with --postprocess)")
     p.add_argument("--interim-dir", default="data/interim")
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
@@ -44,6 +51,12 @@ def main() -> None:
     model, meta = load_checkpoint(args.checkpoint, map_location=args.device)
     mask = predict_large(model, image, tile_size=args.tile_size,
                          device=args.device, threshold=args.threshold, tta=args.tta)
+
+    if args.postprocess:
+        roads_before = mask.mean()
+        mask = postprocess_mask(mask, min_size=args.min_component_size,
+                                close_radius=args.pp_close_radius)
+        print(f"[{args.aoi}] postprocess: roads {roads_before:.2%} -> {mask.mean():.2%}")
 
     out = Path(args.interim_dir) / f"{args.aoi}_mask.png"
     save_binary_png(mask, out)
