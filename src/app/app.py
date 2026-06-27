@@ -29,6 +29,13 @@ SAMPLE_GEOJSON = REPO_ROOT / "data" / "sample" / "panaji_demo_graph.geojson"
 SAMPLE_CRITICALITY = REPO_ROOT / "data" / "sample" / "panaji_demo_criticality.csv"
 
 
+def _truthy(value: object) -> bool:
+    """Interpret a GeoJSON/CSV flag as a bool — robust to bool, str, or NaN."""
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes"}
+    return value is True or value == 1
+
+
 @dataclass(frozen=True)
 class RouteResult:
     """Representative route before and after a junction failure."""
@@ -104,16 +111,16 @@ def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
             x=float(node.geometry.x),
             y=float(node.geometry.y),
             betweenness=float(node.get("betweenness", 0.0)),
-            is_critical=(node.get("is_critical") == True),
-            is_articulation=(node.get("is_articulation") == True),
+            is_critical=_truthy(node.get("is_critical")),
+            is_articulation=_truthy(node.get("is_articulation")),
         )
     for _, edge in edges.iterrows():
         graph.add_edge(
             int(edge["u"]),
             int(edge["v"]),
             length_m=float(edge["length_m"]),
-            is_bridged=(edge.get("is_bridged") == True),
-            is_bridge=(edge.get("is_bridge") == True),
+            is_bridged=_truthy(edge.get("is_bridged")),
+            is_bridge=_truthy(edge.get("is_bridge")),
             coordinates=tuple(
                 (float(longitude), float(latitude))
                 for longitude, latitude in edge.geometry.coords
@@ -280,8 +287,8 @@ def build_map(
     )
 
     for _, edge in edges.iterrows():
-        is_bridged = (edge.get("is_bridged") == True)
-        is_bridge = (edge.get("is_bridge") == True)
+        is_bridged = _truthy(edge.get("is_bridged"))
+        is_bridge = _truthy(edge.get("is_bridge"))
         if is_bridged and not show_healed:
             continue
         start, end = int(edge["u"]), int(edge["v"])
@@ -311,10 +318,10 @@ def build_map(
             tooltip=f"Road {start}–{end} · criticality {score:.3f} · {state}",
         ).add_to(road_map)
 
-    critical_ids = set(criticality.loc[criticality["is_critical"] == True, "node_id"].astype(int))
+    critical_ids = set(criticality.loc[criticality["is_critical"].map(_truthy), "node_id"].astype(int))
     articulation_ids = set()
     if "is_articulation" in criticality.columns:
-        articulation_ids = set(criticality.loc[criticality["is_articulation"] == True, "node_id"].astype(int))
+        articulation_ids = set(criticality.loc[criticality["is_articulation"].map(_truthy), "node_id"].astype(int))
 
     nodes_to_show = set()
     if show_critical:
@@ -327,7 +334,6 @@ def build_map(
             node_id = int(node["node_id"])
             score = float(scores.get(node_id, 0.0))
             is_art = node_id in articulation_ids
-            
             if node_id == disabled_node:
                 colour, radius, label = "#ff4b4b", 9, "Disabled junction"
             elif node_id == selected_node:
