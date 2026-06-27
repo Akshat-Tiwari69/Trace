@@ -244,3 +244,35 @@ Where the new tasks aim:
 - Some 2026 numbers (LineGraph2Road, PathMamba) are author-reported, not independently verified. DeepGlobe resolution is cited inconsistently (0.5 m original; some papers say ~5 m for a val subset) — use 0.5 m and verify your tiles.
 
 **One-line direction:** *pretrain on graph data → self-train on many Indian OSM-weak tiles with connectivity-refined pseudo-labels → fine-tune on a small clean Indian set → score on APLS.* Task rows: Tracker **A12** (self-training), **A16** (Indian corpus + SpaceNet-5 Mumbai), **A17** (hand-labeled Indian GT / APLS), **A18** (SAM-Road++ spike).
+
+---
+
+## A12 Self-Training — External Code-Review Triage + Project-Context Filter (2026-06-27)
+
+> An external (AI-generated) review of the seg pipeline produced 26 suggestions (`Road_Segmentation_Code_Review.pdf`). It read the code but had **none of this project's hard-won context**, so most of its "improvements" optimize the wrong axis. Recorded here so the next reviewer/agent starts from our reality instead of re-deriving it, and so the few real wins are tracked (→ **A19–A22**). Verified against the actual code before triaging.
+
+### The 9 facts a generic reviewer lacks (the filter to apply to *any* seg suggestion)
+1. **Foreign data hurts here (A11).** In-domain Indian data is the only proven lever; adding foreign aerial (v3) *lowered* the deployment target and was rejected. ⇒ architecture/loss knobs are the wrong axis.
+2. **8 GB VRAM ceiling** (3070 Ti, also drives the display). We fought OOM to land clDice-off, 384px, batch 1/1, num_workers 0. ⇒ anything that *adds* activation memory (multi-scale, aux heads, deep supervision, re-enabling clDice) is a non-starter.
+3. **CPU-bound, not GPU-bound** on this hardware (GPU 20–60 % util, ~70 min/epoch). ⇒ GPU-side "speedups" make the CPU stall worse; the real win is removing CPU work in the loop.
+4. **Indian labels are the scarce resource** (hand-labeled GT barely exists — that's A17). ⇒ "make val bigger / add APLS" isn't free; there's no GT to compute it against yet.
+5. **North-star is graph global-efficiency / routing**, not pixel IoU. ⇒ connectivity-aware items (APLS, topology refinement) rank above pixel-boundary losses.
+6. **Pseudo-labels are OSM-derived** (positional offset, missing minor roads). Connectivity-refine exists to fight *OSM* noise specifically.
+7. **Honest-eval bar:** every change must beat **v1 on held-out Indian TEST cities** to ship (v2 trained-on-eval-tiles → proxy only; v3 rejected on this bar). ⇒ suggestions are hypotheses, not wins.
+8. **clDice was tried and removed for OOM** (A9 also showed up-weighting it on a converged model hurts) — not overlooked. A review telling us to "schedule clDice" is recommending what we deliberately cut.
+9. **CoarseDropout is a deliberate feature** (A8 occlusion-recall task, with a paired occlusion mask), not careless supervision.
+
+### Triage — what we adopt vs reject
+| Review item | Verdict | Why / task |
+|---|---|---|
+| #23 save optimizer/scheduler/scaler/EMA + epoch → **resume** | ✅ **adopt** | Confirmed `save_checkpoint` stores weights only; a stop restarts from scratch. **Cost us a lost epoch on 2026-06-27.** → **A19** |
+| #21 avoid CPU↔GPU transfer in connectivity refinement | ✅ **adopt** | `refine_pseudo()` does `.cpu().numpy()`→scipy→GPU **every step** — a real chunk of the CPU-bound epoch time. → **A20** |
+| #9 search prediction threshold instead of fixed 0.44 | ✅ **adopt (eval)** | Cheap; a per-model fair sweep could change the v4-vs-v1 verdict. → **A21** |
+| #19 soft pseudo-labels · #20 dynamic confidence · #22 topology-aware refinement | 🟡 **optional** | Legit self-train knobs (current: hard {0,1} + connected-component-size). Medium value; the knobs most likely to move the Indian number. → **A22** |
+| #1/#2 geographic val split / val too small | ➖ **already done** | Indian eval is city-held-out (val margao/delhi, test panaji/mumbai_bandra/bengaluru). |
+| #12 early stopping · #25 richer metrics/APLS | ➖ **already in flight** | Plateau-watch active on the A12 run; APLS = A17/A18 (already tracked). |
+| #8 freeze/sync BatchNorm | ❌ **N/A** | `model.py` has no BatchNorm (mit_b3 = LayerNorm, batch-size-independent). Reviewer assumed a BN backbone. |
+| #13 schedule clDice/Lovász · #16 multi-scale · #18 boundary/deep-sup/aux-edge/OHEM · #11 grad-accum | ❌ **reject** | Architecture/memory pile-on — violates facts 1–3 (data-thesis, 8 GB, CPU-bound) and the repo's simplicity rule. |
+| #5/#6 occlusion aug "bug" / replace CoarseDropout · #7 more aug · #17 tile blending | ❌ **low/out-of-lane** | #5 misreads A8; #17 is inference/dashboard, not training. |
+
+**Net:** give the reviewer facts 1–9 and its top-3 collapse to ~the same shortlist we kept: **resume (A19), de-CPU the refinement (A20), eval threshold sweep (A21)**, with pseudo-label quality (A22) as optional self-train tuning. Everything else is scope-creep or contradicts evidence we already have.
