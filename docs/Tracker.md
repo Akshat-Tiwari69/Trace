@@ -176,7 +176,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **F5** | ⏳ | **Draw-a-flood-polygon → multi-node failure simulation** | S11 | — | Folium Draw plugin; disable all nodes inside the drawn polygon; recompute RI + reroute. Done when drawing a polygon disables the enclosed nodes and updates RI/charts live. |
 | **F6** | ✅ | **Before/after comparison + resilience-curve side chart** | — | — | Side-by-side/toggle of baseline vs post-failure network + a resilience-degradation curve chart. Done when both views render and the curve matches P3 numbers. |
 | **F7** | ⏳ | **Export / report: download GeoJSON + summary PDF/PNG** | — | — | Download buttons for the current graph (GeoJSON) + a one-page summary (criticality table + RI). Done when downloads work from the running app. |
-| **F8** | ⏳ | **Polish: loading states, error handling, colorblind-safe legend** | — | — | Spinners, graceful errors for missing artifacts, colorblind-safe ramp + legend. Done when the app degrades gracefully with no artifacts and passes a colorblind check. |
+| **F8** | ✅ | **Polish: loading states, error handling, colorblind-safe legend** | — | — | Spinners, graceful errors for missing artifacts, colorblind-safe ramp + legend. Done when the app degrades gracefully with no artifacts and passes a colorblind check. |
 
 ### Shared / final
 | ID | Status | Task | Owner | Waits on |
@@ -255,6 +255,10 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-27 (Saanvi — F8 ✅)**
+- Done: **F8 ✅** — Improved loading states with descriptive spinner messages for large graph construction and ablation calculations. Improved error handling to provide actionable messages on `FileNotFoundError` (missing artifacts vs parse errors). Replaced UI color scheme with the Okabe-Ito colorblind-safe palette (Sky Blue, Vermilion, Orange) for selected, disabled, and rerouted elements to ensure accessibility.
+- Next: Open PR for F8. This concludes Saanvi's current lane tasks.
 
 **2026-06-27 (Saanvi — F6 ✅)**
 - Done: **F6 ✅** — Added a "View Mode" toggle to switch between standard Interactive Map and Side-by-Side Comparison modes. When active, it displays the baseline network alongside the post-failure simulation. Added a new native `st.line_chart` in the side panel to parse and display the P3 `resilience.csv` degradation curves (Targeted vs Random), matching the requested contract. (Akshat: review fixes on merge — **replaced a hand-fabricated sample resilience CSV with the real P3 output** `panaji_real_resilience.csv` so the curve actually "matches P3 numbers"; rebased onto F4 keeping SPOF; trailing-whitespace + `locals()` cleanups.)

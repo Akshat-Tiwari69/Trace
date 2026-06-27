@@ -108,7 +108,7 @@ def split_features(
     return nodes, edges
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner="Building routable graph...")
 def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
     """Convert the map-ready GeoJSON features into a routable graph."""
     nodes, edges = split_features(_features)
@@ -222,7 +222,7 @@ def representative_reroute(graph: nx.Graph, disabled_node: int) -> RouteResult |
     return disconnected_candidate
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner="Simulating failure...")
 def simulate_ablation(graph_fingerprint: str, _graph: nx.Graph, node: int) -> SimulationResult:
     """Disable one node and compute resilience plus a representative reroute."""
     metrics = resilience_index(_graph, removed_nodes=[node])
@@ -241,9 +241,9 @@ def semantic_legend() -> folium.Element:
                 background: #1e1e2e; color: #ffffff; padding: 10px 12px;
                 border: 1px solid #555; border-radius: 6px; font-size: 12px;">
       <b>Network states</b><br>
-      <span style="color:#00d4ff">●</span> selected junction<br>
-      <span style="color:#ff4b4b">●</span> disabled junction / links<br>
-      <span style="color:#ff8c42">━</span> rerouted path<br>
+      <span style="color:#56B4E9">●</span> selected junction<br>
+      <span style="color:#D55E00">●</span> disabled junction / links<br>
+      <span style="color:#E69F00">━</span> rerouted path<br>
       <span style="color:#aaaaaa">┄</span> healed road<br>
       <span style="color:#ff00ff">●</span> / <span style="color:#ff00ff">━</span> single-point-of-failure
     </div>
@@ -259,7 +259,7 @@ def add_rerouted_path(road_map: folium.Map, graph: nx.Graph, route: RouteResult)
         coordinates = graph.edges[start, end]["coordinates"]
         folium.PolyLine(
             [(latitude, longitude) for longitude, latitude in coordinates],
-            color="#ff8c42",
+            color="#E69F00",
             weight=7,
             opacity=1.0,
             tooltip=f"Rerouted road {start}–{end}",
@@ -306,7 +306,7 @@ def build_map(
         is_spof = is_bridge and show_spof
 
         if is_disabled:
-            colour = "#ff4b4b"
+            colour = "#D55E00"
             state = "disabled link"
         elif is_spof:
             colour = "#ff00ff"
@@ -344,9 +344,9 @@ def build_map(
             score = float(scores.get(node_id, 0.0))
             is_art = node_id in articulation_ids
             if node_id == disabled_node:
-                colour, radius, label = "#ff4b4b", 9, "Disabled junction"
+                colour, radius, label = "#D55E00", 9, "Disabled junction"
             elif node_id == selected_node:
-                colour, radius, label = "#00d4ff", 8, "Selected junction"
+                colour, radius, label = "#56B4E9", 8, "Selected junction"
             elif is_art and show_spof:
                 colour, radius, label = "#ff00ff", 7, "Articulation point"
             else:
@@ -414,7 +414,7 @@ def render_charts(simulation: SimulationResult) -> None:
         trend,
         x="Disabled junctions",
         y="Travel-time increase (%)",
-        color="#ff8c42",
+        color="#E69F00",
         height=180,
     )
 
@@ -424,7 +424,7 @@ def render_charts(simulation: SimulationResult) -> None:
             route.delay_segments,
             columns=["Road", "Delay contribution (%)"],
         ).set_index("Road")
-        st.bar_chart(delays, color="#ff8c42", height=190)
+        st.bar_chart(delays, color="#E69F00", height=190)
 
 
 def render_panel(
@@ -521,7 +521,7 @@ def render_panel(
             chart_data = curve_data
         st.line_chart(
             chart_data,
-            color=["#ff4b4b", "#00d4ff"] if len(chart_data.columns) == 2 else None,
+            color=["#D55E00", "#56B4E9"] if len(chart_data.columns) == 2 else None,
             height=200,
         )
 
@@ -560,8 +560,14 @@ def main() -> None:
         features, criticality = load_sample_data()
         graph = graph_from_features(features)
         resilience_curve = load_resilience_curve()
-    except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
-        st.error(f"Could not load the sample network: {error}")
+    except FileNotFoundError as error:
+        st.error(
+            "Sample artifacts not found. Please ensure the pipeline has generated "
+            f"the sample data, or verify `data/sample/` exists. Details: {error}"
+        )
+        st.stop()
+    except (OSError, RuntimeError, ValueError) as error:
+        st.error(f"Could not load or parse the sample network: {error}")
         st.stop()
 
     critical_ids = set(
