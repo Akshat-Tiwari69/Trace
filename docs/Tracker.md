@@ -174,7 +174,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **F3** | ⏳ | **Large-graph performance: caching + geometry simplification + clustering** | S5 (lighter geojson) | — | `st.cache_data`/`st.cache_resource` for artifact + graph loading; render simplified polylines; FastMarkerCluster for nodes; trim `st_folium` returns. Done when a large sample renders noticeably faster (timed before/after) with no functional regression. *(detail: Research.md → Roadmap §D)* |
 | **F4** | ✅ | **Surface articulation points / bridges in the UI** | S8 | — | Read the new criticality columns; add a layer/legend highlighting single-points-of-failure. Done when articulation nodes/bridges are visually distinct with tooltips, off the sample data. |
 | **F5** | ⏳ | **Draw-a-flood-polygon → multi-node failure simulation** | S11 | — | Folium Draw plugin; disable all nodes inside the drawn polygon; recompute RI + reroute. Done when drawing a polygon disables the enclosed nodes and updates RI/charts live. |
-| **F6** | ⏳ | **Before/after comparison + resilience-curve side chart** | — | — | Side-by-side/toggle of baseline vs post-failure network + a resilience-degradation curve chart. Done when both views render and the curve matches P3 numbers. |
+| **F6** | ✅ | **Before/after comparison + resilience-curve side chart** | — | — | Side-by-side/toggle of baseline vs post-failure network + a resilience-degradation curve chart. Done when both views render and the curve matches P3 numbers. |
 | **F7** | ⏳ | **Export / report: download GeoJSON + summary PDF/PNG** | — | — | Download buttons for the current graph (GeoJSON) + a one-page summary (criticality table + RI). Done when downloads work from the running app. |
 | **F8** | ⏳ | **Polish: loading states, error handling, colorblind-safe legend** | — | — | Spinners, graceful errors for missing artifacts, colorblind-safe ramp + legend. Done when the app degrades gracefully with no artifacts and passes a colorblind check. |
 
@@ -255,6 +255,10 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-27 (Saanvi — F6 ✅)**
+- Done: **F6 ✅** — Added a "View Mode" toggle to switch between standard Interactive Map and Side-by-Side Comparison modes. When active, it displays the baseline network alongside the post-failure simulation. Added a new native `st.line_chart` in the side panel to parse and display the P3 `resilience.csv` degradation curves (Targeted vs Random), matching the requested contract. (Akshat: review fixes on merge — **replaced a hand-fabricated sample resilience CSV with the real P3 output** `panaji_real_resilience.csv` so the curve actually "matches P3 numbers"; rebased onto F4 keeping SPOF; trailing-whitespace + `locals()` cleanups.)
+- Next: Open PR for F6. Wait on Shaivi's PRs for F3/F5.
 
 **2026-06-27 (Akshat — A12 GPU run live + external review triaged → A19–A22)**
 - **A12 run live on the 3070 Ti** (detached, warm-start v1; labeled DeepGlobe+SpaceNet, unlabeled Indian corpus; 384px, batch 1/1, num_workers 0, clDice off). Epoch 1: **teacher val IoU 0.3545** (val = margao+delhi). Real epoch time is **CPU-bound ~70 min** (not the 45 min estimated) ⇒ full run ~14–18 h. Paused mid-epoch-2 for a GPU gaming session → lost the partial epoch (no resume in the harness; epoch-1 ckpt was backed up to `models/road_selftrain_v4_epoch1.pt`), then **warm-restarted from that epoch-1 ckpt** (`run_a12.py` `init_checkpoint` now points there, not v1 — still a clean v1-descendant, eval stays valid). Honest eval vs v1 on TEST cities (panaji/mumbai_bandra/bengaluru, untouched) pending run completion.
