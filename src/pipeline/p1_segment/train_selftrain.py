@@ -282,7 +282,7 @@ def train_selftrain(cfg: SelfTrainConfig) -> dict:
                         "cons": run_cons / steps_per_epoch, "lambda": lam, "val_iou": val["iou"]})
         gpu = f" | GPU {torch.cuda.memory_reserved()/1e9:.1f}G" if device != "cpu" else ""
         print(f"epoch {epoch:02d} | sup {run_sup/steps_per_epoch:.4f} | cons {run_cons/steps_per_epoch:.4f} "
-              f"(λ {lam:.2f}) | teacher val IoU {val['iou']:.4f}{gpu}", flush=True)
+              f"(lam {lam:.2f}) | teacher val IoU {val['iou']:.4f}{gpu}", flush=True)
         if val["iou"] > best_iou:
             best_iou = val["iou"]
             save_checkpoint(teacher.module, out, meta={
