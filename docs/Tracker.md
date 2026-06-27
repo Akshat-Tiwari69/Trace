@@ -168,7 +168,7 @@ If two tasks would touch the same shared file, the later one waits or coordinate
 | **F1** | ✅ | Dashboard env + scaffold on sample artifacts | uses S1 sample (mock OK until then) | F2 | Streamlit+folium app loads `data/sample/`, renders roads coloured by criticality + legend; map ~65% / panel ~35% per `Design.md` |
 | **F2** | ✅ | Full dashboard: click-to-disable sim + rerouting + travel-time + charts | F1 | A5 | clicking a node disables it, reroutes, shows RI drop + travel-time %, updates instantly |
 | **F3** | ⏳ | **Large-graph performance: caching + geometry simplification + clustering** | S5 (lighter geojson) | — | `st.cache_data`/`st.cache_resource` for artifact + graph loading; render simplified polylines; FastMarkerCluster for nodes; trim `st_folium` returns. Done when a large sample renders noticeably faster (timed before/after) with no functional regression. *(detail: Research.md → Roadmap §D)* |
-| **F4** | ⏳ | **Surface articulation points / bridges in the UI** | S8 | — | Read the new criticality columns; add a layer/legend highlighting single-points-of-failure. Done when articulation nodes/bridges are visually distinct with tooltips, off the sample data. |
+| **F4** | ✅ | **Surface articulation points / bridges in the UI** | S8 | — | Read the new criticality columns; add a layer/legend highlighting single-points-of-failure. Done when articulation nodes/bridges are visually distinct with tooltips, off the sample data. |
 | **F5** | ⏳ | **Draw-a-flood-polygon → multi-node failure simulation** | S11 | — | Folium Draw plugin; disable all nodes inside the drawn polygon; recompute RI + reroute. Done when drawing a polygon disables the enclosed nodes and updates RI/charts live. |
 | **F6** | ⏳ | **Before/after comparison + resilience-curve side chart** | — | — | Side-by-side/toggle of baseline vs post-failure network + a resilience-degradation curve chart. Done when both views render and the curve matches P3 numbers. |
 | **F7** | ⏳ | **Export / report: download GeoJSON + summary PDF/PNG** | — | — | Download buttons for the current graph (GeoJSON) + a one-page summary (criticality table + RI). Done when downloads work from the running app. |
@@ -251,6 +251,10 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-06-27 (Saanvi — F4 ✅)**
+- Done: **F4 ✅** — Updated the dashboard UI to surface articulation points and bridges (single-points-of-failure). Added `is_articulation` and `is_bridge` data parsing from `features` and `criticality`. Added a new "Single-points-of-failure" checkbox, styling articulation points with a distinct `#ff00ff` magenta circle and tooltip, and critical bridges with a magenta thicker line style. Modified `semantic_legend` to include the new failure types.
+- Next: Open a PR for F4 into `dev` and request Akshat's review.
 
 **2026-06-27 (Akshat — A12 self-training harness built + smoke-tested)**
 - Done: `src/pipeline/p1_segment/train_selftrain.py` — EMA **mean-teacher** self-training. Labeled stream (DeepGlobe + SpaceNet-5 Mumbai) supervised via ComboLoss; unlabeled Indian corpus via **teacher weak-view → student strong-view consistency** (shared geometry so pseudo-labels align), **confidence-gated**, with **connectivity-refined pseudo-labels** (`refine_pseudo` drops small disconnected blobs via `scipy.ndimage`) + λ ramp-up (don't trust early pseudo-labels). 4 CPU smoke tests pass. A12 → 🔄.
