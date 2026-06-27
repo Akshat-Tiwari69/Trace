@@ -48,4 +48,11 @@ Environment setup is self-service in **`SETUP.md`** (pick your path by role).
 - For multi-step tasks, state a brief plan with a verify-check per step.
 - Strong success criteria let you loop independently; weak ones ("make it work") force constant clarification.
 
-> One-line summary: **Read `docs/Tracker.md`, work only in your lane, warn before crossing into someone else's, update the Tracker when done.**
+**5. Record what you find.** Discoveries belong in the docs, not just the chat — if it isn't written down, it didn't happen.
+- Experiment results (**positive _or_ negative**), run findings, progress → `docs/Tracker.md` §10 daily log (+ flip the task status / add a task row).
+- Techniques, literature, design rationale, triage of external reviews → `docs/Research.md`.
+- Locked decisions → `docs/Tracker.md` §8 Decisions Log.
+- A new operating convention (like this one) → **here in the entry-point file**, and **mirror it into the sibling**: `CLAUDE.md` and `AGENTS.md` are the same doc for different agents — keep them **byte-identical except the title line and the "who reads this" line**. Any edit to one is mirrored to the other in the same change.
+- **Negative results are first-class** — record them so nobody re-runs a dead end (cf. A8 / A9 / A11).
+
+> One-line summary: **Read `docs/Tracker.md`, work only in your lane, warn before crossing into someone else's, update the Tracker when done, and write down what you learn (incl. negative results) — keeping `CLAUDE.md` ≡ `AGENTS.md`.**
