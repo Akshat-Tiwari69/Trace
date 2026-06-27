@@ -105,6 +105,7 @@ def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
             y=float(node.geometry.y),
             betweenness=float(node.get("betweenness", 0.0)),
             is_critical=bool(node.get("is_critical", False)),
+            is_articulation=bool(node.get("is_articulation", False)),
         )
     for _, edge in edges.iterrows():
         graph.add_edge(
@@ -112,6 +113,7 @@ def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
             int(edge["v"]),
             length_m=float(edge["length_m"]),
             is_bridged=bool(edge.get("is_bridged", False)),
+            is_bridge=bool(edge.get("is_bridge", False)),
             coordinates=tuple(
                 (float(longitude), float(latitude))
                 for longitude, latitude in edge.geometry.coords
@@ -226,7 +228,8 @@ def semantic_legend() -> folium.Element:
       <span style="color:#00d4ff">●</span> selected junction<br>
       <span style="color:#ff4b4b">●</span> disabled junction / links<br>
       <span style="color:#ff8c42">━</span> rerouted path<br>
-      <span style="color:#aaaaaa">┄</span> healed road
+      <span style="color:#aaaaaa">┄</span> healed road<br>
+      <span style="color:#ff00ff">●</span> / <span style="color:#ff00ff">━</span> single-point-of-failure
     </div>
     """
     return folium.Element(html)
@@ -255,6 +258,7 @@ def build_map(
     simulation: SimulationResult | None,
     show_critical: bool,
     show_healed: bool,
+    show_spof: bool = True,
 ) -> folium.Map:
     """Build the map with criticality, selection, failure, and reroute states."""
     nodes, edges = split_features(features)
@@ -276,37 +280,60 @@ def build_map(
     )
 
     for _, edge in edges.iterrows():
-        is_bridged = bool(edge["is_bridged"])
+        is_bridged = bool(edge.get("is_bridged", False))
+        is_bridge = bool(edge.get("is_bridge", False))
         if is_bridged and not show_healed:
             continue
         start, end = int(edge["u"]), int(edge["v"])
         score = max(float(scores.get(start, 0.0)), float(scores.get(end, 0.0)))
         is_disabled = disabled_node in {start, end}
-        colour = "#ff4b4b" if is_disabled else colour_scale(score)
-        state = "disabled link" if is_disabled else (
-            "healed link" if is_bridged else "observed link"
-        )
+        is_spof = is_bridge and show_spof
+
+        if is_disabled:
+            colour = "#ff4b4b"
+            state = "disabled link"
+        elif is_spof:
+            colour = "#ff00ff"
+            state = "critical bridge"
+        else:
+            colour = colour_scale(score)
+            state = "healed link" if is_bridged else "observed link"
+
         coordinates = [
             (latitude, longitude) for longitude, latitude in edge.geometry.coords
         ]
         folium.PolyLine(
             coordinates,
             color=colour,
-            weight=4 if is_disabled or is_bridged else 3,
-            opacity=0.45 if is_disabled else 0.85,
+            weight=5 if is_spof else (4 if is_disabled or is_bridged else 3),
+            opacity=0.45 if is_disabled else (0.95 if is_spof else 0.85),
             dash_array="8 6" if is_bridged or is_disabled else None,
             tooltip=f"Road {start}–{end} · criticality {score:.3f} · {state}",
         ).add_to(road_map)
 
     critical_ids = set(criticality.loc[criticality["is_critical"], "node_id"].astype(int))
+    articulation_ids = set()
+    if "is_articulation" in criticality.columns:
+        articulation_ids = set(criticality.loc[criticality["is_articulation"], "node_id"].astype(int))
+
+    nodes_to_show = set()
     if show_critical:
-        for _, node in nodes[nodes["node_id"].isin(critical_ids)].iterrows():
+        nodes_to_show.update(critical_ids)
+    if show_spof:
+        nodes_to_show.update(articulation_ids)
+
+    if nodes_to_show:
+        for _, node in nodes[nodes["node_id"].isin(nodes_to_show)].iterrows():
             node_id = int(node["node_id"])
             score = float(scores.get(node_id, 0.0))
+            is_art = node_id in articulation_ids
+            
             if node_id == disabled_node:
                 colour, radius, label = "#ff4b4b", 9, "Disabled junction"
             elif node_id == selected_node:
                 colour, radius, label = "#00d4ff", 8, "Selected junction"
+            elif is_art and show_spof:
+                colour, radius, label = "#ff00ff", 7, "Articulation point"
             else:
                 colour, radius, label = colour_scale(score), 5, "Critical junction"
             folium.CircleMarker(
@@ -445,9 +472,10 @@ def render_panel(
         st.session_state["disabled_node"] = None
         st.rerun()
 
-    layer_one, layer_two = st.columns(2)
+    layer_one, layer_two, layer_three = st.columns(3)
     layer_one.checkbox("Critical nodes", value=True, key="show_critical")
     layer_two.checkbox("Healed roads", value=True, key="show_healed")
+    layer_three.checkbox("Single-points-of-failure", value=True, key="show_spof")
 
     if simulation:
         st.success(f"Junction {simulation.disabled_node} is disabled.")
@@ -519,6 +547,7 @@ def main() -> None:
 
     show_critical = st.session_state.get("show_critical", True)
     show_healed = st.session_state.get("show_healed", True)
+    show_spof = st.session_state.get("show_spof", True)
     road_map = build_map(
         features,
         criticality,
@@ -527,6 +556,7 @@ def main() -> None:
         simulation,
         show_critical,
         show_healed,
+        show_spof,
     )
 
     map_column, panel_column = st.columns([6.5, 3.5], gap="medium")
@@ -536,7 +566,7 @@ def main() -> None:
             height=760,
             use_container_width=True,
             returned_objects=["last_object_clicked"],
-            key=f"network_map_{disabled_node}_{show_critical}_{show_healed}",
+            key=f"network_map_{disabled_node}_{show_critical}_{show_healed}_{show_spof}",
         )
         st.caption(
             "Brighter roads connect more critical junctions · dashed = healed · "
