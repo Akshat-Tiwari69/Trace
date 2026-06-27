@@ -104,16 +104,16 @@ def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
             x=float(node.geometry.x),
             y=float(node.geometry.y),
             betweenness=float(node.get("betweenness", 0.0)),
-            is_critical=bool(node.get("is_critical", False)),
-            is_articulation=bool(node.get("is_articulation", False)),
+            is_critical=(node.get("is_critical") == True),
+            is_articulation=(node.get("is_articulation") == True),
         )
     for _, edge in edges.iterrows():
         graph.add_edge(
             int(edge["u"]),
             int(edge["v"]),
             length_m=float(edge["length_m"]),
-            is_bridged=bool(edge.get("is_bridged", False)),
-            is_bridge=bool(edge.get("is_bridge", False)),
+            is_bridged=(edge.get("is_bridged") == True),
+            is_bridge=(edge.get("is_bridge") == True),
             coordinates=tuple(
                 (float(longitude), float(latitude))
                 for longitude, latitude in edge.geometry.coords
@@ -280,8 +280,8 @@ def build_map(
     )
 
     for _, edge in edges.iterrows():
-        is_bridged = bool(edge.get("is_bridged", False))
-        is_bridge = bool(edge.get("is_bridge", False))
+        is_bridged = (edge.get("is_bridged") == True)
+        is_bridge = (edge.get("is_bridge") == True)
         if is_bridged and not show_healed:
             continue
         start, end = int(edge["u"]), int(edge["v"])
@@ -311,10 +311,10 @@ def build_map(
             tooltip=f"Road {start}–{end} · criticality {score:.3f} · {state}",
         ).add_to(road_map)
 
-    critical_ids = set(criticality.loc[criticality["is_critical"], "node_id"].astype(int))
+    critical_ids = set(criticality.loc[criticality["is_critical"] == True, "node_id"].astype(int))
     articulation_ids = set()
     if "is_articulation" in criticality.columns:
-        articulation_ids = set(criticality.loc[criticality["is_articulation"], "node_id"].astype(int))
+        articulation_ids = set(criticality.loc[criticality["is_articulation"] == True, "node_id"].astype(int))
 
     nodes_to_show = set()
     if show_critical:
