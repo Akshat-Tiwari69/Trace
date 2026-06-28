@@ -81,23 +81,26 @@ def build_train_transform(size: int = 256, occlusion: bool | str = True) -> Any:
     return A.Compose(augs)
 
 
-def build_val_transform(size: int = 256) -> Any:
+def build_val_transform(size: int = 256, grayscale: bool = False) -> Any:
     """Validation transform: a native-resolution centre crop (same scale as the
     train RandomCrop) + normalise. NOT a full-image resize — resizing a 1024px
     DeepGlobe tile down to 256 shrinks thin roads ~4x, evaluating the model at a
     scale it never trained on and pinning val IoU artificially low.
+
+    ``grayscale=True`` desaturates the image (3-channel grey) — a proxy for
+    **Cartosat-3 panchromatic** input, to measure the sensor-modality gap (A24).
     """
     import albumentations as A
     from albumentations.pytorch import ToTensorV2
 
-    return A.Compose(
-        [
-            A.PadIfNeeded(size, size, border_mode=0),  # guard images smaller than the crop
-            A.CenterCrop(size, size),
-            A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
-            ToTensorV2(),
-        ]
-    )
+    steps = [
+        A.PadIfNeeded(size, size, border_mode=0),  # guard images smaller than the crop
+        A.CenterCrop(size, size),
+    ]
+    if grayscale:
+        steps.append(A.ToGray(p=1.0))
+    steps += [A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD), ToTensorV2()]
+    return A.Compose(steps)
 
 
 class RoadTileDataset(Dataset):

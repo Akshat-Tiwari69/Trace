@@ -82,8 +82,13 @@ def evaluate_checkpoints(
     threshold: float = 0.44,
     image_size: int = 384,
     device: str = "cpu",
+    grayscale: bool = False,
 ) -> dict:
-    """Score each checkpoint on the frozen held-out SpaceNet-Mumbai split (IoU/Dice)."""
+    """Score each checkpoint on the frozen held-out SpaceNet-Mumbai split (IoU/Dice).
+
+    ``grayscale=True`` desaturates the input — a **Cartosat-3 PAN** proxy (A24) to
+    measure the sensor-modality gap vs the RGB number.
+    """
     from torch.utils.data import DataLoader
 
     from src.pipeline.p1_segment.dataset import RoadTileDataset, build_val_transform
@@ -93,10 +98,11 @@ def evaluate_checkpoints(
     all_chips = sorted({chip_of(p.name) for p in Path(corpus).glob("*_sat.jpg")})
     test_chips = load_or_make_heldout(all_chips, manifest)
     pairs = heldout_pairs(corpus, test_chips)
-    print(f"held-out SpaceNet-Mumbai TEST: {len(test_chips)} chips / {len(pairs)} tiles "
+    mode = "GRAYSCALE (Cartosat-PAN proxy)" if grayscale else "RGB"
+    print(f"held-out SpaceNet-Mumbai TEST [{mode}]: {len(test_chips)} chips / {len(pairs)} tiles "
           f"(of {len(all_chips)} chips)", flush=True)
 
-    loader = DataLoader(RoadTileDataset(pairs, build_val_transform(image_size)),
+    loader = DataLoader(RoadTileDataset(pairs, build_val_transform(image_size, grayscale=grayscale)),
                         batch_size=4, shuffle=False, num_workers=0)
     results = {}
     for ckpt in checkpoints:
@@ -107,7 +113,8 @@ def evaluate_checkpoints(
         print(f"  {Path(ckpt).name:42s} real-GT IoU {m['iou']:.4f}  Dice {m['dice']:.4f}", flush=True)
         del model
     return {"n_test_chips": len(test_chips), "n_test_tiles": len(pairs),
-            "threshold": threshold, "image_size": image_size, "models": results}
+            "threshold": threshold, "image_size": image_size, "grayscale": grayscale,
+            "models": results}
 
 
 def main() -> None:
@@ -118,11 +125,14 @@ def main() -> None:
     p.add_argument("--threshold", type=float, default=0.44)
     p.add_argument("--image-size", type=int, default=384)
     p.add_argument("--device", default="cpu")
+    p.add_argument("--grayscale", action="store_true",
+                   help="desaturate input (Cartosat-3 PAN proxy) to measure the sensor-modality gap")
     p.add_argument("--out", default="data/sample/spacenet_mumbai_eval.json")
     args = p.parse_args()
 
     report = evaluate_checkpoints([Path(c) for c in args.checkpoints], Path(args.corpus),
-                                  Path(args.manifest), args.threshold, args.image_size, args.device)
+                                  Path(args.manifest), args.threshold, args.image_size, args.device,
+                                  grayscale=args.grayscale)
     Path(args.out).write_text(json.dumps(report, indent=2))
     print(f"-> {args.out}")
 
