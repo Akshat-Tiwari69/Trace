@@ -57,9 +57,9 @@ class RouteResult:
 
 @dataclass(frozen=True)
 class SimulationResult:
-    """Metrics and route state produced by one node ablation."""
+    """Metrics and route state produced by a node/area ablation (1+ nodes)."""
 
-    disabled_node: int
+    disabled_nodes: tuple[int, ...]
     resilience_index: float
     largest_cc_fraction: float
     route: RouteResult | None
@@ -114,9 +114,13 @@ def split_features(
 
 
 @st.cache_resource(show_spinner="Building routable graph...")
-def graph_from_features(features: gpd.GeoDataFrame) -> nx.Graph:
-    """Convert the map-ready GeoJSON features into a routable graph."""
-    nodes, edges = split_features(features)
+def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
+    """Convert the map-ready GeoJSON features into a routable graph.
+
+    ``_features`` is underscore-prefixed so Streamlit skips hashing the
+    (unhashable) GeoDataFrame for the cache key — required under cache_resource.
+    """
+    nodes, edges = split_features(_features)
     graph = nx.Graph()
     for _, node in nodes.iterrows():
         node_id = int(node["node_id"])
