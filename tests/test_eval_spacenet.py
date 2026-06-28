@@ -34,6 +34,27 @@ def test_make_split_changes_with_seed():
     assert test_a != test_b
 
 
+def test_grayscale_val_transform_desaturates_colour_only():
+    """A24: the grayscale (Cartosat-PAN proxy) transform desaturates a colour
+    image but is a no-op on an already-grey one."""
+    import numpy as np
+
+    from src.pipeline.p1_segment.dataset import build_val_transform
+
+    rng = np.random.default_rng(0)
+    mask = np.zeros((32, 32), np.uint8)
+    colour = rng.integers(0, 255, (32, 32, 3), dtype=np.uint8)
+    rgb = build_val_transform(32, grayscale=False)(image=colour, mask=mask)["image"]
+    grey = build_val_transform(32, grayscale=True)(image=colour, mask=mask)["image"]
+    assert grey.shape == rgb.shape
+    assert not np.allclose(grey.numpy(), rgb.numpy())          # ToGray changed the colour image
+    g = rng.integers(0, 255, (32, 32), dtype=np.uint8)
+    already_grey = np.stack([g, g, g], -1)
+    a = build_val_transform(32, grayscale=False)(image=already_grey, mask=mask)["image"]
+    b = build_val_transform(32, grayscale=True)(image=already_grey, mask=mask)["image"]
+    assert np.allclose(a.numpy(), b.numpy(), atol=1e-5)        # no-op on a grey image
+
+
 def test_load_or_make_heldout_freezes_to_manifest(tmp_path):
     chips = [f"chip{i}" for i in range(50)]
     manifest = tmp_path / "heldout.json"
