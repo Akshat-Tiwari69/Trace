@@ -3,15 +3,15 @@
   "n_test_tiles": 449,
   "threshold": 0.44,
   "image_size": 512,
-  "grayscale": false,
+  "grayscale": true,
   "models": {
     "road_spacenet.pt": {
-      "iou": 0.4298055171966553,
-      "dice": 0.5940789217706275
+      "iou": 0.38111135525117934,
+      "dice": 0.5444936820231707
     },
     "deepglobe_mit_b3_scse_512px_best.pt": {
-      "iou": 0.3768379714966348,
-      "dice": 0.5392693689966623
+      "iou": 0.32354190734635413,
+      "dice": 0.4804779731594356
     }
   }
 }
