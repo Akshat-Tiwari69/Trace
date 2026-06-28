@@ -7,7 +7,13 @@ data/raw/*
 data/interim/*
 data/processed/*
 data/outputs/*
+data/finetune/*
 models/*
+
+# local GPU env + caches (kept off C:, never committed)
+.venv-gpu/
+.pip-cache/
+.tmp/
 
 # ...but keep directory placeholders so the skeleton survives a clone
 !data/raw/.gitkeep

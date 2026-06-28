@@ -33,10 +33,11 @@ DASHBOARD_CRITICALITY_COLUMNS = ["node_id", "betweenness", "rank", "is_critical"
 
 def segment(image_path: str | Path, checkpoint: str | Path, aoi: str, interim_dir: str | Path,
             tile_size: int = 512, threshold: float | None = None,
-            device: str = "cpu") -> tuple[Path, float]:
+            device: str = "cpu", tta: bool = False) -> tuple[Path, float]:
     """P1: predict a road mask from imagery → ``data/interim/{aoi}_mask.png``.
 
     Threshold defaults to the checkpoint's deploy threshold (its ``meta``).
+    ``tta`` applies D4 test-time augmentation.
     """
     import cv2
 
@@ -49,7 +50,7 @@ def segment(image_path: str | Path, checkpoint: str | Path, aoi: str, interim_di
     image = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
     model, meta = load_checkpoint(checkpoint, map_location=device)
     thr = threshold if threshold is not None else float(meta.get("threshold", 0.5))
-    mask = predict_large(model, image, tile_size=tile_size, device=device, threshold=thr)
+    mask = predict_large(model, image, tile_size=tile_size, device=device, threshold=thr, tta=tta)
     out = Path(interim_dir) / f"{aoi}_mask.png"
     save_binary_png(mask, out)
     return out, float(mask.mean())
@@ -62,9 +63,11 @@ def verify_dashboard_ready(cfg: GraphConfig) -> dict[str, Any]:
     if crit.exists():
         text = crit.read_text(encoding="utf-8")
         header = text.splitlines()[0] if text.strip() else ""
+    # Required columns must be present; extra columns (e.g. S8's is_articulation)
+    # are fine — the dashboard reads by name, so the contract only *grows*.
     return {
         "criticality_csv": str(crit),
-        "columns_match": header.split(",") == DASHBOARD_CRITICALITY_COLUMNS,
+        "columns_match": set(DASHBOARD_CRITICALITY_COLUMNS).issubset(header.split(",")),
         "geojson": str(cfg.geojson_path),
         "geojson_exists": cfg.geojson_path.exists(),
     }
@@ -73,7 +76,7 @@ def verify_dashboard_ready(cfg: GraphConfig) -> dict[str, Any]:
 def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
         interim_dir: str | Path = "data/interim", processed_dir: str | Path = "data/processed",
         resolution_m: float = 1.0, tile_size: int = 512, threshold: float | None = None,
-        device: str = "cpu", curve_steps: int = 25,
+        device: str = "cpu", curve_steps: int = 25, tta: bool = False,
         segment_fn: Callable[..., tuple[Path, float]] = segment) -> dict[str, Any]:
     """Run the whole pipeline on one tile and return a summary dict.
 
@@ -85,7 +88,7 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
 
     print(f"[A5] end-to-end pipeline for '{aoi}'")
     print("[P1] segment imagery → road mask")
-    mask_path, coverage = segment_fn(image_path, checkpoint, aoi, interim_dir, tile_size, threshold, device)
+    mask_path, coverage = segment_fn(image_path, checkpoint, aoi, interim_dir, tile_size, threshold, device, tta)
     print(f"     → {mask_path}  ({coverage:.2%} road px)")
 
     print("[P2] mask → healed routable graph")
@@ -119,10 +122,11 @@ def main() -> None:
     p.add_argument("--threshold", type=float, default=None, help="override; default = checkpoint meta")
     p.add_argument("--device", default="cpu")
     p.add_argument("--curve-steps", type=int, default=25)
+    p.add_argument("--tta", action="store_true", help="D4 test-time augmentation in P1")
     args = p.parse_args()
     run(args.image, args.checkpoint, args.aoi, resolution_m=args.resolution_m,
         tile_size=args.tile_size, threshold=args.threshold, device=args.device,
-        curve_steps=args.curve_steps)
+        curve_steps=args.curve_steps, tta=args.tta)
 
 
 if __name__ == "__main__":

@@ -70,11 +70,40 @@ def annotate_criticality(
     return bc
 
 
+def annotate_cut_structure(graph: "nx.Graph") -> dict:
+    """Flag **articulation points** (nodes) and **bridge edges** — a second,
+    structural criticality layer alongside betweenness (``docs/Tracker.md`` S8).
+
+    An *articulation point* is a node whose removal disconnects the network; a
+    *bridge* is an edge whose removal does. These are the network's hard single
+    points of failure — distinct from "high traffic share" (betweenness): a node
+    can carry lots of traffic yet not be a cut node, and vice-versa. Sets
+    ``is_articulation`` on every node and ``is_bridge`` on every edge (in place),
+    and returns the counts.
+
+    Note: ``is_bridge`` (graph-theoretic cut edge) is **not** ``is_bridged`` (an
+    edge the healing step inferred) — different concepts, deliberately named
+    distinctly. Works on disconnected graphs (NetworkX handles each component).
+    """
+    import networkx as nx
+
+    articulation = set(nx.articulation_points(graph))
+    bridges = {frozenset(e) for e in nx.bridges(graph)}
+
+    for node_id in graph.nodes:
+        graph.nodes[node_id]["is_articulation"] = node_id in articulation
+    for u, v in graph.edges:
+        graph.edges[u, v]["is_bridge"] = frozenset((u, v)) in bridges
+
+    return {"n_articulation": len(articulation), "n_bridges": len(bridges)}
+
+
 def rank_table(graph: "nx.Graph", bc: dict[int, float]) -> list[dict]:
     """Build the ranked per-node criticality rows for ``{aoi}_criticality.csv``.
 
     Columns match the §4 contract: ``node_id, betweenness, rank, is_critical``
-    (plus ``x, y`` so the dashboard can place the ranked list on the map).
+    (plus ``is_articulation`` from :func:`annotate_cut_structure`, and ``x, y`` so
+    the dashboard can place the ranked list on the map).
     """
     ranked = sorted(bc, key=lambda n: bc[n], reverse=True)
     rows = []
@@ -86,8 +115,83 @@ def rank_table(graph: "nx.Graph", bc: dict[int, float]) -> list[dict]:
                 "betweenness": round(float(bc[node_id]), 6),
                 "rank": rank,
                 "is_critical": bool(data.get("is_critical", False)),
+                "is_articulation": bool(data.get("is_articulation", False)),
                 "x": round(float(data["x"]), 7),
                 "y": round(float(data["y"]), 7),
             }
         )
     return rows
+
+
+# --------------------------------------------------------------------------- #
+# S9 — caching + k-sample approximation for large graphs
+# --------------------------------------------------------------------------- #
+def _graph_fingerprint(graph: "nx.Graph", weight: str) -> int:
+    """Cheap structural hash of the graph (node count + sorted weighted edges)."""
+    edges = tuple(sorted(
+        (min(u, v), max(u, v), round(float(d.get(weight, 0.0)), 3))
+        for u, v, d in graph.edges(data=True)
+    ))
+    return hash((graph.number_of_nodes(), edges))
+
+
+class BetweennessCache:
+    """Memoize betweenness by a structural fingerprint of the graph + params.
+
+    The dashboard computes baseline betweenness **once** and reads it across many
+    interactions (``docs/TRD.md`` performance: "precompute betweenness once"). A
+    node-ablation click operates on a *perturbed* graph whose fingerprint differs,
+    so it recomputes — but every read of the unchanged baseline is a free cache
+    hit. Recompute only when the graph (or weight/k/seed) actually changes.
+    """
+
+    def __init__(self) -> None:
+        self._store: dict = {}
+
+    def get(self, graph: "nx.Graph", weight: str = "length_m",
+            k: int | None = None, seed: int = 42) -> dict[int, float]:
+        key = (_graph_fingerprint(graph, weight), weight, k, seed)
+        if key not in self._store:
+            self._store[key] = compute_betweenness(graph, weight=weight, k=k, seed=seed)
+        return self._store[key]
+
+    def clear(self) -> None:
+        self._store.clear()
+
+    def __len__(self) -> int:
+        return len(self._store)
+
+
+def benchmark_betweenness(
+    graph: "nx.Graph", k: int, weight: str = "length_m", seed: int = 42,
+) -> dict:
+    """Compare k-sample vs exact betweenness: speedup + Spearman rank correlation.
+
+    The k-sample estimate (``docs/RiskRegister.md`` T-3) is only useful if it's
+    both *faster* and *ranks nodes the same way* — what the dashboard's criticality
+    ordering depends on. Returns timings, the speedup, and the Spearman rank
+    correlation of the two betweenness vectors.
+    """
+    import time
+
+    from scipy.stats import spearmanr
+
+    t = time.perf_counter()
+    exact = compute_betweenness(graph, weight=weight, k=None, seed=seed)
+    exact_s = time.perf_counter() - t
+
+    t = time.perf_counter()
+    approx = compute_betweenness(graph, weight=weight, k=k, seed=seed)
+    ksample_s = time.perf_counter() - t
+
+    nodes = list(graph.nodes)
+    rho = float(spearmanr([exact[n] for n in nodes], [approx[n] for n in nodes]).statistic)
+    return {
+        "n_nodes": graph.number_of_nodes(),
+        "n_edges": graph.number_of_edges(),
+        "k": k,
+        "exact_s": round(exact_s, 3),
+        "ksample_s": round(ksample_s, 3),
+        "speedup": round(exact_s / ksample_s, 1) if ksample_s > 0 else float("inf"),
+        "spearman": round(rho, 3),
+    }

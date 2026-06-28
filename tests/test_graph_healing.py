@@ -11,7 +11,12 @@ import networkx as nx
 import numpy as np
 import pytest
 
-from src.pipeline.p2_graph.healing import UnionFind, heal_graph
+from src.pipeline.p2_graph.healing import (
+    UnionFind,
+    _bridge_geometry,
+    _polyline_length,
+    heal_graph,
+)
 from src.pipeline.p2_graph.skeleton_graph import (
     TYPE_BRIDGED,
     _annotate_degree_and_type,
@@ -158,6 +163,54 @@ def test_simulate_occlusion_zero_patches_returns_copy():
     mask = np.ones((5, 5), dtype=np.uint8)
     out = simulate_occlusion(mask, n_patches=0, patch_px=3)
     assert out is not mask and np.array_equal(out, mask)  # copy, unchanged
+
+
+# --------------------------------------------------------------------------- #
+# S6 — curved (smooth) bridge geometry
+# --------------------------------------------------------------------------- #
+def test_bridge_geometry_straight_when_collinear():
+    """A collinear, facing-each-other gap stays a straight line."""
+    geom = _bridge_geometry(
+        np.array([0.0, 0.0]), np.array([10.0, 0.0]),
+        np.array([1.0, 0.0]), np.array([-1.0, 0.0]),
+    )
+    assert max(abs(y) for _, y in geom) < 1e-6                  # no sideways bend
+    assert _polyline_length(geom) == pytest.approx(10.0, abs=1e-6)
+
+
+def test_bridge_geometry_curves_when_offset():
+    """An offset gap is drawn as a smooth multi-point curve, longer than the chord."""
+    p_u, p_v = np.array([0.0, 0.0]), np.array([10.0, 5.0])
+    geom = _bridge_geometry(p_u, p_v, np.array([1.0, 0.0]), np.array([-1.0, 0.0]))
+    assert len(geom) > 2                                        # a curve, not a segment
+    assert geom[0] == [0.0, 0.0] and geom[-1] == [10.0, 5.0]    # endpoints exact
+    chord = float(np.hypot(10.0, 5.0))
+    assert _polyline_length(geom) > chord                       # bends, so longer
+
+
+def test_bridge_geometry_falls_back_to_straight():
+    geom = _bridge_geometry(np.array([0.0, 0.0]), np.array([3.0, 4.0]), None, None)
+    assert geom == [[0.0, 0.0], [3.0, 4.0]]                     # undefined heading → segment
+
+
+def test_bridge_geometry_is_magnitude_independent():
+    """A non-unit heading yields the same curve as its normalised version."""
+    p_u, p_v = np.array([0.0, 0.0]), np.array([10.0, 5.0])
+    unit = _bridge_geometry(p_u, p_v, np.array([1.0, 0.0]), np.array([-1.0, 0.0]))
+    scaled = _bridge_geometry(p_u, p_v, np.array([5.0, 0.0]), np.array([-9.0, 0.0]))
+    assert np.allclose(np.array(unit), np.array(scaled))
+
+
+def test_heal_draws_curved_bridge():
+    """Healing an offset gap produces a multi-point curved bridge edge."""
+    g = nx.Graph()
+    _road(g, 0, (0.0, 0.0), 1, (10.0, 0.0))      # endpoint 1 heads +x
+    _road(g, 2, (20.0, 6.0), 3, (30.0, 6.0))     # endpoint 2 heads -x, offset +6 in y
+    _annotate_degree_and_type(g)
+
+    g, report = heal_graph(g, gap_max_m=40.0, angle_max_deg=80.0)
+    assert report.bridges_added == 1
+    assert len(g.edges[1, 2]["geometry"]) > 2     # curved, not a straight 2-point line
 
 
 def test_heal_prefers_straight_over_kinked():

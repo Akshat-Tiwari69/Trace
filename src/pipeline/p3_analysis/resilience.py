@@ -156,13 +156,15 @@ def ablation_curve(
     weight: str = "length_m",
     seed: int = 42,
     k: int | None = None,
+    sequence: list[int] | None = None,
 ) -> list[AblationPoint]:
     """Remove nodes one at a time and trace how efficiency degrades.
 
     ``order='targeted'`` removes highest-betweenness nodes first (needs
-    ``betweenness``); ``order='random'`` removes in a shuffled order. The pair of
-    curves is the targeted-vs-random sanity check in ``docs/Evaluation.md`` —
-    targeted should fall faster. ``k`` forwards to :func:`global_efficiency` for
+    ``betweenness``); ``order='random'`` removes in a shuffled order. Pass an
+    explicit ``sequence`` to use a custom removal order (e.g. a flood scenario,
+    ``order`` is then ignored). The targeted-vs-random pair is the sanity check in
+    ``docs/Evaluation.md``. ``k`` forwards to :func:`global_efficiency` for
     k-sample estimation, so the per-step recompute stays cheap on large graphs.
     """
     import networkx as nx
@@ -170,7 +172,9 @@ def ablation_curve(
     base = global_efficiency(graph, weight, k=k)
     nodes = list(graph.nodes)
 
-    if order == "targeted":
+    if sequence is not None:
+        sequence = list(sequence)
+    elif order == "targeted":
         if betweenness is None:
             raise ValueError("order='targeted' requires a betweenness dict")
         sequence = sorted(nodes, key=lambda n: betweenness.get(n, 0.0), reverse=True)

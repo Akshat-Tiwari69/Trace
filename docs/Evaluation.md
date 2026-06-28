@@ -93,13 +93,81 @@ Reproduce with `python -m src.pipeline.p3_analysis.evaluate` (reads the committe
 
 | Metric | Value | Notes |
 |---|---|---|
-| Graph size | 630 nodes, 749 edges | 19 healed/bridged edges (2.5%) |
-| **Connectivity Ratio** | **+15.1%** | largest connected component 524 → 603 nodes after MST/Union-Find healing (components 29 → 10) |
-| Top "Gatekeeper" node | betweenness **0.511** | node 45; top-5 all ≈ 0.44–0.51 |
-| Baseline global efficiency | 0.0012 | metric units (1/m); only ratios are interpretable |
-| **Resilience: targeted vs random** | mean RI **0.674 vs 0.860** over 40 removals | targeted (high-betweenness-first) ablation degrades the network **far faster** than random ⇒ betweenness finds genuine chokepoints ✓ |
+| Graph size | 400 nodes, 474 edges | after S3 simplification + S4 consolidation; 19 healed/bridged edges |
+| **Simplification (S3)** | **−22%** nodes (630 → 489) | 48 short stubs pruned + 93 degree-2 chain nodes collapsed; lossless for routing |
+| **Consolidation (S4)** | **489 → 400** nodes | 51 near-duplicate junctions merged (tol 10 m); overpass-guarded (only merges along sub-tolerance edges) |
+| **Total node reduction** | **630 → 400 (−37%)** | **all 10 components preserved** throughout |
+| **Polyline simplification (S5)** | vertices **15.4k → 2.2k (−86%)** | Douglas-Peucker (1.5 m); GeoJSON 675 KB → 256 KB; shape preserved (Hausdorff ≤ tol), routing weights untouched |
+| **Cut structure (S8)** | **136** articulation points, **191** bridge edges | true single-points-of-failure — structural criticality distinct from betweenness |
+| **Connectivity Ratio** | **+15.1%** | largest connected component grew after MST/Union-Find healing (components 29 → 10); build-time figure |
+| Top "Gatekeeper" node | betweenness **0.488** | node 45; top-5 cluster near the centre |
+| Baseline global efficiency | 0.0013 | metric units (1/m); only ratios are interpretable |
+| **Resilience: targeted vs random** | mean RI **0.601 vs 0.731** over 40 removals | targeted (high-betweenness-first) ablation degrades the network **far faster** than random ⇒ betweenness finds genuine chokepoints ✓ |
 
-*Numbers are on the OSM stand-in (S1); the same `evaluate` runs unchanged on a real predicted-mask graph (S2) once a tile is available.*
+*Numbers are on the OSM stand-in (S1); the same `evaluate` runs unchanged on a real predicted-mask graph (S2). The graph is now S3-simplified + S4-consolidated — 37% lighter, identical connectivity.*
+
+### Topology metric suite (E2)
+
+The connectivity/topology scoreboard, consolidated — does the extracted graph
+*route* like the real network, not just *look* like it pixel-wise?
+
+| Metric | Owner | Value | Source |
+|---|---|---|---|
+| **Connectivity Ratio** | graph | **+15.1%** (largest CC after healing) | `evaluate` · S3/E1 |
+| **APLS** (vs OSM) | graph | **0.40** symmetric (densified, snap 15 m) | `apls` · S7 |
+| **Relaxed / buffered IoU** | seg | *Akshat — released model, A7/A10* | `p1_segment` |
+
+Graph-side topology metrics (connectivity ratio + APLS) are **reported and
+reproducible** (commands above); the buffered-IoU row is the segmentation lane's
+contribution. Together they catch the "good pixels, bad topology" failure mode
+(F1 0.72 → APLS 0.25) the project exists to avoid.
+
+### Topology validation — APLS vs OSM (S7)
+
+Reproduce with `python -m src.pipeline.p3_analysis.apls` (compares the healed graph
+to a committed OSM ground-truth graph for the AOI; writes `panaji_demo_apls.json`).
+Self-contained, densified, symmetric node-based APLS (no heavy CosmiQ dependency).
+
+| Metric | Value | Notes |
+|---|---|---|
+| **APLS (healed graph vs OSM)** | **0.40** | symmetric harmonic mean (gt→prop 0.30, prop→gt 0.62); 600 sampled pairs, 15 m snap, 10 m densification |
+| Reference (SpaceNet-3) | baseline ≈ 0.49, winner ≈ 0.67 | *not* directly comparable — those are on clean SpaceNet imagery |
+
+This is a **deliberately hard** case: the S1 sample is built from OSM but then
+**simulated-occluded** (80 patches) and healed, so the score measures how well the
+heal recovers OSM routing *after* damage — honest, not inflated. On a clean
+(non-occluded) or S3/S4-simplified build the score rises. APLS guards against the
+"good pixels, bad topology" trap (a mask at F1 0.72 can score APLS 0.25).
+
+### Resilience ablations (E4)
+
+The design choices are only justified if turning them on/off *moves the number*.
+
+**Healing on vs off** — does MST/Union-Find healing actually make a more resilient
+network? (Reproduce: `python -m src.pipeline.p3_analysis.evaluate`; "off" = drop the
+`is_bridged` edges from the sample.)
+
+| | components | global efficiency |
+|---|---|---|
+| **Healing OFF** | 26 | 0.001008 |
+| **Healing ON** | **10** | **0.001105** |
+| Δ | −16 components | **+9.6% efficiency** · **+15.1% connectivity ratio** (build-time) |
+
+**Failure mode — targeted vs random vs flood** (same node count; reproduce:
+`python -m src.pipeline.p3_analysis.flood`):
+
+| Failure | end Resilience Index | reading |
+|---|---|---|
+| **Targeted** (highest-betweenness first) | **0.357** | most damaging — losing the real chokepoints |
+| **Random** (scattered) | 0.428 | distributed loss hurts more than a localized one |
+| **Flood** (spatial cluster around the top chokepoint) | 0.785 | least damaging — the network reroutes around a *localized* hole |
+
+**Reading:** healing measurably improves resilience; and the network is **robust to
+localized floods but vulnerable to targeted chokepoint failure** — exactly the
+distinction a disaster planner needs. (A flood of a *redundant* inland area, `--central`,
+is even more survivable, RI > 1.) The naive expectation "flood ≫ random" does **not**
+hold here because a contiguous flood mostly drowns low-importance local streets;
+reported honestly rather than fitted to the hypothesis.
 
 ## Target Scores
 

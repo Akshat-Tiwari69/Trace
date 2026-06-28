@@ -12,6 +12,11 @@ import networkx as nx
 import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
+from folium.plugins import FastMarkerCluster
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import io
 
 from src.pipeline.p3_analysis.resilience import resilience_index
 
@@ -27,6 +32,13 @@ def find_repo_root() -> Path:
 REPO_ROOT = find_repo_root()
 SAMPLE_GEOJSON = REPO_ROOT / "data" / "sample" / "panaji_demo_graph.geojson"
 SAMPLE_CRITICALITY = REPO_ROOT / "data" / "sample" / "panaji_demo_criticality.csv"
+
+
+def _truthy(value: object) -> bool:
+    """Interpret a GeoJSON/CSV flag as a bool — robust to bool, str, or NaN."""
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes"}
+    return value is True or value == 1
 
 
 @dataclass(frozen=True)
@@ -45,9 +57,9 @@ class RouteResult:
 
 @dataclass(frozen=True)
 class SimulationResult:
-    """Metrics and route state produced by one node ablation."""
+    """Metrics and route state produced by a node/area ablation (1+ nodes)."""
 
-    disabled_node: int
+    disabled_nodes: tuple[int, ...]
     resilience_index: float
     largest_cc_fraction: float
     route: RouteResult | None
@@ -79,6 +91,15 @@ def load_sample_data() -> tuple[gpd.GeoDataFrame, pd.DataFrame]:
     return features, criticality
 
 
+@st.cache_data
+def load_resilience_curve() -> pd.DataFrame | None:
+    """Load the resilience degradation curve (P3 contract) if available."""
+    path = REPO_ROOT / "data" / "sample" / "panaji_demo_resilience.csv"
+    if path.is_file():
+        return pd.read_csv(path)
+    return None
+
+
 def split_features(
     features: gpd.GeoDataFrame,
 ) -> tuple[gpd.GeoDataFrame, gpd.GeoDataFrame]:
@@ -92,9 +113,13 @@ def split_features(
     return nodes, edges
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_resource(show_spinner="Building routable graph...")
 def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
-    """Convert the map-ready GeoJSON features into a routable graph."""
+    """Convert the map-ready GeoJSON features into a routable graph.
+
+    ``_features`` is underscore-prefixed so Streamlit skips hashing the
+    (unhashable) GeoDataFrame for the cache key — required under cache_resource.
+    """
     nodes, edges = split_features(_features)
     graph = nx.Graph()
     for _, node in nodes.iterrows():
@@ -104,14 +129,16 @@ def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
             x=float(node.geometry.x),
             y=float(node.geometry.y),
             betweenness=float(node.get("betweenness", 0.0)),
-            is_critical=bool(node.get("is_critical", False)),
+            is_critical=_truthy(node.get("is_critical")),
+            is_articulation=_truthy(node.get("is_articulation")),
         )
     for _, edge in edges.iterrows():
         graph.add_edge(
             int(edge["u"]),
             int(edge["v"]),
             length_m=float(edge["length_m"]),
-            is_bridged=bool(edge.get("is_bridged", False)),
+            is_bridged=_truthy(edge.get("is_bridged")),
+            is_bridge=_truthy(edge.get("is_bridge")),
             coordinates=tuple(
                 (float(longitude), float(latitude))
                 for longitude, latitude in edge.geometry.coords
@@ -204,15 +231,17 @@ def representative_reroute(graph: nx.Graph, disabled_node: int) -> RouteResult |
     return disconnected_candidate
 
 
-@st.cache_data(show_spinner=False)
-def simulate_ablation(graph_fingerprint: str, _graph: nx.Graph, node: int) -> SimulationResult:
-    """Disable one node and compute resilience plus a representative reroute."""
-    metrics = resilience_index(_graph, removed_nodes=[node])
+@st.cache_data(show_spinner="Simulating failure...")
+def simulate_ablation(graph_fingerprint: str, _graph: nx.Graph, nodes: tuple[int, ...]) -> SimulationResult:
+    """Disable nodes and compute resilience plus a representative reroute (if single node)."""
+    metrics = resilience_index(_graph, removed_nodes=list(nodes))
+    route = representative_reroute(_graph, nodes[0]) if len(nodes) == 1 else None
+    
     return SimulationResult(
-        disabled_node=node,
+        disabled_nodes=nodes,
         resilience_index=float(metrics["resilience_index"]),
         largest_cc_fraction=float(metrics["largest_cc_fraction"]),
-        route=representative_reroute(_graph, node),
+        route=route,
     )
 
 
@@ -223,10 +252,11 @@ def semantic_legend() -> folium.Element:
                 background: #1e1e2e; color: #ffffff; padding: 10px 12px;
                 border: 1px solid #555; border-radius: 6px; font-size: 12px;">
       <b>Network states</b><br>
-      <span style="color:#00d4ff">●</span> selected junction<br>
-      <span style="color:#ff4b4b">●</span> disabled junction / links<br>
-      <span style="color:#ff8c42">━</span> rerouted path<br>
-      <span style="color:#aaaaaa">┄</span> healed road
+      <span style="color:#56B4E9">●</span> selected junction<br>
+      <span style="color:#D55E00">●</span> disabled junction / links<br>
+      <span style="color:#E69F00">━</span> rerouted path<br>
+      <span style="color:#aaaaaa">┄</span> healed road<br>
+      <span style="color:#ff00ff">●</span> / <span style="color:#ff00ff">━</span> single-point-of-failure
     </div>
     """
     return folium.Element(html)
@@ -240,7 +270,7 @@ def add_rerouted_path(road_map: folium.Map, graph: nx.Graph, route: RouteResult)
         coordinates = graph.edges[start, end]["coordinates"]
         folium.PolyLine(
             [(latitude, longitude) for longitude, latitude in coordinates],
-            color="#ff8c42",
+            color="#E69F00",
             weight=7,
             opacity=1.0,
             tooltip=f"Rerouted road {start}–{end}",
@@ -255,6 +285,8 @@ def build_map(
     simulation: SimulationResult | None,
     show_critical: bool,
     show_healed: bool,
+    show_spof: bool,
+    scenario: str,
 ) -> folium.Map:
     """Build the map with criticality, selection, failure, and reroute states."""
     nodes, edges = split_features(features)
@@ -266,7 +298,7 @@ def build_map(
         vmax=maximum,
         caption="Road criticality (endpoint betweenness: low to high)",
     )
-    disabled_node = simulation.disabled_node if simulation else None
+    disabled_nodes = simulation.disabled_nodes if simulation else ()
 
     road_map = folium.Map(
         location=[nodes.geometry.y.mean(), nodes.geometry.x.mean()],
@@ -274,51 +306,108 @@ def build_map(
         tiles="CartoDB dark_matter",
         control_scale=True,
     )
+    
+    if scenario == "Flood":
+        from folium.plugins import Draw
+        Draw(
+            export=False,
+            position='topleft',
+            draw_options={
+                'polyline': False,
+                'rectangle': True,
+                'circle': False,
+                'circlemarker': False,
+                'marker': False,
+                'polygon': True
+            },
+            edit_options={'poly': {'allowIntersection': False}}
+        ).add_to(road_map)
 
     for _, edge in edges.iterrows():
-        is_bridged = bool(edge["is_bridged"])
+        is_bridged = _truthy(edge.get("is_bridged"))
+        is_bridge = _truthy(edge.get("is_bridge"))
         if is_bridged and not show_healed:
             continue
         start, end = int(edge["u"]), int(edge["v"])
         score = max(float(scores.get(start, 0.0)), float(scores.get(end, 0.0)))
-        is_disabled = disabled_node in {start, end}
-        colour = "#ff4b4b" if is_disabled else colour_scale(score)
-        state = "disabled link" if is_disabled else (
-            "healed link" if is_bridged else "observed link"
-        )
+        is_disabled = start in disabled_nodes or end in disabled_nodes
+        is_spof = is_bridge and show_spof
+
+        if is_disabled:
+            colour = "#D55E00"
+            state = "disabled link"
+        elif is_spof:
+            colour = "#ff00ff"
+            state = "critical bridge"
+        else:
+            colour = colour_scale(score)
+            state = "healed link" if is_bridged else "observed link"
+
         coordinates = [
             (latitude, longitude) for longitude, latitude in edge.geometry.coords
         ]
         folium.PolyLine(
             coordinates,
             color=colour,
-            weight=4 if is_disabled or is_bridged else 3,
-            opacity=0.45 if is_disabled else 0.85,
+            weight=5 if is_spof else (4 if is_disabled or is_bridged else 3),
+            opacity=0.45 if is_disabled else (0.95 if is_spof else 0.85),
             dash_array="8 6" if is_bridged or is_disabled else None,
             tooltip=f"Road {start}–{end} · criticality {score:.3f} · {state}",
         ).add_to(road_map)
 
-    critical_ids = set(criticality.loc[criticality["is_critical"], "node_id"].astype(int))
+    critical_ids = set(criticality.loc[criticality["is_critical"].map(_truthy), "node_id"].astype(int))
+    articulation_ids = set()
+    if "is_articulation" in criticality.columns:
+        articulation_ids = set(criticality.loc[criticality["is_articulation"].map(_truthy), "node_id"].astype(int))
+
+    nodes_to_show = set()
     if show_critical:
-        for _, node in nodes[nodes["node_id"].isin(critical_ids)].iterrows():
+        nodes_to_show.update(critical_ids)
+    if show_spof:
+        nodes_to_show.update(articulation_ids)
+    
+    nodes_to_show.add(selected_node)
+    nodes_to_show.update(disabled_nodes)
+
+    if nodes_to_show:
+        cluster_data = []
+        for _, node in nodes[nodes["node_id"].isin(nodes_to_show)].iterrows():
             node_id = int(node["node_id"])
             score = float(scores.get(node_id, 0.0))
-            if node_id == disabled_node:
-                colour, radius, label = "#ff4b4b", 9, "Disabled junction"
+            is_art = node_id in articulation_ids
+            if node_id in disabled_nodes:
+                colour, radius, label = "#D55E00", 9, "Disabled junction"
             elif node_id == selected_node:
-                colour, radius, label = "#00d4ff", 8, "Selected junction"
+                colour, radius, label = "#56B4E9", 8, "Selected junction"
+            elif is_art and show_spof:
+                colour, radius, label = "#ff00ff", 7, "Articulation point"
             else:
                 colour, radius, label = colour_scale(score), 5, "Critical junction"
-            folium.CircleMarker(
-                location=[node.geometry.y, node.geometry.x],
-                radius=radius,
-                color="#ffffff",
-                weight=2 if node_id in {selected_node, disabled_node} else 1,
-                fill=True,
-                fill_color=colour,
-                fill_opacity=1.0,
-                tooltip=f"{label} {node_id} · score {score:.3f}",
-            ).add_to(road_map)
+                
+            cluster_data.append([
+                float(node.geometry.y),
+                float(node.geometry.x),
+                radius,
+                2 if node_id == selected_node or node_id in disabled_nodes else 1,
+                colour,
+                f"{label} {node_id} &middot; score {score:.3f}"
+            ])
+
+        callback = """
+        function (row) {
+            var marker = L.circleMarker([row[0], row[1]], {
+                radius: row[2],
+                color: '#ffffff',
+                weight: row[3],
+                fill: true,
+                fillColor: row[4],
+                fillOpacity: 1.0
+            });
+            marker.bindTooltip(row[5]);
+            return marker;
+        };
+        """
+        FastMarkerCluster(cluster_data, callback=callback).add_to(road_map)
 
     if simulation and simulation.route:
         add_rerouted_path(road_map, graph, simulation.route)
@@ -352,7 +441,10 @@ def render_charts(simulation: SimulationResult) -> None:
     """Render Design.md's live travel-impact and delay-contributor charts."""
     route = simulation.route
     if route is None:
-        st.warning("This junction has no through-route to reroute.")
+        if len(simulation.disabled_nodes) > 1:
+            st.info("Area-based flood active. Single-path rerouting analysis is disabled.")
+        else:
+            st.warning("This junction has no through-route to reroute.")
         return
     if route.rerouted_path is None:
         st.error(
@@ -372,7 +464,7 @@ def render_charts(simulation: SimulationResult) -> None:
         trend,
         x="Disabled junctions",
         y="Travel-time increase (%)",
-        color="#ff8c42",
+        color="#E69F00",
         height=180,
     )
 
@@ -382,17 +474,99 @@ def render_charts(simulation: SimulationResult) -> None:
             route.delay_segments,
             columns=["Road", "Delay contribution (%)"],
         ).set_index("Road")
-        st.bar_chart(delays, color="#ff8c42", height=190)
+        st.bar_chart(delays, color="#E69F00", height=190)
+
+
+def generate_geojson_export(features: gpd.GeoDataFrame, disabled_nodes: tuple[int, ...]) -> str:
+    """Generate GeoJSON string of the current network state."""
+    export_df = features.copy()
+    if disabled_nodes:
+        is_disabled_node = (export_df["feature_type"] == "node") & (export_df["node_id"].isin(disabled_nodes))
+        export_df.loc[is_disabled_node, "status"] = "disabled"
+        is_disabled_edge = (export_df["feature_type"] == "edge") & ((export_df["u"].isin(disabled_nodes)) | (export_df["v"].isin(disabled_nodes)))
+        export_df.loc[is_disabled_edge, "status"] = "disabled"
+    return export_df.to_json()
+
+
+@st.cache_data(show_spinner=False)
+def generate_summary_png(
+    simulation: SimulationResult | None,
+    critical_nodes: pd.DataFrame,
+    resilience_curve: pd.DataFrame | None
+) -> bytes:
+    """Generate a high-res PNG summary of the current state."""
+    from matplotlib.figure import Figure
+    fig = Figure(figsize=(10, 8))
+    fig.patch.set_facecolor('#1E1E2E')
+    
+    fig.suptitle("Route Resilience - Network Summary", color='white', fontsize=20, y=0.95)
+    
+    ax_metrics = fig.add_subplot(2, 2, 1)
+    ax_metrics.axis('off')
+    ax_metrics.set_facecolor('#1E1E2E')
+    
+    ri = simulation.resilience_index if simulation else 1.0
+    ax_metrics.text(0.1, 0.7, f"Resilience Index:\n{ri:.3f}", color='white', fontsize=18, fontweight='bold')
+    
+    if simulation and simulation.route:
+        delay = f"+{simulation.route.travel_time_delta_pct:.1f}%"
+    elif simulation and len(simulation.disabled_nodes) > 1:
+        delay = "N/A"
+    else:
+        delay = "0.0%"
+    ax_metrics.text(0.1, 0.3, f"Travel Time Impact:\n{delay}", color='#E69F00', fontsize=18, fontweight='bold')
+    
+    ax_table = fig.add_subplot(2, 2, 2)
+    ax_table.axis('off')
+    top5 = critical_nodes.head(5)[["node_id", "betweenness"]].copy()
+    top5["betweenness"] = top5["betweenness"].round(3)
+    table = ax_table.table(
+        cellText=top5.values,
+        colLabels=["Node ID", "Score"],
+        loc='center',
+        cellLoc='center'
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(12)
+    table.scale(1, 2)
+    
+    for (row, col), cell in table.get_celld().items():
+        cell.set_facecolor('#2D2D3D' if row > 0 else '#4C4C6D')
+        cell.set_text_props(color='white')
+        cell.set_edgecolor('#1E1E2E')
+
+    if resilience_curve is not None:
+        ax_curve = fig.add_subplot(2, 1, 2)
+        ax_curve.set_facecolor('#1E1E2E')
+        ax_curve.tick_params(colors='white')
+        for spine in ax_curve.spines.values():
+            spine.set_color('white')
+            
+        curve_data = resilience_curve.set_index("n_removed")
+        if "targeted_resilience_index" in curve_data.columns and "random_resilience_index" in curve_data.columns:
+            ax_curve.plot(curve_data.index, curve_data["targeted_resilience_index"], color='#D55E00', label='Targeted')
+            ax_curve.plot(curve_data.index, curve_data["random_resilience_index"], color='#56B4E9', label='Random')
+            ax_curve.legend(facecolor='#2D2D3D', edgecolor='white', labelcolor='white')
+        
+        ax_curve.set_xlabel("Nodes Removed", color='white')
+        ax_curve.set_ylabel("Resilience Index", color='white')
+        ax_curve.set_title("Resilience Degradation Curve", color='white')
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=150, facecolor=fig.get_facecolor(), bbox_inches='tight')
+    return buf.getvalue()
+
 
 
 def render_panel(
     features: gpd.GeoDataFrame,
     criticality: pd.DataFrame,
     simulation: SimulationResult | None,
+    resilience_curve: pd.DataFrame | None = None,
 ) -> None:
     """Render controls, metrics, ranked hotspots, and live charts."""
     nodes, edges = split_features(features)
-    critical_nodes = criticality[criticality["is_critical"]].sort_values("rank")
+    critical_nodes = criticality[criticality["is_critical"].map(_truthy)].sort_values("rank")
     critical_ids = critical_nodes["node_id"].astype(int).tolist()
     scores = criticality.set_index("node_id")["betweenness"].to_dict()
     ranks = criticality.set_index("node_id")["rank"].to_dict()
@@ -411,7 +585,11 @@ def render_panel(
         delta_color="inverse",
         help="Global efficiency after failure divided by baseline global efficiency.",
     )
-    travel_value = "Route cut" if simulation and not isfinite(travel_delta) else f"+{travel_delta:.1f}%"
+    if simulation and len(simulation.disabled_nodes) > 1:
+        travel_value = "N/A"
+    else:
+        travel_value = "Route cut" if simulation and not isfinite(travel_delta) else f"+{travel_delta:.1f}%"
+    
     travel_column.metric(
         "Travel-time impact",
         travel_value,
@@ -419,8 +597,9 @@ def render_panel(
     )
 
     st.subheader("Scenario controls")
+    view_mode = st.radio("View Mode", ["Interactive Map", "Side-by-Side Comparison"], horizontal=True, key="view_mode")
     st.selectbox("Region", ["Panaji demo"], disabled=True)
-    scenario = st.selectbox("Scenario", ["Road closure", "Accident", "Flood"])
+    scenario = st.selectbox("Scenario", ["Road closure", "Accident", "Flood"], key="scenario")
     # TODO: wire scenario-specific behavior into routing logic
     selected = st.selectbox(
         "Junction to disable",
@@ -439,18 +618,21 @@ def render_panel(
         use_container_width=True,
         help="Disable the selected junction and recompute routes and resilience.",
     ):
-        st.session_state["disabled_node"] = int(selected)
+        st.session_state["disabled_nodes"] = (int(selected),)
         st.rerun()
     if reset_column.button("Reset", use_container_width=True):
-        st.session_state["disabled_node"] = None
+        st.session_state["disabled_nodes"] = ()
+        st.session_state["reset_counter"] = st.session_state.get("reset_counter", 0) + 1
         st.rerun()
 
-    layer_one, layer_two = st.columns(2)
+    layer_one, layer_two, layer_three = st.columns(3)
     layer_one.checkbox("Critical nodes", value=True, key="show_critical")
     layer_two.checkbox("Healed roads", value=True, key="show_healed")
+    layer_three.checkbox("Single-points-of-failure", value=True, key="show_spof")
 
     if simulation:
-        st.success(f"Junction {simulation.disabled_node} is disabled.")
+        nodes_str = ", ".join(map(str, simulation.disabled_nodes))
+        st.success(f"Junction(s) {nodes_str} disabled.")
         st.caption(
             f"Largest connected network: {simulation.largest_cc_fraction:.1%} of "
             "remaining junctions."
@@ -464,11 +646,53 @@ def render_panel(
     else:
         st.info("No simulation running. Select a junction, then simulate its closure.")
 
+    if resilience_curve is not None:
+        st.subheader("Resilience Degradation Curve")
+        curve_data = resilience_curve.set_index("n_removed")
+        if "targeted_resilience_index" in curve_data.columns and "random_resilience_index" in curve_data.columns:
+            chart_data = curve_data.rename(columns={
+                "targeted_resilience_index": "Targeted failure",
+                "random_resilience_index": "Random failure"
+            })[["Targeted failure", "Random failure"]]
+        else:
+            chart_data = curve_data
+        st.line_chart(
+            chart_data,
+            color=["#D55E00", "#56B4E9"] if len(chart_data.columns) == 2 else None,
+            height=200,
+        )
+
     st.subheader("Top critical junctions")
     top_nodes = critical_nodes[["rank", "node_id", "betweenness"]].head(5).copy()
     top_nodes["betweenness"] = top_nodes["betweenness"].map(lambda value: f"{value:.3f}")
     st.dataframe(top_nodes, hide_index=True, use_container_width=True)
     st.caption(f"Network: {len(nodes):,} junctions · {len(edges):,} road links")
+
+    st.divider()
+    st.subheader("Export & Reports")
+    export_col1, export_col2 = st.columns(2)
+    
+    with export_col1:
+        geojson_data = generate_geojson_export(features, simulation.disabled_nodes if simulation else ())
+        st.download_button(
+            label="Download GeoJSON",
+            data=geojson_data,
+            file_name="network_state.geojson",
+            mime="application/geo+json",
+            use_container_width=True,
+            help="Download the current map state including disabled nodes and rerouted edges."
+        )
+        
+    with export_col2:
+        png_data = generate_summary_png(simulation, critical_nodes, resilience_curve)
+        st.download_button(
+            label="Download Summary",
+            data=png_data,
+            file_name="resilience_summary.png",
+            mime="image/png",
+            use_container_width=True,
+            help="Download a high-resolution PNG summarizing metrics, curve, and top critical nodes."
+        )
 
 
 def apply_design_theme() -> None:
@@ -498,28 +722,38 @@ def main() -> None:
     try:
         features, criticality = load_sample_data()
         graph = graph_from_features(features)
-    except (FileNotFoundError, OSError, RuntimeError, ValueError) as error:
-        st.error(f"Could not load the sample network: {error}")
+        resilience_curve = load_resilience_curve()
+    except FileNotFoundError as error:
+        st.error(
+            "Sample artifacts not found. Please ensure the pipeline has generated "
+            f"the sample data, or verify `data/sample/` exists. Details: {error}"
+        )
+        st.stop()
+    except (OSError, RuntimeError, ValueError) as error:
+        st.error(f"Could not load or parse the sample network: {error}")
         st.stop()
 
     critical_ids = set(
-        criticality.loc[criticality["is_critical"], "node_id"].astype(int)
+        criticality.loc[criticality["is_critical"].map(_truthy), "node_id"].astype(int)
     )
     if "selected_node" not in st.session_state:
         st.session_state["selected_node"] = int(
             criticality.sort_values("rank").iloc[0]["node_id"]
         )
-    disabled_node = st.session_state.get("disabled_node")
-    with st.spinner("Simulating junction failure…") if disabled_node is not None else st.empty():
+    disabled_nodes = st.session_state.get("disabled_nodes", ())
+    with st.spinner("Simulating failure…") if disabled_nodes else st.empty():
         simulation = (
-            simulate_ablation("panaji_demo_v1", graph, int(disabled_node))
-            if disabled_node is not None
+            simulate_ablation("panaji_demo_v1", graph, disabled_nodes)
+            if disabled_nodes
             else None
         )
 
     show_critical = st.session_state.get("show_critical", True)
     show_healed = st.session_state.get("show_healed", True)
-    road_map = build_map(
+    show_spof = st.session_state.get("show_spof", True)
+    scenario = st.session_state.get("scenario", "Road closure")
+    
+    sim_map = build_map(
         features,
         criticality,
         graph,
@@ -527,22 +761,80 @@ def main() -> None:
         simulation,
         show_critical,
         show_healed,
+        show_spof,
+        scenario,
     )
 
+    view_mode = st.session_state.get("view_mode", "Interactive Map")
     map_column, panel_column = st.columns([6.5, 3.5], gap="medium")
+
     with map_column:
-        map_state = st_folium(
-            road_map,
-            height=760,
-            use_container_width=True,
-            returned_objects=["last_object_clicked"],
-            key=f"network_map_{disabled_node}_{show_critical}_{show_healed}",
-        )
+        if view_mode == "Side-by-Side Comparison":
+            baseline_map = build_map(
+                features,
+                criticality,
+                graph,
+                int(st.session_state["selected_node"]),
+                None,
+                show_critical,
+                show_healed,
+                show_spof,
+                scenario,
+            )
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("**Baseline Network**")
+                baseline_map_state = st_folium(
+                    baseline_map,
+                    height=500,
+                    use_container_width=True,
+                    returned_objects=["last_object_clicked"],
+                    key=f"baseline_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{scenario}",
+                )
+            with col2:
+                st.markdown("**Post-Failure Network**")
+                map_state = st_folium(
+                    sim_map,
+                    height=500,
+                    use_container_width=True,
+                    returned_objects=["last_object_clicked", "all_drawings"],
+                    key=f"network_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{scenario}",
+                )
+        else:
+            baseline_map_state = None
+            map_state = st_folium(
+                sim_map,
+                height=760,
+                use_container_width=True,
+                returned_objects=["last_object_clicked", "all_drawings"],
+                key=f"network_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{scenario}",
+            )
+
         st.caption(
             "Brighter roads connect more critical junctions · dashed = healed · "
             "orange = reroute · red = disabled"
         )
+
     clicked = map_state.get("last_object_clicked") if map_state else None
+    drawings = map_state.get("all_drawings") if map_state else None
+
+    if scenario == "Flood" and drawings is not None:
+        from shapely.geometry import shape
+        flooded_nodes = set()
+        nodes_gdf, _ = split_features(features)
+        for drawing in drawings:
+            geom_type = drawing.get("geometry", {}).get("type")
+            if geom_type in ("Polygon", "MultiPolygon"):
+                geom = shape(drawing["geometry"])
+                inside = nodes_gdf[nodes_gdf.geometry.within(geom)]["node_id"].astype(int).tolist()
+                flooded_nodes.update(inside)
+        
+        new_disabled = tuple(sorted(flooded_nodes))
+        if new_disabled != st.session_state.get("disabled_nodes", ()):
+            st.session_state["disabled_nodes"] = new_disabled
+            st.rerun()
+    if not clicked and baseline_map_state:
+        clicked = baseline_map_state.get("last_object_clicked")
     click_signature = (
         (round(float(clicked["lat"]), 7), round(float(clicked["lng"]), 7))
         if clicked and "lat" in clicked and "lng" in clicked
@@ -557,7 +849,7 @@ def main() -> None:
             st.rerun()
 
     with panel_column:
-        render_panel(features, criticality, simulation)
+        render_panel(features, criticality, simulation, resilience_curve)
 
 
 if __name__ == "__main__":

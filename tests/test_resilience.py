@@ -13,7 +13,12 @@ import math
 import networkx as nx
 import pytest
 
-from src.pipeline.p3_analysis.criticality import annotate_criticality, compute_betweenness
+from src.pipeline.p3_analysis.criticality import (
+    annotate_criticality,
+    annotate_cut_structure,
+    compute_betweenness,
+    rank_table,
+)
 from src.pipeline.p3_analysis.resilience import (
     ablation_curve,
     global_efficiency,
@@ -149,3 +154,83 @@ def test_critical_fraction_positive_flags_at_least_one():
 def test_critical_fraction_out_of_range_raises():
     with pytest.raises(ValueError):
         annotate_criticality(_barbell(), critical_fraction=1.5)
+
+
+# --------------------------------------------------------------------------- #
+# S8 — articulation points & bridge edges
+# --------------------------------------------------------------------------- #
+def test_cut_structure_finds_articulation_and_bridge():
+    g = _barbell()                       # two triangles joined by the single edge 2—3
+    counts = annotate_cut_structure(g)
+    assert counts["n_articulation"] == 2 and counts["n_bridges"] == 1
+    assert g.nodes[2]["is_articulation"] and g.nodes[3]["is_articulation"]
+    assert not g.nodes[0]["is_articulation"]      # a triangle corner is not a cut node
+    assert g.edges[2, 3]["is_bridge"] is True     # the lone bridge edge
+    assert g.edges[0, 1]["is_bridge"] is False    # a cycle edge is not a bridge
+
+
+def test_cut_structure_none_in_a_cycle():
+    g = nx.Graph()
+    for a, b in [(0, 1), (1, 2), (0, 2)]:        # a triangle has no cut node/edge
+        g.add_edge(a, b, length_m=1.0)
+    counts = annotate_cut_structure(g)
+    assert counts["n_articulation"] == 0 and counts["n_bridges"] == 0
+
+
+def test_cut_structure_handles_disconnected():
+    g = _barbell()
+    g.add_edge(10, 11, length_m=1.0)             # a separate 2-node component (its edge is a bridge)
+    counts = annotate_cut_structure(g)
+    assert counts["n_bridges"] == 2              # 2—3 plus the isolated 10—11
+
+
+def test_rank_table_includes_is_articulation():
+    g = _barbell()
+    for n in g.nodes:                            # rank_table needs coords
+        g.nodes[n]["x"], g.nodes[n]["y"] = float(n), 0.0
+    bc = compute_betweenness(g)
+    annotate_criticality(g)
+    annotate_cut_structure(g)
+    rows = rank_table(g, bc)
+    assert "is_articulation" in rows[0]
+    assert sum(r["is_articulation"] for r in rows) == 2
+
+
+# --------------------------------------------------------------------------- #
+# S9 — betweenness caching + k-sample benchmark
+# --------------------------------------------------------------------------- #
+def test_betweenness_cache_memoizes_and_matches_direct():
+    from src.pipeline.p3_analysis.criticality import BetweennessCache
+
+    g = _barbell()
+    cache = BetweennessCache()
+    first = cache.get(g)
+    assert len(cache) == 1
+    second = cache.get(g)            # same graph → cache hit, no new entry
+    assert len(cache) == 1
+    assert first == second == compute_betweenness(g)   # exact, not approximate
+
+
+def test_betweenness_cache_distinguishes_graphs():
+    from src.pipeline.p3_analysis.criticality import BetweennessCache
+
+    g = _barbell()
+    cache = BetweennessCache()
+    cache.get(g)
+    g2 = g.copy()
+    g2.remove_edge(2, 3)             # different structure → different fingerprint
+    cache.get(g2)
+    assert len(cache) == 2
+
+
+def test_benchmark_betweenness_tracks_exact_ranking():
+    import networkx as nx
+
+    from src.pipeline.p3_analysis.criticality import benchmark_betweenness
+
+    g = nx.convert_node_labels_to_integers(nx.grid_2d_graph(15, 15))
+    for u, v in g.edges:
+        g.edges[u, v]["length_m"] = 1.0
+    result = benchmark_betweenness(g, k=40)
+    assert set(result) >= {"speedup", "spearman", "exact_s", "ksample_s"}
+    assert result["spearman"] >= 0.8   # k-sample preserves the criticality ranking

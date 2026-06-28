@@ -36,54 +36,71 @@ def pair_deepglobe(root: str | Path) -> list[tuple[Path, Path]]:
     return pairs
 
 
-def build_train_transform(size: int = 256, occlusion: bool = True) -> Any:
-    """Training augmentation: flips/rotate/colour (+ optional occlusion), norm."""
+def build_train_transform(size: int = 256, occlusion: bool | str = True) -> Any:
+    """Training augmentation: flips/rotate/colour (+ optional occlusion), norm.
+
+    ``occlusion`` controls the occlusion-simulation stack (task A8):
+    ``True`` = the A4-baseline CoarseDropout boxes; ``"heavy"`` = a stronger stack
+    (more/larger CoarseDropout + RandomShadow + hue/sat jitter) to push
+    Occlusion-Recall; ``False`` = none.
+    """
     import albumentations as A
     from albumentations.pytorch import ToTensorV2
 
+    heavy = occlusion == "heavy"
     augs = [
         A.RandomCrop(size, size) if size else A.NoOp(),
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
         A.RandomRotate90(p=0.5),
-        A.RandomBrightnessContrast(p=0.3),
+        A.RandomBrightnessContrast(brightness_limit=0.3 if heavy else 0.2,
+                                   contrast_limit=0.3 if heavy else 0.2,
+                                   p=0.4 if heavy else 0.3),
     ]
     if occlusion:
-        # blank up to 8 boxes (~1/16–1/8 of the tile each) to mimic
-        # trees/buildings/vehicles (albumentations 2.x CoarseDropout API)
-        hole = max(1, size // 8)
+        # blank boxes (~1/16–1/6 of the tile) to mimic trees/buildings/vehicles;
+        # "heavy" uses more, larger boxes more often (albumentations 2.x API).
+        hole = max(1, size // (6 if heavy else 8))
         lo = max(1, size // 16)
         augs.append(
             A.CoarseDropout(
-                num_holes_range=(1, 8),
+                num_holes_range=(1, 12 if heavy else 8),
                 hole_height_range=(lo, hole),
                 hole_width_range=(lo, hole),
                 fill=0,
                 fill_mask=None,  # keep the road label under the hole
-                p=0.5,
+                p=0.6 if heavy else 0.5,
             )
         )
+    if heavy:
+        augs += [
+            A.HueSaturationValue(hue_shift_limit=10, sat_shift_limit=15, val_shift_limit=10, p=0.3),
+            A.RandomShadow(p=0.3),  # cast shadows — a real occlusion mode
+        ]
     augs += [A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD), ToTensorV2()]
     return A.Compose(augs)
 
 
-def build_val_transform(size: int = 256) -> Any:
+def build_val_transform(size: int = 256, grayscale: bool = False) -> Any:
     """Validation transform: a native-resolution centre crop (same scale as the
     train RandomCrop) + normalise. NOT a full-image resize — resizing a 1024px
     DeepGlobe tile down to 256 shrinks thin roads ~4x, evaluating the model at a
     scale it never trained on and pinning val IoU artificially low.
+
+    ``grayscale=True`` desaturates the image (3-channel grey) — a proxy for
+    **Cartosat-3 panchromatic** input, to measure the sensor-modality gap (A24).
     """
     import albumentations as A
     from albumentations.pytorch import ToTensorV2
 
-    return A.Compose(
-        [
-            A.PadIfNeeded(size, size, border_mode=0),  # guard images smaller than the crop
-            A.CenterCrop(size, size),
-            A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD),
-            ToTensorV2(),
-        ]
-    )
+    steps = [
+        A.PadIfNeeded(size, size, border_mode=0),  # guard images smaller than the crop
+        A.CenterCrop(size, size),
+    ]
+    if grayscale:
+        steps.append(A.ToGray(p=1.0))
+    steps += [A.Normalize(mean=IMAGENET_MEAN, std=IMAGENET_STD), ToTensorV2()]
+    return A.Compose(steps)
 
 
 class RoadTileDataset(Dataset):
