@@ -65,10 +65,18 @@ def load_or_make_heldout(
 
 def heldout_pairs(corpus: Path, test_chips: list[str]) -> list[tuple[Path, Path]]:
     """(sat, mask) pairs whose chip is in the held-out TEST set."""
-    test = set(test_chips)
+    return _pairs_by_chip(corpus, set(test_chips), keep_in_set=True)
+
+
+def train_pairs(corpus: Path, test_chips: list[str]) -> list[tuple[Path, Path]]:
+    """(sat, mask) pairs whose chip is NOT held out — the A23 supervised train set."""
+    return _pairs_by_chip(corpus, set(test_chips), keep_in_set=False)
+
+
+def _pairs_by_chip(corpus: Path, chips: set[str], keep_in_set: bool) -> list[tuple[Path, Path]]:
     out = []
     for sat in sorted(Path(corpus).glob("*_sat.jpg")):
-        if chip_of(sat.name) in test:
+        if (chip_of(sat.name) in chips) == keep_in_set:
             mask = sat.with_name(sat.name.replace("_sat.jpg", "_mask.png"))
             if mask.exists():
                 out.append((sat, mask))

@@ -34,6 +34,23 @@ def test_make_split_changes_with_seed():
     assert test_a != test_b
 
 
+def test_train_and_heldout_pairs_are_disjoint_by_chip(tmp_path):
+    """A23 train pairs must never include a held-out chip (no leakage)."""
+    from src.pipeline.p1_segment.eval_spacenet import heldout_pairs, train_pairs
+    corpus = tmp_path / "dg"
+    corpus.mkdir()
+    for chip in range(6):
+        for r in range(2):
+            (corpus / f"sn5mum_chip{chip}_r{r}_c0_sat.jpg").write_bytes(b"x")
+            (corpus / f"sn5mum_chip{chip}_r{r}_c0_mask.png").write_bytes(b"x")
+    test_chips = ["chip0", "chip3"]
+    held = {chip_of(p[0].name) for p in heldout_pairs(corpus, test_chips)}
+    train = {chip_of(p[0].name) for p in train_pairs(corpus, test_chips)}
+    assert held == {"chip0", "chip3"}
+    assert train.isdisjoint(held)
+    assert held | train == {f"chip{i}" for i in range(6)}
+
+
 def test_grayscale_val_transform_desaturates_colour_only():
     """A24: the grayscale (Cartosat-PAN proxy) transform desaturates a colour
     image but is a no-op on an already-grey one."""

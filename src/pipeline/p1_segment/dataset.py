@@ -36,13 +36,16 @@ def pair_deepglobe(root: str | Path) -> list[tuple[Path, Path]]:
     return pairs
 
 
-def build_train_transform(size: int = 256, occlusion: bool | str = True) -> Any:
+def build_train_transform(size: int = 256, occlusion: bool | str = True, grayscale_p: float = 0.0) -> Any:
     """Training augmentation: flips/rotate/colour (+ optional occlusion), norm.
 
     ``occlusion`` controls the occlusion-simulation stack (task A8):
     ``True`` = the A4-baseline CoarseDropout boxes; ``"heavy"`` = a stronger stack
     (more/larger CoarseDropout + RandomShadow + hue/sat jitter) to push
     Occlusion-Recall; ``False`` = none.
+
+    ``grayscale_p`` (A24) randomly desaturates a fraction of tiles so the model
+    can't depend on colour — a cheap path to **Cartosat-3 panchromatic** robustness.
     """
     import albumentations as A
     from albumentations.pytorch import ToTensorV2
@@ -57,6 +60,8 @@ def build_train_transform(size: int = 256, occlusion: bool | str = True) -> Any:
                                    contrast_limit=0.3 if heavy else 0.2,
                                    p=0.4 if heavy else 0.3),
     ]
+    if grayscale_p > 0:
+        augs.append(A.ToGray(p=grayscale_p))   # Cartosat-PAN robustness (A24)
     if occlusion:
         # blank boxes (~1/16–1/6 of the tile) to mimic trees/buildings/vehicles;
         # "heavy" uses more, larger boxes more often (albumentations 2.x API).
