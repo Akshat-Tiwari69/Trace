@@ -48,7 +48,9 @@ from src.pipeline.p1_segment.train import train_one_epoch
 @dataclasses.dataclass
 class FineTuneConfig:
     init_checkpoint: str | Path          # the v1 checkpoint to start from
-    finetune_dir: str | Path             # data/finetune (DeepGlobe-format Indian pairs)
+    finetune_dir: str | Path | None = None   # data/finetune (DeepGlobe-format Indian pairs)
+    finetune_pairs: list | None = None   # explicit (sat,mask) pairs — overrides finetune_dir (A23: SpaceNet train split)
+    grayscale_p: float = 0.0             # A24: random desaturation for Cartosat-PAN robustness
     deepglobe_dir: str | Path | None = None   # mix in DeepGlobe to avoid forgetting
     deepglobe_subset: int = 2000         # clean DeepGlobe anchor size
     deepglobe_val: int = 40              # held-out DeepGlobe tiles (forget-check)
@@ -61,6 +63,7 @@ class FineTuneConfig:
     finetune_oversample: int = 3
     crops_per_image: int = 1
     occlusion: bool | str = True         # "heavy" = stronger occlusion aug (A8)
+    cldice_weight: float = 0.1           # soft-clDice weight; 0 avoids its 8 GB skeletonize OOM (A12)
     val_fraction: float = 0.15
     deepglobe_iou_tolerance: float = 0.005   # max allowed DeepGlobe drop vs v1
     device: str = "cpu"
@@ -70,7 +73,7 @@ class FineTuneConfig:
 def gather_pairs(cfg: FineTuneConfig) -> tuple[list, list, list]:
     """Build (train, indian_val, deepglobe_val). Val sets are disjoint from train."""
     rng = random.Random(cfg.seed)
-    indian = pair_deepglobe(cfg.finetune_dir)
+    indian = list(cfg.finetune_pairs) if cfg.finetune_pairs is not None else pair_deepglobe(cfg.finetune_dir)
     if not indian:
         raise SystemExit(f"no DeepGlobe-format pairs in {cfg.finetune_dir} — run build_finetune_data first.")
     rng.shuffle(indian)
@@ -135,10 +138,11 @@ def finetune(cfg: FineTuneConfig) -> dict:
           f"encoder {'FROZEN' if frozen else f'lr×{cfg.encoder_lr_scale}'} | "
           f"train {len(train_pairs)} (anchor incl.) | val dg {len(deepglobe_val)}/ind {len(indian_val)}")
 
-    train_ds = RoadTileDataset(train_pairs, build_train_transform(cfg.image_size, occlusion=cfg.occlusion),
+    train_ds = RoadTileDataset(train_pairs, build_train_transform(cfg.image_size, occlusion=cfg.occlusion,
+                                                                  grayscale_p=cfg.grayscale_p),
                                crops_per_image=cfg.crops_per_image)
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True, num_workers=0)
-    loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=0.1)
+    loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=cfg.cldice_weight)
     optimizer = _build_optimizer(model, cfg)
     scaler = torch.amp.GradScaler("cuda", enabled=(cfg.device != "cpu"))
 
