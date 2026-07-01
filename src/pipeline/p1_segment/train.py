@@ -51,15 +51,37 @@ def evaluate(
     loader: DataLoader,
     device: str = "cpu",
     threshold: float = 0.5,
+    reduction: str = "global",
 ) -> dict[str, float]:
-    """Evaluate IoU + Dice over a loader (mean of per-batch scores)."""
+    """Evaluate IoU + Dice over a loader.
+
+    ``reduction="global"`` (default) accumulates intersection/union over the
+    **whole set** (paper-grade — unaffected by batch size or per-tile road
+    coverage); ``"batch_mean"`` averages per-batch scores (legacy behaviour).
+    """
     model.eval()
-    iou_sum, dice_sum, n = 0.0, 0.0, 0
+    if reduction == "batch_mean":
+        iou_sum, dice_sum, n = 0.0, 0.0, 0
+        for images, masks in loader:
+            images, masks = images.to(device), masks.to(device)
+            preds = (torch.sigmoid(model(images)) >= threshold).float()
+            iou_sum += iou_score(preds, masks)
+            dice_sum += dice_score(preds, masks)
+            n += 1
+        n = max(n, 1)
+        return {"iou": iou_sum / n, "dice": dice_sum / n}
+
+    inter = union = pred_sum = target_sum = 0.0
     for images, masks in loader:
         images, masks = images.to(device), masks.to(device)
-        preds = (torch.sigmoid(model(images)) >= threshold).float()
-        iou_sum += iou_score(preds, masks)
-        dice_sum += dice_score(preds, masks)
-        n += 1
-    n = max(n, 1)
-    return {"iou": iou_sum / n, "dice": dice_sum / n}
+        preds = (torch.sigmoid(model(images)) >= threshold) > 0.5
+        targets = masks > 0.5
+        i = float((preds & targets).sum())
+        p, t = float(preds.sum()), float(targets.sum())
+        inter += i
+        union += p + t - i
+        pred_sum += p
+        target_sum += t
+    eps = 1e-7
+    return {"iou": (inter + eps) / (union + eps),
+            "dice": (2 * inter + eps) / (pred_sum + target_sum + eps)}

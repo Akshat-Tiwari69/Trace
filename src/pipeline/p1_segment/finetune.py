@@ -64,6 +64,7 @@ class FineTuneConfig:
     crops_per_image: int = 1
     occlusion: bool | str = True         # "heavy" = stronger occlusion aug (A8)
     cldice_weight: float = 0.1           # soft-clDice weight; 0 avoids its 8 GB skeletonize OOM (A12)
+    num_workers: int = 0                 # DataLoader workers (0 = safe on low RAM, per A12)
     val_fraction: float = 0.15
     deepglobe_iou_tolerance: float = 0.005   # max allowed DeepGlobe drop vs v1
     device: str = "cpu"
@@ -141,7 +142,8 @@ def finetune(cfg: FineTuneConfig) -> dict:
     train_ds = RoadTileDataset(train_pairs, build_train_transform(cfg.image_size, occlusion=cfg.occlusion,
                                                                   grayscale_p=cfg.grayscale_p),
                                crops_per_image=cfg.crops_per_image)
-    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True, num_workers=0)
+    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True,
+                              num_workers=cfg.num_workers)
     loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=cfg.cldice_weight)
     optimizer = _build_optimizer(model, cfg)
     scaler = torch.amp.GradScaler("cuda", enabled=(cfg.device != "cpu"))
@@ -202,15 +204,33 @@ def main() -> None:
     p.add_argument("--occlusion", choices=["standard", "heavy", "none"], default="standard",
                    help="occlusion augmentation strength (A8: 'heavy')")
     p.add_argument("--deepglobe-tol", type=float, default=0.005, help="max allowed DeepGlobe IoU drop vs v1")
+    p.add_argument("--grayscale-p", type=float, default=0.0, help="A24: random desaturation for Cartosat-PAN robustness")
+    p.add_argument("--cldice-weight", type=float, default=0.1, help="0 avoids the 8 GB clDice OOM (A12)")
+    p.add_argument("--num-workers", type=int, default=0)
+    p.add_argument("--spacenet-corpus", default=None,
+                   help="A23: SpaceNet dg_format dir — train on the NON-held-out chips (frozen A17 split)")
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
     occlusion = {"standard": True, "heavy": "heavy", "none": False}[args.occlusion]
+
+    finetune_pairs, finetune_dir = None, args.finetune_dir
+    if args.spacenet_corpus:  # A23 reproducible mode: SpaceNet train split, held-out reserved
+        from src.pipeline.p1_segment.eval_spacenet import (
+            DEFAULT_MANIFEST, chip_of, load_or_make_heldout, train_pairs)
+        corpus = Path(args.spacenet_corpus)
+        chips = sorted({chip_of(p.name) for p in corpus.glob("*_sat.jpg")})
+        held = load_or_make_heldout(chips, DEFAULT_MANIFEST)
+        finetune_pairs, finetune_dir = train_pairs(corpus, held), None
+        print(f"A23 SpaceNet mode: {len(finetune_pairs)} train pairs (held-out {len(held)} chips reserved)", flush=True)
+
     finetune(FineTuneConfig(
-        init_checkpoint=args.init, finetune_dir=args.finetune_dir, deepglobe_dir=args.deepglobe_dir,
-        deepglobe_subset=args.deepglobe_subset, deepglobe_val=args.deepglobe_val, out_path=args.out,
+        init_checkpoint=args.init, finetune_dir=finetune_dir, finetune_pairs=finetune_pairs,
+        deepglobe_dir=args.deepglobe_dir, deepglobe_subset=args.deepglobe_subset,
+        deepglobe_val=args.deepglobe_val, out_path=args.out,
         image_size=args.image_size, batch_size=args.batch_size, lr=args.lr,
         encoder_lr_scale=args.encoder_lr_scale, epochs=args.epochs, finetune_oversample=args.oversample,
-        crops_per_image=args.crops_per_image, occlusion=occlusion,
+        crops_per_image=args.crops_per_image, occlusion=occlusion, grayscale_p=args.grayscale_p,
+        cldice_weight=args.cldice_weight, num_workers=args.num_workers,
         deepglobe_iou_tolerance=args.deepglobe_tol, device=args.device,
     ))
 

@@ -28,8 +28,8 @@ def main() -> None:
     p.add_argument("--image", required=True, help="RGB image/tile (jpg/png/3-band tif)")
     p.add_argument("--checkpoint", required=True, help="trained .pt checkpoint from the A4 notebook")
     p.add_argument("--aoi", required=True, help="short AOI id -> data/interim/{aoi}_mask.png")
-    p.add_argument("--tile-size", type=int, default=256)
-    p.add_argument("--threshold", type=float, default=0.5)
+    p.add_argument("--tile-size", type=int, default=None, help="default: checkpoint meta image_size")
+    p.add_argument("--threshold", type=float, default=None, help="default: checkpoint meta threshold")
     p.add_argument("--tta", action="store_true", help="D4 test-time augmentation (8× compute, ~+IoU)")
     p.add_argument("--postprocess", action="store_true",
                    help="A10 mask cleanup: drop tiny false components (+ optional close)")
@@ -49,8 +49,12 @@ def main() -> None:
     image = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
     model, meta = load_checkpoint(args.checkpoint, map_location=args.device)
-    mask = predict_large(model, image, tile_size=args.tile_size,
-                         device=args.device, threshold=args.threshold, tta=args.tta)
+    # fall back to the checkpoint's deploy settings (like run_pipeline) so a good
+    # model isn't hobbled by the wrong CLI threshold/resolution
+    tile_size = args.tile_size if args.tile_size is not None else int(meta.get("image_size", 512))
+    threshold = args.threshold if args.threshold is not None else float(meta.get("threshold", 0.5))
+    mask = predict_large(model, image, tile_size=tile_size,
+                         device=args.device, threshold=threshold, tta=args.tta)
 
     if args.postprocess:
         roads_before = mask.mean()
