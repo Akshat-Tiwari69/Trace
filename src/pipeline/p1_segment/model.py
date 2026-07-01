@@ -137,6 +137,26 @@ def _dihedral_tta_prob(net: torch.nn.Module, x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
+def predict_prob(
+    model: torch.nn.Module,
+    image: np.ndarray,
+    device: str = "cpu",
+    tta: bool = False,
+) -> np.ndarray:
+    """Predict a float road-probability map for one RGB tile.
+
+    This is the probability-producing sibling of :func:`predict_mask`. Keeping
+    probabilities until after full-image stitching avoids hard seams at tile
+    boundaries.
+    """
+    net = _unwrap(model).to(device)
+    net.eval()
+    x = _to_chw_tensor(image).to(device)
+    prob = _dihedral_tta_prob(net, x) if tta else torch.sigmoid(net(x))
+    return prob[0, 0].cpu().numpy().astype(np.float32)
+
+
+@torch.no_grad()
 def predict_mask(
     model: torch.nn.Module,
     image: np.ndarray,
@@ -150,11 +170,69 @@ def predict_mask(
     ``HxW`` mask of 0/1, the §4 contract shape P2 consumes. ``tta`` averages over
     the 8 D4 symmetries (retrain-free; ~8× compute).
     """
-    net = _unwrap(model).to(device)
-    net.eval()
-    x = _to_chw_tensor(image).to(device)
-    prob = _dihedral_tta_prob(net, x) if tta else torch.sigmoid(net(x))
-    return (prob[0, 0].cpu().numpy() >= threshold).astype(np.uint8)
+    return (predict_prob(model, image, device=device, tta=tta) >= threshold).astype(np.uint8)
+
+
+def _window_starts(length: int, tile_size: int, stride: int) -> list[int]:
+    """Start indices that cover ``length`` with possibly-overlapping windows."""
+    if length <= tile_size:
+        return [0]
+    starts = list(range(0, length - tile_size + 1, stride))
+    if starts[-1] != length - tile_size:
+        starts.append(length - tile_size)
+    return starts
+
+
+def _padded_crop(image: np.ndarray, y0: int, x0: int, tile_size: int) -> tuple[np.ndarray, int, int]:
+    """Crop a ``tile_size`` patch; zero-pad if the source image is smaller."""
+    patch = image[y0 : y0 + tile_size, x0 : x0 + tile_size]
+    ph, pw = patch.shape[:2]
+    if ph == tile_size and pw == tile_size:
+        return patch, ph, pw
+    padded = np.zeros((tile_size, tile_size, *image.shape[2:]), dtype=image.dtype)
+    padded[:ph, :pw] = patch
+    return padded, ph, pw
+
+
+def _blend_window(tile_size: int) -> np.ndarray:
+    """2-D Hann blend window with non-zero borders for stable division."""
+    one = np.hanning(tile_size).astype(np.float32)
+    win = np.outer(one, one)
+    return np.maximum(win, 1e-3).astype(np.float32)
+
+
+@torch.no_grad()
+def predict_large_prob(
+    model: torch.nn.Module,
+    image: np.ndarray,
+    tile_size: int = 512,
+    stride: int | None = None,
+    device: str = "cpu",
+    tta: bool = False,
+) -> np.ndarray:
+    """Predict a full-image road-probability map with optional overlap blending.
+
+    ``stride=None`` keeps the old non-overlap behaviour. Use ``stride < tile_size``
+    (for example 384 or 256 with 512 windows) to remove tile-seam artifacts.
+    """
+    if stride is None:
+        stride = tile_size
+    if stride <= 0 or stride > tile_size:
+        raise ValueError("stride must be in (0, tile_size]")
+
+    h, w = image.shape[:2]
+    acc = np.zeros((h, w), dtype=np.float32)
+    weight = np.zeros((h, w), dtype=np.float32)
+    win = _blend_window(tile_size)
+
+    for y0 in _window_starts(h, tile_size, stride):
+        for x0 in _window_starts(w, tile_size, stride):
+            patch, ph, pw = _padded_crop(image, y0, x0, tile_size)
+            prob = predict_prob(model, patch, device=device, tta=tta)[:ph, :pw]
+            ww = win[:ph, :pw]
+            acc[y0 : y0 + ph, x0 : x0 + pw] += prob * ww
+            weight[y0 : y0 + ph, x0 : x0 + pw] += ww
+    return acc / np.maximum(weight, 1e-6)
 
 
 @torch.no_grad()
@@ -165,21 +243,14 @@ def predict_large(
     device: str = "cpu",
     threshold: float = 0.5,
     tta: bool = False,
+    stride: int | None = None,
 ) -> np.ndarray:
     """Predict a binary {0,1} road mask for a whole (large) RGB image.
 
     The model only sees ``tile_size`` windows, so tile the image, predict each
-    tile, and stitch the results back to the original ``HxW`` — the §4 contract
-    ``data/interim/{aoi}_mask.png`` that P2 consumes. Reuses A3's ``tile_array``.
-    ``tta`` applies D4 test-time augmentation per tile.
+    tile, and stitch probabilities back to the original ``HxW`` before applying
+    one threshold. ``stride < tile_size`` enables overlap/Hann blending; this
+    avoids hard tile seams that can break roads before graph extraction.
     """
-    from src.pipeline.p1_segment.osm_mask import tile_array
-
-    net = _unwrap(model).to(device)
-    h, w = image.shape[:2]
-    full = np.zeros((h, w), dtype=np.uint8)
-    for t in tile_array(image, tile_size):
-        pred = predict_mask(net, t.data, device=device, threshold=threshold, tta=tta)
-        th, tw = min(tile_size, h - t.y0), min(tile_size, w - t.x0)
-        full[t.y0 : t.y0 + th, t.x0 : t.x0 + tw] = pred[:th, :tw]  # drop padding
-    return full
+    prob = predict_large_prob(model, image, tile_size=tile_size, stride=stride, device=device, tta=tta)
+    return (prob >= threshold).astype(np.uint8)
