@@ -1,0 +1,15 @@
+{
+  "n_tiles": 50,
+  "models": [
+    {
+      "checkpoint": "road_spacenet.pt",
+      "n_scored": 50,
+      "apls_mean": 0.41474200000000006
+    },
+    {
+      "checkpoint": "deepglobe_mit_b3_scse_512px_best.pt",
+      "n_scored": 50,
+      "apls_mean": 0.38444999999999996
+    }
+  ]
+}
