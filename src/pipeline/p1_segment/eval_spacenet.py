@@ -125,6 +125,61 @@ def evaluate_checkpoints(
             "models": results}
 
 
+def threshold_sweep(
+    checkpoints, corpus=DEFAULT_CORPUS, manifest=DEFAULT_MANIFEST,
+    thresholds=None, image_size: int = 512, device: str = "cpu", grayscale: bool = False,
+) -> dict:
+    """Sweep thresholds per model (one inference per tile, cheap threshold loop).
+
+    Reports each model's best threshold + its IoU there, plus the IoU at a shared
+    0.44 for continuity — so the "best model" verdict doesn't hinge on a threshold
+    picked for the older v1/A4 checkpoints (A21 / Codex audit #3)."""
+    import cv2
+    import numpy as np
+
+    from src.pipeline.p1_segment.model import load_checkpoint, predict_prob
+
+    if thresholds is None:
+        thresholds = [round(0.20 + 0.02 * i, 2) for i in range(26)]  # 0.20..0.70
+    corpus = Path(corpus)
+    chips = sorted({chip_of(p.name) for p in corpus.glob("*_sat.jpg")})
+    pairs = heldout_pairs(corpus, load_or_make_heldout(chips, manifest))
+    mode = "GRAYSCALE (Cartosat-PAN proxy)" if grayscale else "RGB"
+    print(f"threshold sweep [{mode}] over {len(pairs)} held-out tiles, {len(thresholds)} thresholds", flush=True)
+
+    results = {}
+    for ckpt in checkpoints:
+        model, _ = load_checkpoint(ckpt, map_location=device)
+        model.to(device).eval()
+        eps = 1e-7
+        inter = {t: 0.0 for t in thresholds}
+        union = {t: 0.0 for t in thresholds}
+        for sat, mask_path in pairs:
+            img = cv2.cvtColor(cv2.imread(str(sat)), cv2.COLOR_BGR2RGB)
+            if img.shape[0] != image_size:
+                img = cv2.resize(img, (image_size, image_size))
+            if grayscale:
+                g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+                img = np.stack([g, g, g], -1)
+            gt = (cv2.imread(str(mask_path), 0) > 127)
+            if gt.shape[0] != image_size:
+                gt = cv2.resize(gt.astype(np.uint8), (image_size, image_size),
+                                interpolation=cv2.INTER_NEAREST).astype(bool)
+            prob = predict_prob(model, img, device=device)
+            for t in thresholds:
+                pred = prob >= t
+                i = float(np.logical_and(pred, gt).sum())
+                inter[t] += i
+                union[t] += float(pred.sum()) + float(gt.sum()) - i
+        iou = {t: (inter[t] + eps) / (union[t] + eps) for t in thresholds}
+        best_t = max(iou, key=iou.get)
+        results[Path(ckpt).name] = {"best_threshold": best_t, "best_iou": round(iou[best_t], 4),
+                                    "iou_at_0.44": round(iou.get(0.44, 0.0), 4),
+                                    "iou_by_threshold": {t: round(v, 4) for t, v in iou.items()}}
+        print(f"  {Path(ckpt).name:42s} best thr {best_t:.2f} IoU {iou[best_t]:.4f}  (@0.44 {iou.get(0.44,0):.4f})", flush=True)
+    return {"grayscale": grayscale, "models": results}
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="A17: eval on held-out SpaceNet-5 Mumbai (real Indian GT).")
     p.add_argument("--checkpoints", nargs="+", required=True)
@@ -133,10 +188,16 @@ def main() -> None:
     p.add_argument("--threshold", type=float, default=0.44)
     p.add_argument("--image-size", type=int, default=384)
     p.add_argument("--device", default="cpu")
+    p.add_argument("--sweep", action="store_true", help="A21: sweep thresholds 0.20-0.70 and report each model's best")
     p.add_argument("--grayscale", action="store_true",
                    help="desaturate input (Cartosat-3 PAN proxy) to measure the sensor-modality gap")
     p.add_argument("--out", default="data/sample/spacenet_mumbai_eval.json")
     args = p.parse_args()
+
+    if args.sweep:
+        rep = threshold_sweep([Path(c) for c in args.checkpoints], Path(args.corpus), Path(args.manifest),
+                              image_size=args.image_size, device=args.device, grayscale=args.grayscale)
+        Path(args.out).write_text(json.dumps(rep, indent=2)); print(f"-> {args.out}"); return
 
     report = evaluate_checkpoints([Path(c) for c in args.checkpoints], Path(args.corpus),
                                   Path(args.manifest), args.threshold, args.image_size, args.device,
