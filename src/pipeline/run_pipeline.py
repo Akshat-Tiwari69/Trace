@@ -42,15 +42,11 @@ def segment(image_path: str | Path, checkpoint: str | Path, aoi: str, interim_di
     ``tta`` applies D4 test-time augmentation. ``postprocess`` runs the A10 mask
     cleanup (drop tiny false components, optional close/fill) before writing.
     """
-    import cv2
-
     from src.pipeline.p1_segment.model import load_checkpoint, predict_large
     from src.pipeline.p1_segment.osm_mask import save_binary_png
+    from src.pipeline.p1_segment.raster_io import read_image_any, write_manifest
 
-    bgr = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-    if bgr is None:
-        raise SystemExit(f"could not read image: {image_path}")
-    image = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    image, transform, crs = read_image_any(image_path)  # A26: GeoTIFF-aware (keeps CRS/PAN)
     model, meta = load_checkpoint(checkpoint, map_location=device)
     thr = threshold if threshold is not None else float(meta.get("threshold", 0.5))
     mask = predict_large(model, image, tile_size=tile_size, device=device, threshold=thr, tta=tta)
@@ -60,6 +56,7 @@ def segment(image_path: str | Path, checkpoint: str | Path, aoi: str, interim_di
                                 close_radius=pp_close_radius, fill_holes=fill_holes)
     out = Path(interim_dir) / f"{aoi}_mask.png"
     save_binary_png(mask, out)
+    write_manifest(aoi, interim_dir, transform, crs)  # A26: georeference the graph if available
     return out, float(mask.mean())
 
 

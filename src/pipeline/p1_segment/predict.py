@@ -43,12 +43,10 @@ def main() -> None:
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
 
-    import cv2
+    from src.pipeline.p1_segment.raster_io import read_image_any, write_manifest
 
-    bgr = cv2.imread(args.image, cv2.IMREAD_COLOR)
-    if bgr is None:
-        raise SystemExit(f"could not read image: {args.image}")
-    image = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    # A26: rasterio for GeoTIFFs (keeps CRS/transform; handles 1-band PAN), else cv2
+    image, transform, crs = read_image_any(args.image)
 
     model, meta = load_checkpoint(args.checkpoint, map_location=args.device)
     # fall back to the checkpoint's deploy settings (like run_pipeline) so a good
@@ -71,8 +69,10 @@ def main() -> None:
 
     out = Path(args.interim_dir) / f"{args.aoi}_mask.png"
     save_binary_png(mask, out)
+    manifest = write_manifest(args.aoi, args.interim_dir, transform, crs)  # A26: georef for P2
+    geo = f" · georeferenced ({crs}) -> {manifest}" if manifest else " · pixel-space (no CRS)"
     print(f"[{args.aoi}] {image.shape[1]}x{image.shape[0]}px "
-          f"(encoder {meta.get('encoder', '?')}) -> roads {mask.mean():.2%} of pixels -> {out}")
+          f"(encoder {meta.get('encoder', '?')}) -> roads {mask.mean():.2%} of pixels -> {out}{geo}")
 
 
 if __name__ == "__main__":
