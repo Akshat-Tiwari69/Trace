@@ -158,6 +158,70 @@ def predict_mask(
 
 
 @torch.no_grad()
+def predict_prob(
+    model: torch.nn.Module,
+    image: np.ndarray,
+    device: str = "cpu",
+    tta: bool = False,
+) -> np.ndarray:
+    """Per-pixel road **probability** map (``HxW`` float in [0,1]) for one tile.
+
+    Same forward pass as :func:`predict_mask` without the threshold — lets callers
+    sweep thresholds (A21) or blend overlapping windows (A27) before binarising.
+    """
+    net = _unwrap(model).to(device)
+    net.eval()
+    x = _to_chw_tensor(image).to(device)
+    prob = _dihedral_tta_prob(net, x) if tta else torch.sigmoid(net(x))
+    return prob[0, 0].cpu().numpy().astype(np.float32)
+
+
+def _hann2d(size: int) -> np.ndarray:
+    """2-D Hann window (+small floor so edge pixels still contribute)."""
+    w = np.hanning(size)
+    return np.outer(w, w).astype(np.float32) + 1e-3
+
+
+@torch.no_grad()
+def predict_large_prob(
+    model: torch.nn.Module,
+    image: np.ndarray,
+    tile_size: int = 512,
+    stride: int | None = None,
+    device: str = "cpu",
+    tta: bool = False,
+) -> np.ndarray:
+    """Blended probability map for a large image via **overlapping** windows.
+
+    Slides ``tile_size`` windows at ``stride`` (default 75 % overlap), weights each
+    tile's probabilities by a Hann window and normalises — so roads crossing tile
+    seams don't break (A27). Threshold the returned map **once**. Reuses padding
+    for edge windows.
+    """
+    stride = stride or max(1, tile_size * 3 // 4)
+    net = _unwrap(model).to(device)
+    h, w = image.shape[:2]
+    acc = np.zeros((h, w), np.float32)
+    wsum = np.zeros((h, w), np.float32)
+    window = _hann2d(tile_size)
+    ys = sorted({*range(0, max(1, h - tile_size + 1), stride), max(0, h - tile_size)})
+    xs = sorted({*range(0, max(1, w - tile_size + 1), stride), max(0, w - tile_size)})
+    for y0 in ys:
+        for x0 in xs:
+            tile = image[y0 : y0 + tile_size, x0 : x0 + tile_size]
+            th, tw = tile.shape[:2]
+            if th < tile_size or tw < tile_size:  # pad edge windows
+                padded = np.zeros((tile_size, tile_size, image.shape[2]), image.dtype)
+                padded[:th, :tw] = tile
+                tile = padded
+            prob = predict_prob(net, tile, device=device, tta=tta)
+            win = window[:th, :tw]
+            acc[y0 : y0 + th, x0 : x0 + tw] += prob[:th, :tw] * win
+            wsum[y0 : y0 + th, x0 : x0 + tw] += win
+    return acc / np.maximum(wsum, 1e-6)
+
+
+@torch.no_grad()
 def predict_large(
     model: torch.nn.Module,
     image: np.ndarray,

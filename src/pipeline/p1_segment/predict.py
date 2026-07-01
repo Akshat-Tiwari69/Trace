@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from src.pipeline.p1_segment.model import load_checkpoint, predict_large
+from src.pipeline.p1_segment.model import load_checkpoint, predict_large, predict_large_prob
 from src.pipeline.p1_segment.osm_mask import save_binary_png
 from src.pipeline.p1_segment.postprocess import postprocess_mask
 
@@ -31,6 +31,8 @@ def main() -> None:
     p.add_argument("--tile-size", type=int, default=None, help="default: checkpoint meta image_size")
     p.add_argument("--threshold", type=float, default=None, help="default: checkpoint meta threshold")
     p.add_argument("--tta", action="store_true", help="D4 test-time augmentation (8× compute, ~+IoU)")
+    p.add_argument("--blend", action="store_true", help="A27: overlapped Hann-blended inference (no tile-seam breaks)")
+    p.add_argument("--stride", type=int, default=None, help="blend window stride (default 75%% overlap)")
     p.add_argument("--postprocess", action="store_true",
                    help="A10 mask cleanup: drop tiny false components (+ optional close)")
     p.add_argument("--min-component-size", type=int, default=50,
@@ -53,8 +55,13 @@ def main() -> None:
     # model isn't hobbled by the wrong CLI threshold/resolution
     tile_size = args.tile_size if args.tile_size is not None else int(meta.get("image_size", 512))
     threshold = args.threshold if args.threshold is not None else float(meta.get("threshold", 0.5))
-    mask = predict_large(model, image, tile_size=tile_size,
-                         device=args.device, threshold=threshold, tta=args.tta)
+    if args.blend:
+        prob = predict_large_prob(model, image, tile_size=tile_size, stride=args.stride,
+                                  device=args.device, tta=args.tta)
+        mask = (prob >= threshold).astype("uint8")
+    else:
+        mask = predict_large(model, image, tile_size=tile_size,
+                             device=args.device, threshold=threshold, tta=args.tta)
 
     if args.postprocess:
         roads_before = mask.mean()
