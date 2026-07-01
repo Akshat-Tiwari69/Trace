@@ -125,3 +125,30 @@ def test_predict_large_tta_runs():
     mask = predict_large(model, image, tile_size=256, tta=True)
     assert mask.shape == (300, 400) and mask.dtype == np.uint8
     assert set(np.unique(mask)).issubset({0, 1})
+
+
+def test_predict_prob_returns_probabilities():
+    import numpy as np
+    from src.pipeline.p1_segment.model import build_model, predict_prob
+    model = build_model(encoder_weights=None)
+    image = np.random.default_rng(0).integers(0, 255, (128, 128, 3), dtype=np.uint8)
+    prob = predict_prob(model, image)
+    assert prob.shape == (128, 128)
+    assert prob.min() >= 0.0 and prob.max() <= 1.0
+
+
+def test_predict_large_prob_blends_and_covers():
+    import numpy as np
+    from src.pipeline.p1_segment.model import build_model, predict_prob, predict_large_prob
+    model = build_model(encoder_weights=None)
+    # larger-than-tile image -> overlapping windows must cover every pixel, stay in [0,1]
+    image = np.random.default_rng(1).integers(0, 255, (200, 260, 3), dtype=np.uint8)
+    prob = predict_large_prob(model, image, tile_size=128, stride=96)
+    assert prob.shape == (200, 260)
+    assert prob.min() >= 0.0 and prob.max() <= 1.0
+    assert not np.isnan(prob).any()
+    # on a uniform image the blended prob ~ a single-tile prediction (no seam artifacts)
+    uniform = np.full((200, 260, 3), 120, np.uint8)
+    blended = predict_large_prob(model, uniform, tile_size=128, stride=96)
+    single = predict_prob(model, uniform[:128, :128])
+    assert abs(float(blended[64, 64]) - float(single[64, 64])) < 0.05
