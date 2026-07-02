@@ -725,7 +725,12 @@ def _call_modal_seg(image_bytes: bytes) -> tuple[bytes, float | None]:
     import json
     import urllib.request
 
-    body = json.dumps({"image_b64": base64.b64encode(image_bytes).decode()}).encode()
+    body = json.dumps(
+        {
+            "image_b64": base64.b64encode(image_bytes).decode(),
+            "key": os.environ.get("MODAL_SEG_KEY", ""),
+        }
+    ).encode()
     req = urllib.request.Request(
         MODAL_SEG_URL, data=body, headers={"Content-Type": "application/json"}
     )

@@ -2,9 +2,10 @@
 
 Runs the deployed SegFormer MiT-B3 + SCSE checkpoint (`road_pan.pt`, release
 a4-roadseg-v3.2) on a T4 that scales to zero. The dashboard POSTs a base64 image
-and gets back a base64 binary road-mask PNG. Only `model.py` is vendored (it
-imports torch/smp/numpy only), so none of the repo's heavy geo `__init__` chain
-is pulled in.
++ a shared key and gets back a base64 binary road-mask PNG. Only `model.py` is
+vendored (torch/smp/numpy only), so none of the repo's heavy geo `__init__` chain
+is pulled in. The auth key lives in a Modal Secret (`roadseg-key`, env
+`ROADSEG_KEY`) — never in the repo.
 
 Deploy (from repo root, Modal authed):  modal deploy deploy/modal_app.py
 """
@@ -44,7 +45,7 @@ image = (
 app = modal.App("roadresilience-seg", image=image)
 
 
-@app.cls(gpu="T4")
+@app.cls(gpu="T4", secrets=[modal.Secret.from_name("roadseg-key")])
 class Segmenter:
     @modal.enter()
     def load(self) -> None:
@@ -77,9 +78,12 @@ class Segmenter:
 
     @modal.fastapi_endpoint(method="POST", docs=True)
     def segment(self, item: dict):
-        """POST {"image_b64": "<base64 image>"} -> {"mask_png_b64", "threshold"}."""
+        """POST {"image_b64","key"} -> {"mask_png_b64","threshold"} (401 on bad key)."""
         import base64
+        import os
 
+        if item.get("key") != os.environ.get("ROADSEG_KEY"):
+            return {"error": "unauthorized"}
         img_b64 = item.get("image_b64")
         if not img_b64:
             return {"error": "missing image_b64"}
