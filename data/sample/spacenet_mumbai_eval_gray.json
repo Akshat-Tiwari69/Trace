@@ -5,6 +5,10 @@
   "image_size": 512,
   "grayscale": true,
   "models": {
+    "road_pan.pt": {
+      "iou": 0.34175357660682254,
+      "dice": 0.5094133268063811
+    },
     "road_spacenet.pt": {
       "iou": 0.3752248826608057,
       "dice": 0.5456923989548723

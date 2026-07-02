@@ -95,11 +95,11 @@ Download pointers (sources, licenses, roles) are in `docs/Research.md` → *Data
 
 ## Run P1 inference (imagery → road mask)
 
-Once you have a trained checkpoint (grab the best one, `road_spacenet.pt`, from the [`a4-roadseg-v3.1` release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.1), or train your own), turn an image into the road-mask artifact P2 consumes — runs on **CPU**, no GPU needed:
+Once you have a trained checkpoint (grab the best one, `road_pan.pt`, from the [`a4-roadseg-v3.2` release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2), or train your own), turn an image into the road-mask artifact P2 consumes — runs on **CPU**, no GPU needed:
 
 ```bash
 python -m src.pipeline.p1_segment.predict \
-    --image data/raw/<tile>.tif --checkpoint models/road_spacenet.pt --aoi <id> \
+    --image data/raw/<tile>.tif --checkpoint models/road_pan.pt --aoi <id> \
     [--blend] [--postprocess]
 # writes data/interim/<id>_mask.png  (binary {0,1}); large images are tiled + stitched.
 # threshold/tile-size default to the checkpoint meta; --blend = seamless Hann-overlap
