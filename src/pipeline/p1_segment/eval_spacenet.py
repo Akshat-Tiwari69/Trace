@@ -142,7 +142,7 @@ def threshold_sweep(
     import cv2
     import numpy as np
 
-    from src.pipeline.p1_segment.model import load_checkpoint, predict_prob
+    from src.pipeline.p1_segment.model import load_checkpoint, predict_prob_batch
     from src.pipeline.p1_segment.raster_io import imread_gray, imread_rgb
 
     if thresholds is None:
@@ -160,24 +160,31 @@ def threshold_sweep(
         eps = 1e-7
         inter = {t: 0.0 for t in thresholds}
         union = {t: 0.0 for t in thresholds}
-        for sat, mask_path in pairs:
-            img = imread_rgb(sat)
-            if img.shape[0] != image_size:
-                img = cv2.resize(img, (image_size, image_size))
-            if grayscale:
-                g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-                img = np.stack([g, g, g], -1)
-            gt = imread_gray(mask_path) > 127
-            if gt.shape[0] != image_size:
-                gt = cv2.resize(gt.astype(np.uint8), (image_size, image_size),
-                                interpolation=cv2.INTER_NEAREST).astype(bool)
-            prob = predict_prob(model, img, device=device)
-            gt_sum = float(gt.sum())  # constant across thresholds — hoisted out of the loop
-            for t in thresholds:
-                pred = prob >= t
-                i = float(np.logical_and(pred, gt).sum())
-                inter[t] += i
-                union[t] += float(pred.sum()) + gt_sum - i
+        # Batch tiles through the model (A28): read+preprocess a bounded chunk, run
+        # one (device-aware) batched forward, then sweep thresholds on each prob map.
+        batch = 16
+        for start in range(0, len(pairs), batch):
+            imgs, gts = [], []
+            for sat, mask_path in pairs[start : start + batch]:
+                img = imread_rgb(sat)
+                if img.shape[0] != image_size:
+                    img = cv2.resize(img, (image_size, image_size))
+                if grayscale:
+                    g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+                    img = np.stack([g, g, g], -1)
+                gt = imread_gray(mask_path) > 127
+                if gt.shape[0] != image_size:
+                    gt = cv2.resize(gt.astype(np.uint8), (image_size, image_size),
+                                    interpolation=cv2.INTER_NEAREST).astype(bool)
+                imgs.append(img)
+                gts.append(gt)
+            for prob, gt in zip(predict_prob_batch(model, imgs, device=device), gts):
+                gt_sum = float(gt.sum())  # constant across thresholds — hoisted out of the loop
+                for t in thresholds:
+                    pred = prob >= t
+                    i = float(np.logical_and(pred, gt).sum())
+                    inter[t] += i
+                    union[t] += float(pred.sum()) + gt_sum - i
         iou = {t: (inter[t] + eps) / (union[t] + eps) for t in thresholds}
         best_t = max(iou, key=iou.get)
         results[Path(ckpt).name] = {"best_threshold": best_t, "best_iou": round(iou[best_t], 4),

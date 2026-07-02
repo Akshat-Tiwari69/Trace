@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import functools
 import random
 from pathlib import Path
 
@@ -105,6 +106,18 @@ def _build_optimizer(model: torch.nn.Module, cfg: FineTuneConfig) -> torch.optim
     return torch.optim.AdamW(groups, weight_decay=1.0e-4)
 
 
+@functools.lru_cache(maxsize=None)
+def _read_val_pair(sat_path: str, mask_path: str):
+    """Decode a (sat RGB, gt-bool) val pair once and cache it (A28).
+
+    The held-out val images are identical every epoch, yet ``_iou_on_pairs`` runs
+    ~3× per epoch — this turns 3×epochs disk re-reads/pair into a single read.
+    Callers must treat the returned arrays as read-only (they're shared)."""
+    from src.pipeline.p1_segment.raster_io import imread_gray, imread_rgb
+
+    return imread_rgb(sat_path), imread_gray(mask_path) > 127
+
+
 @torch.no_grad()
 def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False) -> float:
     """Mean IoU over (sat, mask) pairs via full-image sliding prediction.
@@ -115,16 +128,13 @@ def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False)
     """
     import cv2
 
-    from src.pipeline.p1_segment.raster_io import imread_gray, imread_rgb
-
     if not pairs:
         return float("nan")
     total = 0.0
     for sat_path, mask_path in pairs:
-        img = imread_rgb(sat_path)
+        img, gt = _read_val_pair(str(sat_path), str(mask_path))
         if grayscale:
             img = cv2.cvtColor(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
-        gt = imread_gray(mask_path) > 127
         pred = predict_large(model, img, tile_size=tile_size, device=device, threshold=thr) > 0
         inter = np.logical_and(pred, gt).sum()
         union = np.logical_or(pred, gt).sum()

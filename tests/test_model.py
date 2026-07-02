@@ -152,3 +152,28 @@ def test_predict_large_prob_blends_and_covers():
     blended = predict_large_prob(model, uniform, tile_size=128, stride=96)
     single = predict_prob(model, uniform[:128, :128])
     assert abs(float(blended[64, 64]) - float(single[64, 64])) < 0.05
+
+
+def test_predict_prob_batch_matches_serial():
+    # A28: batched inference must reproduce the per-tile predict_prob loop exactly.
+    from src.pipeline.p1_segment.model import build_model, predict_prob, predict_prob_batch
+    model = build_model(encoder_weights=None)
+    rng = np.random.default_rng(3)
+    tiles = [rng.integers(0, 255, (96, 96, 3), dtype=np.uint8) for _ in range(5)]
+    serial = [predict_prob(model, t) for t in tiles]
+    batched = predict_prob_batch(model, tiles, batch_size=2)  # chunks 2+2+1
+    assert predict_prob_batch(model, []) == []
+    for s, b in zip(serial, batched):
+        assert np.allclose(s, b, atol=1e-5)          # batched matmul reorders adds (~1e-7)
+        assert np.array_equal(s >= 0.5, b >= 0.5)    # thresholded mask is identical
+
+
+def test_predict_large_prob_batch_size_invariant():
+    # A28: the blended map must not depend on how many tiles share a forward pass.
+    from src.pipeline.p1_segment.model import build_model, predict_large_prob
+    model = build_model(encoder_weights=None)
+    image = np.random.default_rng(4).integers(0, 255, (300, 300, 3), dtype=np.uint8)
+    one = predict_large_prob(model, image, tile_size=128, stride=96, batch_size=1)
+    many = predict_large_prob(model, image, tile_size=128, stride=96, batch_size=8)
+    assert np.allclose(one, many, atol=1e-5)         # ~1e-7 batched-matmul drift
+    assert np.array_equal(one >= 0.5, many >= 0.5)   # binarised road mask unchanged
