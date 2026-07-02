@@ -257,6 +257,11 @@ flowchart TD
 
 > Copy the block each working day. Newest on top.
 
+**2026-07-03 (Akshat — A30: dashboard UI overhaul, coordinator-authorized in Saanvi's lane)**
+- **Root cause of the "generic" look:** the app forced a dark background via CSS while every native Streamlit widget still rendered on the **default light theme** (no `.streamlit/config.toml`) — mismatched selects/charts/dataframes. Fix: committed `.streamlit/config.toml` (base=dark, amber primary `#F59E0B`, bg `#0B1220`) so native widgets follow, then layered a design system in `apply_design_theme()`.
+- **Design system (ui-ux-pro-max: dark ops-dashboard):** Fira Sans + Fira Code (tabular numerals for metrics), token palette (navy surfaces `#121C30/#16233B`, borders `#24334E`, amber accent, blue data), metric cards w/ signal edge, gradient primary buttons, uppercase section micro-labels, framed map iframe, branded header (inline SVG glyph — no emoji icons), restyled map legend, focus-visible rings + `prefers-reduced-motion` support. Map data colors untouched (Okabe-Ito, colorblind-safe).
+- Coordinator (Akshat) explicitly authorized working in Saanvi's `src/app` lane for this. Logic untouched — CSS/markdown/theming only.
+
 **2026-07-03 (Akshat — A29: public deploy on Oracle ARM + Modal GPU inference + auto-update)**
 - **Dashboard is LIVE** at **https://trace.tiwaribabu.in** (Oracle Cloud Always-Free ARM box). Runs as a **user systemd** service (`roadresilience.service`, lingering on). **Host/access specifics (IP, login user, key path, co-tenancy) are kept in private agent-memory (`trace-deploy-server.md`), deliberately NOT in this public repo.**
 - **Deploy is dashboard-only + slim:** the dashboard reads precomputed `data/sample/` and never loads the model, so `deploy/requirements-app.txt` drops the whole ML/geo-IO stack; **geopandas 1.0.1 + pyogrio** (bundled GDAL) installs clean on ARM with no system GDAL. Fixed the long-standing `ModuleNotFound: src` (documented `streamlit run` path) by setting **PYTHONPATH in the service env** — `app.py` untouched at deploy time.
