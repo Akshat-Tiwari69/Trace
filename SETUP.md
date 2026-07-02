@@ -59,7 +59,7 @@ python -c "import streamlit, folium, networkx, skimage, sknw, rasterio, osmnx; p
 
 The **primary, hardware-agnostic** way to train. Same notebook for everyone.
 1. Open `notebooks/train_segmentation.ipynb` in **Google Colab** or **Kaggle**.
-2. Enable GPU: Colab → *Runtime → Change runtime type → GPU (T4)*; Kaggle → *Settings → Accelerator → GPU P100 / T4×2*.
+2. Enable GPU: Colab → *Runtime → Change runtime type → GPU (T4)*; Kaggle → *Settings → Accelerator → **GPU T4×2***. **Avoid Kaggle P100** — our torch build silently fails on it (see `Tracker.md` §10); the API push also defaults to P100, so launch T4 from the Kaggle UI.
 3. Run all cells. The notebook installs its own deps, pulls the dataset, fine-tunes, and saves the checkpoint.
 4. **Save the checkpoint off-device** (Google Drive / Kaggle Dataset) — cloud sessions are wiped when they end.
    - Kaggle free GPU: ~30 hrs/week, ≤9 hr/session. Colab free: a T4 with variable limits.
@@ -95,13 +95,19 @@ Download pointers (sources, licenses, roles) are in `docs/Research.md` → *Data
 
 ## Run P1 inference (imagery → road mask)
 
-Once you have a trained checkpoint (from `notebooks/train_segmentation.ipynb`, saved off-device), turn an image into the road-mask artifact P2 consumes — runs on **CPU**, no GPU needed:
+Once you have a trained checkpoint (grab the best one, `road_spacenet.pt`, from the [`a4-roadseg-v3.1` release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.1), or train your own), turn an image into the road-mask artifact P2 consumes — runs on **CPU**, no GPU needed:
 
 ```bash
 python -m src.pipeline.p1_segment.predict \
-    --image data/raw/<tile>.tif --checkpoint models/<checkpoint>.pt --aoi <id>
-# writes data/interim/<id>_mask.png  (binary {0,1}); large images are tiled + stitched
+    --image data/raw/<tile>.tif --checkpoint models/road_spacenet.pt --aoi <id> \
+    [--blend] [--postprocess]
+# writes data/interim/<id>_mask.png  (binary {0,1}); large images are tiled + stitched.
+# threshold/tile-size default to the checkpoint meta; --blend = seamless Hann-overlap
+# inference; --postprocess = A10 cleanup. GeoTIFFs (incl. 1-band Cartosat PAN) are read
+# with their CRS/transform and a georef manifest is written for P2 automatically.
 ```
+
+For the full CLI (eval on the truthful Indian benchmark, the v3 fine-tune, whole-pipeline) see the AUTO-GENERATED reference in [`README.md`](README.md).
 
 ## Troubleshooting (I-1)
 
