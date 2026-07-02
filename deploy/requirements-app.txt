@@ -9,7 +9,10 @@ streamlit==1.38.0
 folium==0.17.0
 streamlit-folium==0.23.1
 branca==0.7.2
-geopandas==0.14.4
+# geopandas 1.0 dropped the hard fiona dependency and reads via pyogrio (which
+# bundles GDAL in its wheel) -> no system GDAL needed on aarch64. App only uses
+# gpd.read_file(), which is unchanged in 1.0.
+geopandas==1.0.1
 pyogrio==0.9.0
 shapely==2.0.5
 networkx==3.3
