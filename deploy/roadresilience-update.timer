@@ -1,0 +1,10 @@
+[Unit]
+Description=Route Resilience — poll GitHub for updates every 2 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=Route Resilience — Streamlit dashboard (public)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Trace
+Environment=PYTHONPATH=%h/Trace
+ExecStart=%h/Trace/.venv/bin/streamlit run src/app/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

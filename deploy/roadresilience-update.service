@@ -1,0 +1,6 @@
+[Unit]
+Description=Route Resilience — pull latest from GitHub and restart if changed
+
+[Service]
+Type=oneshot
+ExecStart=%h/Trace/deploy/update.sh
