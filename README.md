@@ -40,10 +40,10 @@ flowchart LR
 | v2 — Indian OSM fine-tuned | 0.373 | — | — | [`a4-roadseg-v2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v2) |
 | v1 — DeepGlobe baseline | 0.375 | 0.318 | 0.384 | [`a4-roadseg-v1`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v1) |
 
-**v3 beats the baseline on every axis** — pixels (+15%), routing (APLS +8%), and grayscale/PAN robustness — the first genuine gain on *real* Indian GT (earlier OSM-agreement gains didn't transfer to held-out; the truthful benchmark is what exposed it). A threshold sweep puts the optimum at **0.50** (v3 → 0.449). On DeepGlobe (in-domain) v1 still scores IoU **0.670** / Occlusion-Recall **0.793** @0.44.
+**v3 beats the baseline on every axis** — pixels (+15%), routing (APLS +8%), and grayscale/PAN robustness — the first genuine gain on *real* Indian GT (earlier OSM-agreement gains didn't transfer to held-out; the truthful benchmark is what exposed it). A threshold sweep puts the optimum at **0.50**, not the 0.44 v3 shipped with — the deployed model is **[`a4-roadseg-v3.1`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.1)** (same weights, threshold 0.50 → IoU **0.449**). On DeepGlobe (in-domain) v1 still scores IoU **0.670** / Occlusion-Recall **0.793** @0.44.
 <!-- END AUTO-GENERATED -->
 
-Model releases: **[`a4-roadseg-v3`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3)** (best on Indian) · `v2` · `v1`.
+Model releases: **[`a4-roadseg-v3.1`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.1)** (deployed — v3 weights @ threshold 0.50) · `v3` · `v2` · `v1`.
 
 **Resilience (the core thesis holds):** removing high-betweenness junctions collapses global efficiency *far faster* than removing random ones — i.e. the criticality scoring finds genuine chokepoints. On the OSM sample, targeted ablation mean RI **0.674 vs 0.860** random; on a live, tree-occluded Panaji satellite tile run end-to-end, **0.503 vs 0.780**.
 
@@ -64,7 +64,7 @@ Then open the local URL, pick a critical junction, and hit **Simulate closure**.
 
 ### Run the whole pipeline on your own tile
 
-Grab the best model from the [`a4-roadseg-v3` release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3) (`road_spacenet.pt`) into `models/`, then one command takes imagery all the way to dashboard-ready artifacts:
+Grab the best model from the [`a4-roadseg-v3.1` release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.1) (`road_spacenet.pt`) into `models/`, then one command takes imagery all the way to dashboard-ready artifacts:
 
 <!-- AUTO-GENERATED: CLI reference — from src/pipeline/**/__main__ entrypoints -->
 ```bash
