@@ -106,8 +106,13 @@ def _build_optimizer(model: torch.nn.Module, cfg: FineTuneConfig) -> torch.optim
 
 
 @torch.no_grad()
-def _iou_on_pairs(model, pairs, tile_size, device, thr) -> float:
-    """Mean IoU over (sat, mask) pairs via full-image sliding prediction."""
+def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False) -> float:
+    """Mean IoU over (sat, mask) pairs via full-image sliding prediction.
+
+    ``grayscale=True`` decolorizes each image (3-channel grey) before predicting —
+    a Cartosat-PAN proxy, so the fine-tune can watch the sensor-modality gap close
+    epoch-by-epoch instead of only at the end (A24).
+    """
     import cv2
 
     if not pairs:
@@ -115,6 +120,8 @@ def _iou_on_pairs(model, pairs, tile_size, device, thr) -> float:
     total = 0.0
     for sat_path, mask_path in pairs:
         img = cv2.cvtColor(cv2.imread(str(sat_path), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+        if grayscale:
+            img = cv2.cvtColor(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
         gt = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE) > 127
         pred = predict_large(model, img, tile_size=tile_size, device=device, threshold=thr) > 0
         inter = np.logical_and(pred, gt).sum()
@@ -155,13 +162,17 @@ def finetune(cfg: FineTuneConfig) -> dict:
         train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, cfg.device, scaler)
         ind_iou = _iou_on_pairs(model, indian_val, cfg.image_size, cfg.device, thr)
         dg_iou = _iou_on_pairs(model, deepglobe_val, cfg.image_size, cfg.device, thr)
+        # A24: track the Cartosat-PAN (grayscale) gap on the Indian val each epoch.
+        gray_iou = (_iou_on_pairs(model, indian_val, cfg.image_size, cfg.device, thr, grayscale=True)
+                    if cfg.grayscale_p > 0 else float("nan"))
         keeps_dg = (not deepglobe_val) or (dg_iou >= keep_floor)
         score = ind_iou if keeps_dg else -1e9
         row = {"epoch": epoch, "train_loss": train_loss, "indian_iou": ind_iou,
-               "deepglobe_iou": dg_iou, "keeps_deepglobe": keeps_dg}
+               "deepglobe_iou": dg_iou, "indian_gray_iou": gray_iou, "keeps_deepglobe": keeps_dg}
         history.append(row)
+        gap = f" | grey {gray_iou:.4f} ({(gray_iou-ind_iou)/ind_iou*100:+.0f}%)" if cfg.grayscale_p > 0 else ""
         print(f"epoch {epoch:02d} | loss {train_loss:.4f} | Indian {ind_iou:.4f} "
-              f"(v1 {base_ind:.4f}) | DeepGlobe {dg_iou:.4f} (v1 {base_dg:.4f}) | "
+              f"(v1 {base_ind:.4f}) | DeepGlobe {dg_iou:.4f} (v1 {base_dg:.4f}){gap} | "
               f"{'KEEPS dg' if keeps_dg else 'regresses dg'}")
         if score > best_score:
             best_score, best_row = score, row
@@ -169,6 +180,7 @@ def finetune(cfg: FineTuneConfig) -> dict:
                 **{k: meta.get(k) for k in ("encoder", "arch", "decoder_attention_type", "image_size", "threshold")},
                 "finetuned_from": str(cfg.init_checkpoint), "encoder_frozen": frozen,
                 "indian_val_iou": float(ind_iou), "deepglobe_val_iou": float(dg_iou),
+                "indian_gray_val_iou": float(gray_iou),  # A24: Cartosat-PAN proxy
                 "v1_indian_val_iou": float(base_ind), "v1_deepglobe_val_iou": float(base_dg),
                 "epoch": epoch,
             })
