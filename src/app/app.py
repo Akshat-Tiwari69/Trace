@@ -250,9 +250,12 @@ def semantic_legend() -> folium.Element:
     """Create a labelled map legend for semantic route states."""
     html = """
     <div style="position: fixed; bottom: 36px; right: 12px; z-index: 9999;
-                background: #1e1e2e; color: #ffffff; padding: 10px 12px;
-                border: 1px solid #555; border-radius: 6px; font-size: 12px;">
-      <b>Network states</b><br>
+                background: rgba(13,21,38,.92); color: #E2E8F0; padding: 10px 14px;
+                border: 1px solid #24334E; border-radius: 10px; font-size: 12px;
+                line-height: 1.75; font-family: 'Fira Sans', sans-serif;
+                box-shadow: 0 8px 24px rgba(2,6,17,.5); backdrop-filter: blur(6px);">
+      <b style="font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
+                color: #8FA3BF;">Network states</b><br>
       <span style="color:#56B4E9">●</span> selected junction<br>
       <span style="color:#D55E00">●</span> disabled junction / links<br>
       <span style="color:#E69F00">━</span> rerouted path<br>
@@ -572,8 +575,26 @@ def render_panel(
     scores = criticality.set_index("node_id")["betweenness"].to_dict()
     ranks = criticality.set_index("node_id")["rank"].to_dict()
 
-    st.title("Route Resilience")
-    st.caption("Panaji demo · live junction-failure simulation")
+    st.markdown(
+        """
+        <div class="rr-header">
+          <div class="rr-logo">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F8FAFC"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img"
+                 aria-label="Road network glyph">
+              <circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/>
+              <path d="M6.7 7.6 10.6 16M17.3 7.6 13.4 16M7.2 6h9.6"/>
+            </svg>
+          </div>
+          <div>
+            <h1>Route Resilience</h1>
+            <p class="rr-sub">Panaji network &middot; live junction-failure simulation</p>
+          </div>
+          <span class="rr-chip"><span class="rr-dot"></span>LIVE</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     ri = simulation.resilience_index if simulation else 1.0
     route = simulation.route if simulation else None
@@ -697,19 +718,149 @@ def render_panel(
 
 
 def apply_design_theme() -> None:
-    """Apply the restrained dark mission-control styling from Design.md."""
+    """Apply the A30 design system: dark ops-dashboard, Fira Sans/Code, amber accent.
+
+    Works WITH `.streamlit/config.toml` (native-widget dark tokens); this layer
+    adds the typography, card system, and interaction polish on top.
+    """
     st.markdown(
         """
         <style>
-          .stApp { background: #121212; }
-          [data-testid="stMetric"] {
-            background: #1e1e2e;
-            border: 1px solid #343447;
-            border-radius: 8px;
-            padding: 10px 12px;
+          @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
+
+          :root {
+            --rr-bg: #0B1220;
+            --rr-surface: #121C30;
+            --rr-surface-2: #16233B;
+            --rr-border: #24334E;
+            --rr-border-strong: #33456A;
+            --rr-text: #E2E8F0;
+            --rr-muted: #8FA3BF;
+            --rr-amber: #F59E0B;
+            --rr-amber-deep: #D97706;
+            --rr-blue: #38BDF8;
           }
-          [data-testid="stMetricValue"] { font-variant-numeric: tabular-nums; }
-          .block-container { padding-top: 1rem; padding-bottom: 1rem; }
+
+          html, body, [data-testid="stAppViewContainer"] *:not(code):not(pre) {
+            font-family: 'Fira Sans', -apple-system, 'Segoe UI', sans-serif;
+          }
+
+          /* Layered backdrop: deep navy with faint blue/amber radial glows */
+          .stApp {
+            background:
+              radial-gradient(1100px 550px at 88% -10%, rgba(56,189,248,.07), transparent 60%),
+              radial-gradient(900px 500px at -8% 108%, rgba(245,158,11,.05), transparent 55%),
+              linear-gradient(180deg, #0B1220 0%, #0D1526 100%);
+          }
+          .block-container { padding-top: 1.1rem; padding-bottom: 2.2rem; max-width: 1560px; }
+
+          /* Section headers become uppercase micro-labels with an amber tick */
+          [data-testid="stAppViewContainer"] h3 {
+            font-size: .82rem !important;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: .12em;
+            color: #B9C7DD !important;
+            border-left: 3px solid var(--rr-amber);
+            padding: .1rem 0 .1rem .6rem;
+            margin-top: .4rem;
+          }
+
+          /* Brand header */
+          .rr-header { display: flex; align-items: center; gap: 13px; padding: 2px 0 4px; }
+          .rr-logo {
+            width: 42px; height: 42px; flex: 0 0 42px; border-radius: 12px;
+            display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #1E3A8A 0%, #0EA5E9 120%);
+            box-shadow: 0 6px 18px rgba(14,165,233,.28);
+          }
+          .rr-header h1 { font-size: 1.42rem; font-weight: 700; letter-spacing: -.015em; margin: 0; line-height: 1.15; color: var(--rr-text); }
+          .rr-header .rr-sub { margin: 2px 0 0; color: var(--rr-muted); font-size: .8rem; }
+          .rr-chip {
+            margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 11px; border-radius: 999px; font-size: .7rem; font-weight: 600; letter-spacing: .1em;
+            border: 1px solid rgba(52,211,153,.35); background: rgba(16,185,129,.12); color: #6EE7B7;
+          }
+          .rr-dot { width: 7px; height: 7px; border-radius: 50%; background: #34D399; box-shadow: 0 0 8px #34D399; animation: rr-pulse 2.2s ease-in-out infinite; }
+          @keyframes rr-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
+
+          /* Metric cards: elevated surface, amber signal edge, tabular numerals */
+          [data-testid="stMetric"] {
+            position: relative; overflow: hidden;
+            background: linear-gradient(180deg, var(--rr-surface-2) 0%, var(--rr-surface) 100%);
+            border: 1px solid var(--rr-border);
+            border-radius: 12px;
+            padding: 14px 16px 11px;
+            box-shadow: 0 4px 16px rgba(2,6,17,.35);
+            transition: border-color .2s ease;
+          }
+          [data-testid="stMetric"]:hover { border-color: var(--rr-border-strong); }
+          [data-testid="stMetric"]::before {
+            content: ""; position: absolute; top: 0; left: 0; bottom: 0; width: 3px;
+            background: linear-gradient(180deg, var(--rr-amber), rgba(245,158,11,.12));
+          }
+          [data-testid="stMetricLabel"] { text-transform: uppercase; letter-spacing: .11em; font-size: .7rem !important; font-weight: 500; color: var(--rr-muted) !important; }
+          [data-testid="stMetricValue"] { font-family: 'Fira Code', monospace; font-variant-numeric: tabular-nums; font-size: 1.85rem; color: #F1F5FB; }
+          [data-testid="stMetricDelta"] { font-family: 'Fira Code', monospace; font-size: .82rem; }
+
+          /* Buttons */
+          .stButton > button, .stDownloadButton > button {
+            border-radius: 10px; font-weight: 600; cursor: pointer;
+            transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease, filter .16s ease;
+          }
+          .stButton > button[kind="primary"] {
+            background: linear-gradient(180deg, var(--rr-amber) 0%, var(--rr-amber-deep) 100%);
+            color: #1A1205; border: none;
+            box-shadow: 0 6px 18px rgba(245,158,11,.22);
+          }
+          .stButton > button[kind="primary"]:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(245,158,11,.32); filter: brightness(1.06); }
+          .stButton > button[kind="primary"]:active { transform: translateY(0); }
+          .stButton > button[kind="secondary"], .stDownloadButton > button {
+            background: var(--rr-surface); color: var(--rr-text); border: 1px solid var(--rr-border-strong);
+          }
+          .stButton > button[kind="secondary"]:hover, .stDownloadButton > button:hover {
+            border-color: var(--rr-amber); color: #FDE68A;
+          }
+
+          /* Inputs / selects (BaseWeb) */
+          div[data-baseweb="select"] > div {
+            background: var(--rr-surface) !important;
+            border-color: var(--rr-border) !important;
+            border-radius: 10px !important;
+            transition: border-color .16s ease;
+          }
+          div[data-baseweb="select"] > div:hover { border-color: var(--rr-border-strong) !important; }
+
+          /* Cards: expander, dataframe, alerts, charts */
+          [data-testid="stExpander"] {
+            border: 1px solid var(--rr-border); border-radius: 12px;
+            background: var(--rr-surface); overflow: hidden;
+          }
+          [data-testid="stExpander"] summary { font-weight: 600; }
+          [data-testid="stExpander"] summary:hover { color: var(--rr-amber); }
+          [data-testid="stDataFrame"] { border: 1px solid var(--rr-border); border-radius: 12px; overflow: hidden; }
+          [data-testid="stAlert"] { border-radius: 10px; border: 1px solid var(--rr-border); }
+
+          /* The Folium map iframe becomes a framed panel */
+          iframe {
+            border-radius: 14px;
+            border: 1px solid var(--rr-border) !important;
+            box-shadow: 0 10px 30px rgba(2,6,17,.45);
+          }
+
+          [data-testid="stCaptionContainer"] { color: var(--rr-muted) !important; }
+          hr { border-color: var(--rr-border) !important; }
+
+          ::-webkit-scrollbar { width: 10px; height: 10px; }
+          ::-webkit-scrollbar-track { background: transparent; }
+          ::-webkit-scrollbar-thumb { background: var(--rr-border); border-radius: 8px; border: 2px solid var(--rr-bg); }
+          ::-webkit-scrollbar-thumb:hover { background: var(--rr-border-strong); }
+
+          :focus-visible { outline: 2px solid var(--rr-blue) !important; outline-offset: 2px; }
+
+          @media (prefers-reduced-motion: reduce) {
+            * { transition: none !important; animation: none !important; }
+          }
         </style>
         """,
         unsafe_allow_html=True,
@@ -784,7 +935,7 @@ def render_live_detection() -> None:
 
 def main() -> None:
     """Render the interactive F2 dashboard."""
-    st.set_page_config(page_title="Route Resilience", layout="wide")
+    st.set_page_config(page_title="Route Resilience", page_icon="🛰️", layout="wide")
     apply_design_theme()
     render_live_detection()
     try:
