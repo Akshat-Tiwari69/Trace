@@ -177,3 +177,20 @@ def test_predict_large_prob_batch_size_invariant():
     many = predict_large_prob(model, image, tile_size=128, stride=96, batch_size=8)
     assert np.allclose(one, many, atol=1e-5)         # ~1e-7 batched-matmul drift
     assert np.array_equal(one >= 0.5, many >= 0.5)   # binarised road mask unchanged
+
+
+def test_save_checkpoint_persists_and_omits_train_state(tmp_path):
+    # A19: checkpoints can carry optimizer/epoch state for --resume, and stay
+    # backward-compatible (no train_state key) when it isn't passed.
+    from src.pipeline.p1_segment.model import load_train_state
+    model = build_model(encoder_weights=None)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    model(torch.randn(1, 3, 64, 64)).sum().backward()
+    opt.step()                                        # give the optimizer real state
+    ck = tmp_path / "c.pt"
+    save_checkpoint(model, ck, meta={"encoder": "mit_b0"},
+                    train_state={"optimizer": opt.state_dict(), "epoch": 3})
+    ts = load_train_state(ck)
+    assert ts is not None and ts["epoch"] == 3 and "optimizer" in ts
+    save_checkpoint(model, ck, meta={"encoder": "mit_b0"})   # no train_state
+    assert load_train_state(ck) is None                      # weights-only reload still fine

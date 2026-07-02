@@ -42,7 +42,12 @@ from src.pipeline.p1_segment.dataset import (
     pair_deepglobe,
 )
 from src.pipeline.p1_segment.losses import ComboLoss
-from src.pipeline.p1_segment.model import load_checkpoint, predict_large, save_checkpoint
+from src.pipeline.p1_segment.model import (
+    load_checkpoint,
+    load_train_state,
+    predict_large,
+    save_checkpoint,
+)
 from src.pipeline.p1_segment.train import train_one_epoch
 
 
@@ -70,6 +75,7 @@ class FineTuneConfig:
     deepglobe_iou_tolerance: float = 0.005   # max allowed DeepGlobe drop vs v1
     device: str = "cpu"
     seed: int = 2026
+    resume: str | Path | None = None     # A19: resume from a rolling `.last` checkpoint
 
 
 def gather_pairs(cfg: FineTuneConfig) -> tuple[list, list, list]:
@@ -142,17 +148,36 @@ def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False)
     return total / len(pairs)
 
 
+def _last_path(out_path: str | Path) -> Path:
+    """Rolling full-state checkpoint path beside the best model (A19).
+
+    ``models/road_v2.pt`` → ``models/road_v2.last.pt`` — the file ``--resume`` reads.
+    """
+    out = Path(out_path)
+    return out.with_name(f"{out.stem}.last{out.suffix}")
+
+
 def finetune(cfg: FineTuneConfig) -> dict:
     """Fine-tune from v1; save the checkpoint that best adapts to India while
-    preserving DeepGlobe. Returns a summary dict."""
+    preserving DeepGlobe. Returns a summary dict.
+
+    ``cfg.resume`` (A19) restarts from a rolling ``.last`` checkpoint — restoring
+    the optimizer/scaler/epoch/best/history — instead of from ``init_checkpoint``
+    at epoch 1, so an interrupted run continues rather than warm-restarting.
+    """
     torch.manual_seed(cfg.seed)
-    model, meta = load_checkpoint(cfg.init_checkpoint, map_location=cfg.device)
+    init_from = cfg.resume if cfg.resume else cfg.init_checkpoint
+    model, meta = load_checkpoint(init_from, map_location=cfg.device)
     model = model.to(cfg.device)
     thr = float(meta.get("threshold", 0.5))
 
     train_pairs, indian_val, deepglobe_val = gather_pairs(cfg)
-    base_dg = _iou_on_pairs(model, deepglobe_val, cfg.image_size, cfg.device, thr)
-    base_ind = _iou_on_pairs(model, indian_val, cfg.image_size, cfg.device, thr)
+    resume_state = load_train_state(cfg.resume, map_location=cfg.device) if cfg.resume else None
+    if resume_state:  # keep the v1 anchor (keep_floor) fixed — model here is already fine-tuned
+        base_dg, base_ind = resume_state["v1_deepglobe"], resume_state["v1_indian"]
+    else:
+        base_dg = _iou_on_pairs(model, deepglobe_val, cfg.image_size, cfg.device, thr)
+        base_ind = _iou_on_pairs(model, indian_val, cfg.image_size, cfg.device, thr)
     frozen = cfg.encoder_lr_scale <= 0.0
     print(f"v1 baseline | DeepGlobe IoU {base_dg:.4f} | Indian IoU {base_ind:.4f} | "
           f"encoder {'FROZEN' if frozen else f'lr×{cfg.encoder_lr_scale}'} | "
@@ -168,9 +193,19 @@ def finetune(cfg: FineTuneConfig) -> dict:
     scaler = torch.amp.GradScaler("cuda", enabled=(cfg.device != "cpu"))
 
     out = Path(cfg.out_path)
-    best_score, best_row, history = -1e9, None, []
+    last = _last_path(out)
+    best_score, best_row, history, start_epoch = -1e9, None, [], 1
+    if resume_state:  # A19: restore full training state and continue past the saved epoch
+        optimizer.load_state_dict(resume_state["optimizer"])
+        scaler.load_state_dict(resume_state["scaler"])
+        best_score, best_row = resume_state["best_score"], resume_state["best_row"]
+        history = list(resume_state["history"])
+        torch.set_rng_state(resume_state["rng_state"].cpu())
+        start_epoch = resume_state["epoch"] + 1
+        print(f"resumed from {cfg.resume} @ epoch {resume_state['epoch']} -> starting epoch {start_epoch}",
+              flush=True)
     keep_floor = (base_dg - cfg.deepglobe_iou_tolerance) if deepglobe_val else -1.0
-    for epoch in range(1, cfg.epochs + 1):
+    for epoch in range(start_epoch, cfg.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, cfg.device, scaler)
         ind_iou = _iou_on_pairs(model, indian_val, cfg.image_size, cfg.device, thr)
         dg_iou = _iou_on_pairs(model, deepglobe_val, cfg.image_size, cfg.device, thr)
@@ -198,6 +233,15 @@ def finetune(cfg: FineTuneConfig) -> dict:
                 "epoch": epoch,
             })
             print(f"  saved new best -> {out} (Indian {ind_iou:.4f}, DeepGlobe {dg_iou:.4f})")
+        # A19: rolling full-state checkpoint so a kill mid-run can --resume from here.
+        save_checkpoint(model, last, meta={
+            **{k: meta.get(k) for k in ("encoder", "arch", "decoder_attention_type", "image_size", "threshold")},
+            "epoch": epoch,
+        }, train_state={
+            "optimizer": optimizer.state_dict(), "scaler": scaler.state_dict(), "epoch": epoch,
+            "best_score": best_score, "best_row": best_row, "history": history,
+            "rng_state": torch.get_rng_state(), "v1_deepglobe": base_dg, "v1_indian": base_ind,
+        })
 
     if best_row is None:
         print("\nNo epoch preserved DeepGlobe within tolerance — nothing saved. Loosen the "
@@ -208,7 +252,7 @@ def finetune(cfg: FineTuneConfig) -> dict:
               f"DeepGlobe {best_row['deepglobe_iou']:.4f} (v1 {base_dg:.4f}, "
               f"{best_row['deepglobe_iou']-base_dg:+.4f}) -> {out}")
     return {"best": best_row, "v1_deepglobe": base_dg, "v1_indian": base_ind, "history": history,
-            "n_train": len(train_pairs)}
+            "n_train": len(train_pairs), "start_epoch": start_epoch, "resumed": bool(cfg.resume)}
 
 
 def main() -> None:
@@ -235,6 +279,8 @@ def main() -> None:
     p.add_argument("--spacenet-corpus", default=None,
                    help="A23: SpaceNet dg_format dir — train on the NON-held-out chips (frozen A17 split)")
     p.add_argument("--device", default="cpu")
+    p.add_argument("--resume", default=None,
+                   help="A19: resume from a rolling `<out>.last.pt` checkpoint (restores optimizer/epoch/best)")
     args = p.parse_args()
     occlusion = {"standard": True, "heavy": "heavy", "none": False}[args.occlusion]
 
@@ -256,7 +302,7 @@ def main() -> None:
         encoder_lr_scale=args.encoder_lr_scale, epochs=args.epochs, finetune_oversample=args.oversample,
         crops_per_image=args.crops_per_image, occlusion=occlusion, grayscale_p=args.grayscale_p,
         cldice_weight=args.cldice_weight, num_workers=args.num_workers,
-        deepglobe_iou_tolerance=args.deepglobe_tol, device=args.device,
+        deepglobe_iou_tolerance=args.deepglobe_tol, device=args.device, resume=args.resume,
     ))
 
 
