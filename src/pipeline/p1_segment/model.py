@@ -112,7 +112,9 @@ def load_checkpoint(
 def _to_chw_tensor(image: np.ndarray) -> torch.Tensor:
     """HxWx3 uint8/float image → normalised (1,3,H,W) float tensor."""
     arr = image.astype(np.float32)
-    if arr.max() > 1.0:
+    # uint8 is always 0–255 (even a near-black tile whose max is ≤1); floats are
+    # 0–1 by contract, so only rescale those if they clearly exceed that range.
+    if image.dtype == np.uint8 or arr.max() > 1.0:
         arr /= 255.0
     arr = (arr - IMAGENET_MEAN) / IMAGENET_STD
     chw = np.transpose(arr, (2, 0, 1))
@@ -225,7 +227,7 @@ def predict_large_prob(
 def predict_large(
     model: torch.nn.Module,
     image: np.ndarray,
-    tile_size: int = 256,
+    tile_size: int = 512,
     device: str = "cpu",
     threshold: float = 0.5,
     tta: bool = False,

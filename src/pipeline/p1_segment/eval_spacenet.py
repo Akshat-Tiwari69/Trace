@@ -87,13 +87,16 @@ def evaluate_checkpoints(
     checkpoints: list[Path],
     corpus: Path = DEFAULT_CORPUS,
     manifest: Path = DEFAULT_MANIFEST,
-    threshold: float = 0.44,
+    threshold: float | None = None,
     image_size: int = 384,
     device: str = "cpu",
     grayscale: bool = False,
 ) -> dict:
     """Score each checkpoint on the frozen held-out SpaceNet-Mumbai split (IoU/Dice).
 
+    ``threshold=None`` (default) scores each checkpoint at its **own deployed
+    threshold** (checkpoint ``meta``, falling back to 0.44) — so v3.2 @0.52 isn't
+    scored at v1's operating point; pass a float to force a shared threshold.
     ``grayscale=True`` desaturates the input — a **Cartosat-3 PAN** proxy (A24) to
     measure the sensor-modality gap vs the RGB number.
     """
@@ -116,9 +119,11 @@ def evaluate_checkpoints(
     for ckpt in checkpoints:
         model, meta = load_checkpoint(ckpt, map_location=device)
         model.to(device).eval()
-        m = evaluate(model, loader, device, threshold=threshold)
-        results[Path(ckpt).name] = {"iou": m["iou"], "dice": m["dice"]}
-        print(f"  {Path(ckpt).name:42s} real-GT IoU {m['iou']:.4f}  Dice {m['dice']:.4f}", flush=True)
+        thr = threshold if threshold is not None else float(meta.get("threshold", 0.44))
+        m = evaluate(model, loader, device, threshold=thr)
+        results[Path(ckpt).name] = {"iou": m["iou"], "dice": m["dice"], "threshold": thr}
+        print(f"  {Path(ckpt).name:42s} real-GT IoU {m['iou']:.4f}  Dice {m['dice']:.4f}  (thr {thr:.2f})",
+              flush=True)
         del model
     return {"n_test_chips": len(test_chips), "n_test_tiles": len(pairs),
             "threshold": threshold, "image_size": image_size, "grayscale": grayscale,
@@ -138,6 +143,7 @@ def threshold_sweep(
     import numpy as np
 
     from src.pipeline.p1_segment.model import load_checkpoint, predict_prob
+    from src.pipeline.p1_segment.raster_io import imread_gray, imread_rgb
 
     if thresholds is None:
         thresholds = [round(0.20 + 0.02 * i, 2) for i in range(26)]  # 0.20..0.70
@@ -155,22 +161,23 @@ def threshold_sweep(
         inter = {t: 0.0 for t in thresholds}
         union = {t: 0.0 for t in thresholds}
         for sat, mask_path in pairs:
-            img = cv2.cvtColor(cv2.imread(str(sat)), cv2.COLOR_BGR2RGB)
+            img = imread_rgb(sat)
             if img.shape[0] != image_size:
                 img = cv2.resize(img, (image_size, image_size))
             if grayscale:
                 g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
                 img = np.stack([g, g, g], -1)
-            gt = (cv2.imread(str(mask_path), 0) > 127)
+            gt = imread_gray(mask_path) > 127
             if gt.shape[0] != image_size:
                 gt = cv2.resize(gt.astype(np.uint8), (image_size, image_size),
                                 interpolation=cv2.INTER_NEAREST).astype(bool)
             prob = predict_prob(model, img, device=device)
+            gt_sum = float(gt.sum())  # constant across thresholds — hoisted out of the loop
             for t in thresholds:
                 pred = prob >= t
                 i = float(np.logical_and(pred, gt).sum())
                 inter[t] += i
-                union[t] += float(pred.sum()) + float(gt.sum()) - i
+                union[t] += float(pred.sum()) + gt_sum - i
         iou = {t: (inter[t] + eps) / (union[t] + eps) for t in thresholds}
         best_t = max(iou, key=iou.get)
         results[Path(ckpt).name] = {"best_threshold": best_t, "best_iou": round(iou[best_t], 4),
@@ -185,7 +192,8 @@ def main() -> None:
     p.add_argument("--checkpoints", nargs="+", required=True)
     p.add_argument("--corpus", default=str(DEFAULT_CORPUS))
     p.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
-    p.add_argument("--threshold", type=float, default=0.44)
+    p.add_argument("--threshold", type=float, default=None,
+                   help="shared override; default = each checkpoint's deployed meta threshold")
     p.add_argument("--image-size", type=int, default=384)
     p.add_argument("--device", default="cpu")
     p.add_argument("--sweep", action="store_true", help="A21: sweep thresholds 0.20-0.70 and report each model's best")

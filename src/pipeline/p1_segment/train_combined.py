@@ -10,6 +10,13 @@ ComboLoss (BCE+Dice+Lovász+clDice), discriminative encoder/decoder LR, warmup +
 cosine, AMP, road-aware-ish multi-crop. Saves the best-val **EMA** checkpoint.
 
 GPU step; the orchestration is CPU-smoke-tested.
+
+.. note::
+    **A11's combined retrain was run and rejected** (Massachusetts diluted the
+    Indian deployment target — `docs/Tracker.md` §6 A11). The production
+    training path is A23/A24 (`finetune.py`). Kept as the reference
+    implementation for from-scratch multi-corpus retrains (and `ModelEMA`,
+    which `train_selftrain.py` reuses).
 """
 
 from __future__ import annotations

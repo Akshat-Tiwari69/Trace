@@ -19,6 +19,13 @@ first"):
 
 GPU step; the orchestration is CPU-smoke-tested. Validate on a held-out Indian
 split + DeepGlobe; release only if it beats v2 (same honest bar).
+
+.. warning::
+    **A12 was run and REJECTED (2026-06-28)** — both configs peaked at epoch 1
+    and lost to v1 on the honest held-out TEST (see `docs/Tracker.md` §6 A12 +
+    §10). Kept as a negative-result artifact per CLAUDE.md; do **not** use for
+    production training. The productive path became A23 (supervised SpaceNet
+    fine-tune → v3/v3.2).
 """
 
 from __future__ import annotations
@@ -111,10 +118,9 @@ class UnlabeledTileDataset(Dataset):
         return len(self.images)
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        import cv2
+        from src.pipeline.p1_segment.raster_io import imread_rgb
 
-        bgr = cv2.imread(str(self.images[idx]), cv2.IMREAD_COLOR)
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        rgb = imread_rgb(self.images[idx])
         geo = self.geo(image=rgb)["image"]            # uint8 H×W×3, geometry fixed
         return self.weak(image=geo)["image"], self.strong(image=geo)["image"]
 

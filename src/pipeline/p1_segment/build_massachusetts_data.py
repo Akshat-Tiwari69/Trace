@@ -5,6 +5,12 @@ image / `{stem}.tif` label). DeepGlobe is **@0.5 m**, so road widths differ ~2×
 To train a *scale-consistent* combined corpus we upsample Massachusetts 2× (to
 ~0.5 m), tile to 512, and keep road-bearing tiles as DeepGlobe-format pairs
 (`{prefix}_{stem}_r{r}_c{c}_sat.jpg` + `_mask.png`, 0/255). Reuses A3's tiler.
+
+.. note::
+    **A11 was run and rejected** — the resulting combined model lost on the
+    Indian deployment target (`docs/Tracker.md` §6 A11). Kept as the reference
+    for scale-matched corpus conversion; the production data path is
+    `build_spacenet_data.py` (A16/A23).
 """
 
 from __future__ import annotations

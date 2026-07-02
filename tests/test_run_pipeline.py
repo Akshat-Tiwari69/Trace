@@ -16,7 +16,7 @@ from src.pipeline.run_pipeline import DASHBOARD_CRITICALITY_COLUMNS, run
 
 
 def _fake_segment(image_path, checkpoint, aoi, interim_dir, tile_size, threshold, device, tta=False,
-                  postprocess=False, min_component_size=50, pp_close_radius=0):
+                  postprocess=False, min_component_size=50, pp_close_radius=0, fill_holes=0):
     """Stand-in for P1: write a synthetic road grid mask at the contract path."""
     mask = np.zeros((256, 256), np.uint8)
     for r in (64, 128, 192):
