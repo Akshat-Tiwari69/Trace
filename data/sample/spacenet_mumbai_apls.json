@@ -1,15 +1,20 @@
 {
-  "n_tiles": 50,
+  "n_tiles": 80,
   "models": [
     {
+      "checkpoint": "road_pan.pt",
+      "n_scored": 80,
+      "apls_mean": 0.49874875
+    },
+    {
       "checkpoint": "road_spacenet.pt",
-      "n_scored": 50,
-      "apls_mean": 0.41474200000000006
+      "n_scored": 80,
+      "apls_mean": 0.437395
     },
     {
       "checkpoint": "deepglobe_mit_b3_scse_512px_best.pt",
-      "n_scored": 50,
-      "apls_mean": 0.38444999999999996
+      "n_scored": 80,
+      "apls_mean": 0.41984625
     }
   ]
 }

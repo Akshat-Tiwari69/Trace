@@ -4,7 +4,7 @@
 
 Route Resilience extracts roads from satellite imagery — *even where trees, buildings, and shadows hide them* — heals the gaps into a routable network, then scores which junctions are critical and how gracefully the network degrades when they fail. It ends in an interactive map you can click to simulate a closure and watch the city reroute.
 
-> Status: **road-seg v3 released** — full pipeline end-to-end (segmentation → graph → resilience → dashboard); **166 CPU tests** green. **v3 is the first model to beat the DeepGlobe baseline on real Indian ground truth** (held-out SpaceNet-5 Mumbai), and is Cartosat-3 PAN aware.
+> Status: **road-seg v3.2 released** — full pipeline end-to-end (segmentation → graph → resilience → dashboard); **169 CPU tests** green. **v3.2 is the best model on real Indian ground truth** (held-out SpaceNet-5 Mumbai) across pixels, routing (APLS), and grayscale — and is **Cartosat-3 PAN-hardened** (trained with grayscale + radiometric augmentation).
 
 ---
 
@@ -32,18 +32,18 @@ flowchart LR
 ## Results
 
 <!-- AUTO-GENERATED: segmentation results — from data/sample/spacenet_mumbai_*.json; see docs/Evaluation.md -->
-**Segmentation — held-out SpaceNet-5 Mumbai (real Indian ground truth, IoU @0.44, 512px):**
+**Segmentation — held-out SpaceNet-5 Mumbai (real Indian ground truth, 512px, each model at its deploy threshold):**
 
-| Model | RGB IoU | Grayscale (Cartosat-PAN proxy) | APLS (routing) | Release |
-|---|---|---|---|---|
-| **v3** — SpaceNet-Mumbai fine-tuned | **0.431** | **0.375** | **0.415** | [`a4-roadseg-v3`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3) |
-| v2 — Indian OSM fine-tuned | 0.373 | — | — | [`a4-roadseg-v2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v2) |
-| v1 — DeepGlobe baseline | 0.375 | 0.318 | 0.384 | [`a4-roadseg-v1`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v1) |
+| Model | RGB IoU | Grayscale (Cartosat-PAN proxy) | APLS (routing) | Deploy thr | Release |
+|---|---|---|---|---|---|
+| **v3.2** — PAN-hardened (grayscale + gamma aug) | **0.459** | **0.418** | **0.499** | 0.52 | [`a4-roadseg-v3.2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) |
+| v3 — SpaceNet-Mumbai fine-tuned | 0.449 | 0.405 | 0.437 | 0.50 | [`a4-roadseg-v3.1`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.1) |
+| v1 — DeepGlobe baseline | 0.399 | 0.345 | 0.420 | 0.50 | [`a4-roadseg-v1`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v1) |
 
-**v3 beats the baseline on every axis** — pixels (+15%), routing (APLS +8%), and grayscale/PAN robustness — the first genuine gain on *real* Indian GT (earlier OSM-agreement gains didn't transfer to held-out; the truthful benchmark is what exposed it). A threshold sweep puts the optimum at **0.50**, not the 0.44 v3 shipped with — the deployed model is **[`a4-roadseg-v3.1`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.1)** (same weights, threshold 0.50 → IoU **0.449**). On DeepGlobe (in-domain) v1 still scores IoU **0.670** / Occlusion-Recall **0.793** @0.44.
+**v3.2 is the best model on every axis** — RGB, grayscale/PAN, and routing. The A24 sensor-robustness aug (heavier grayscale + radiometric gamma) lifted **routing the most (APLS +14% over v3)**: training the model off colour yields more *connected* roads, which the downstream graph/resilience pipeline needs. The grayscale (Cartosat-PAN proxy) gap narrowed to **−9%** (v1 was −14%). The earlier OSM-fine-tuned v2 was a metric artifact (tied v1 on real GT, so dropped from the live comparison). On DeepGlobe (in-domain) v1 still scores IoU **0.670** / Occlusion-Recall **0.793** @0.44.
 <!-- END AUTO-GENERATED -->
 
-Model releases: **[`a4-roadseg-v3.1`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.1)** (deployed — v3 weights @ threshold 0.50) · `v3` · `v2` · `v1`.
+Model releases: **[`a4-roadseg-v3.2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2)** (deployed — PAN-hardened, threshold 0.52) · `v3.1` · `v3` · `v2` · `v1`.
 
 **Resilience (the core thesis holds):** removing high-betweenness junctions collapses global efficiency *far faster* than removing random ones — i.e. the criticality scoring finds genuine chokepoints. On the OSM sample, targeted ablation mean RI **0.674 vs 0.860** random; on a live, tree-occluded Panaji satellite tile run end-to-end, **0.503 vs 0.780**.
 
@@ -64,13 +64,13 @@ Then open the local URL, pick a critical junction, and hit **Simulate closure**.
 
 ### Run the whole pipeline on your own tile
 
-Grab the best model from the [`a4-roadseg-v3.1` release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.1) (`road_spacenet.pt`) into `models/`, then one command takes imagery all the way to dashboard-ready artifacts:
+Grab the best model from the [`a4-roadseg-v3.2` release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) (`road_pan.pt`) into `models/`, then one command takes imagery all the way to dashboard-ready artifacts:
 
 <!-- AUTO-GENERATED: CLI reference — from src/pipeline/**/__main__ entrypoints -->
 ```bash
 # whole pipeline: imagery → mask → graph → resilience (threshold/tile-size come from the checkpoint meta)
 python -m src.pipeline.run_pipeline --image data/raw/your_tile.jpg \
-    --checkpoint models/road_spacenet.pt --aoi your_area --postprocess
+    --checkpoint models/road_pan.pt --aoi your_area --postprocess
 
 # stages individually
 python -m src.pipeline.p1_segment.predict --image <tile> --checkpoint <pt> --aoi <id> \
@@ -79,14 +79,14 @@ python -m src.pipeline.p2_graph.build_graph  --aoi <id>   # → healed routable 
 python -m src.pipeline.p3_analysis.analyze   --aoi <id>   # → criticality + resilience
 
 # evaluate on the truthful Indian benchmark (held-out SpaceNet-5 Mumbai, real GT)
-python -m src.pipeline.p1_segment.eval_spacenet --checkpoints models/road_spacenet.pt <v1.pt> \
+python -m src.pipeline.p1_segment.eval_spacenet --checkpoints models/road_pan.pt <v1.pt> \
     --device cuda [--grayscale] [--sweep]     # IoU/Dice (RGB or Cartosat-PAN proxy; --sweep = best threshold)
-python -m src.pipeline.p1_segment.apls_eval    --checkpoints models/road_spacenet.pt <v1.pt> --device cuda  # routing APLS
+python -m src.pipeline.p1_segment.apls_eval    --checkpoints models/road_pan.pt <v1.pt> --device cuda  # routing APLS
 
-# reproduce the v3 fine-tune (real SpaceNet labels + Cartosat grayscale aug)
+# reproduce the v3.2 PAN-hardened fine-tune (real SpaceNet labels + grayscale + gamma aug)
 python -m src.pipeline.p1_segment.finetune --init <v1.pt> --spacenet-corpus data/raw/spacenet/dg_format \
-    --deepglobe-dir data/raw/deepglobe/train --grayscale-p 0.5 --cldice-weight 0 --oversample 1 \
-    --epochs 10 --out models/road_spacenet.pt --device cuda
+    --deepglobe-dir data/raw/deepglobe/train --grayscale-p 0.7 --cldice-weight 0 --oversample 1 \
+    --epochs 10 --out models/road_pan.pt --device cuda
 ```
 
 Cartosat-3 GeoTIFFs (RGB **or** 1-band PAN) are read via rasterio and carry their CRS/transform through as a metric graph automatically.
@@ -109,7 +109,7 @@ src/app/        Streamlit + Folium dashboard
 notebooks/      Colab/Kaggle training notebook
 data/sample/    committed demo artifacts (so the app runs with no GPU)
 docs/           Tracker (source of truth) + PRD, TRD, Design, Evaluation, Research, …
-tests/          166 CPU unit tests
+tests/          169 CPU unit tests
 ```
 
 ## Design rules (non-negotiable)
@@ -125,7 +125,7 @@ Evaluation methodology and numbers live in [`docs/Evaluation.md`](docs/Evaluatio
 ## Tests
 
 ```bash
-python -m pytest -q        # 166 CPU unit tests
+python -m pytest -q        # 169 CPU unit tests
 ```
 
 ## Roadmap
