@@ -255,6 +255,9 @@ flowchart TD
 
 > Copy the block each working day. Newest on top.
 
+**2026-07-02 (Akshat — /update-docs: synced README + Evaluation.md from source-of-truth)**
+- Ran the doc-sync skill. Regenerated the **stale generated sections** from source of truth (the committed eval JSONs + the module CLIs), preserving hand-written prose, with `<!-- AUTO-GENERATED -->` markers: **README** (status v1→v3; Results table now real-GT held-out SpaceNet v1/v2/v3 + APLS; CLI reference incl. `eval_spacenet/apls_eval/--blend/--postprocess/--spacenet-corpus`; 76→166 tests; roadmap Cartosat/APLS); **Evaluation.md** (new "Real Indian GT — held-out SpaceNet-5 Mumbai" section: v3 0.431 vs v1 0.375 RGB, APLS 0.415 vs 0.384, grayscale, threshold-sweep 0.50). Not created: CONTRIBUTING/RUNBOOK — already covered by Tracker §1 (operating protocol) + §11 (git) + SETUP.md. Flagged for later human review: SETUP.md (command list) + RiskRegister D-2 (Cartosat now partly mitigated by A26).
+
 **2026-07-01/02 (Akshat — Codex model-improvement audit triaged → A25–A27)**
 - External **Codex audit** (`trace_model_improvement_audit.md`) reviewed. Strong + accurate (unlike the earlier generic PDF) — read the real repo, cites our eval JSONs/PRs. **Verified every claim against code.** Core thesis (agreed): *not blocked by more epochs — blocked by deploy/eval correctness that can hide checkpoint quality + missing Cartosat/georef; fix cheap correctness before more GPU; judge experiments on held-out real GT + APLS.*
 - **Already addressed:** APLS on SpaceNet-Mumbai (their "not yet scored" — we did #89 today); threshold sweep = our **A21**.

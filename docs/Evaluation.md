@@ -86,6 +86,26 @@ resilience sanity check (**targeted RI 0.503 < random 0.780**). Off-domain + hea
 occlusion ⇒ a deliberately hard, sparse case — reported honestly per the
 error-analysis policy below; on open road grids the mask is far denser.*
 
+### Real Indian GT — held-out SpaceNet-5 Mumbai (A17 benchmark, A23 model)
+
+The **truthful** Indian metric. DeepGlobe/OSM-agreement numbers above are in-domain
+or weak-label proxies; A12 proved OSM-agreement is *misleading* (it rewarded models
+that lose on held-out). A17 froze a chip-level held-out SpaceNet-5 Mumbai split
+(real human vector GT, `data/sample/spacenet_mumbai_heldout_chips.json`, 127/637
+chips) and re-baselined every model on it. Reproduce with
+`python -m src.pipeline.p1_segment.eval_spacenet --checkpoints <ckpts> --device cuda [--grayscale] [--sweep]`
+and `… apls_eval …`.
+
+<!-- AUTO-GENERATED: from data/sample/spacenet_mumbai_{eval,eval_gray,threshold_sweep,apls}.json (IoU @0.44, 512px, global aggregation) -->
+| Model | RGB IoU | Grayscale (Cartosat-PAN proxy) | APLS (routing, n=50) | best-threshold IoU |
+|---|---|---:|---:|---:|
+| **v3** `road_spacenet` (SpaceNet-Mumbai fine-tune) | **0.4311** | **0.3752** | **0.4147** | 0.4493 @0.50 |
+| v2 `road_v2` (Indian OSM fine-tune) | 0.3727 | — | — | — |
+| v1 `deepglobe_…_best` (DeepGlobe baseline) | 0.3752 | 0.3183 | 0.3844 | 0.3993 @0.50 |
+<!-- END AUTO-GENERATED -->
+
+**Findings:** (1) **v3 beats v1 on every axis** — RGB IoU +0.056 (+15%), APLS +0.030 (+8%), and grayscale. First genuine gain on real Indian GT after A8/A9/A11/A12 all failed — the lever was *real in-domain labels + a truthful metric*, not architecture. (2) **v2's apparent edge was a metric artifact** — on real GT it ties v1 (0.373 vs 0.375); its OSM-agreement gain didn't transfer. (3) **Cartosat readiness:** grayscale (PAN proxy) drop shrank from v1's −15% to v3's −11% (grayscale aug, A24); v3-grayscale 0.375 ≈ v1-RGB. (4) **Threshold sweep:** optimum is 0.50, not the deployed 0.44 (~+0.02 IoU). v3 released as [`a4-roadseg-v3`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3).
+
 ### Graph-lane first numbers (S1 sample — `panaji_demo`, OSM-derived w/ simulated occlusion)
 
 Reproduce with `python -m src.pipeline.p3_analysis.evaluate` (reads the committed
