@@ -76,6 +76,32 @@ def test_finetune_selects_and_saves_releasable_checkpoint(tmp_path):
     assert "indian_val_iou" in meta and "deepglobe_val_iou" in meta
 
 
+def test_finetune_resume_continues_from_next_epoch(tmp_path):
+    """A19: a --resume run picks up from the rolling `.last` checkpoint's epoch
+    (restoring optimizer/scaler/best/history) instead of restarting at epoch 1."""
+    from src.pipeline.p1_segment.finetune import _last_path
+    ft, dg = tmp_path / "ft", tmp_path / "dg"
+    for i in range(5):
+        _write_pair(ft, f"c{i}")
+    for i in range(6):
+        _write_pair(dg, f"d{i}")
+    init = tmp_path / "v1.pt"
+    _tiny_v1_checkpoint(init)
+    out = tmp_path / "v2.pt"
+    common = dict(init_checkpoint=init, finetune_dir=ft, deepglobe_dir=dg,
+                  deepglobe_subset=3, deepglobe_val=2, out_path=out, image_size=64,
+                  batch_size=2, finetune_oversample=2, deepglobe_iou_tolerance=1.0, device="cpu")
+
+    first = finetune(FineTuneConfig(epochs=1, **common))     # run A: 1 epoch → rolling .last @1
+    assert first["start_epoch"] == 1
+    last = _last_path(out)
+    assert last.exists()
+
+    resumed = finetune(FineTuneConfig(epochs=3, resume=last, **common))   # run B: resume → epochs 2,3
+    assert resumed["start_epoch"] == 2                       # did NOT restart at epoch 1
+    assert [r["epoch"] for r in resumed["history"]] == [1, 2, 3]  # epoch-1 row carried over
+
+
 def test_finetune_grayscale_tracks_pan_proxy(tmp_path):
     """A24: grayscale_p>0 records the Cartosat-PAN (grayscale) IoU each epoch + in meta."""
     ft, dg = tmp_path / "ft", tmp_path / "dg"

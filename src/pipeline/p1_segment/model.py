@@ -73,14 +73,30 @@ def save_checkpoint(
     model: torch.nn.Module,
     path: str | Path,
     meta: dict[str, Any] | None = None,
+    train_state: dict[str, Any] | None = None,
 ) -> None:
     """Save model weights + metadata (encoder, metrics, config) to ``path``.
 
     Unwraps DataParallel/DDP so the saved keys match a plain model on reload.
+    ``train_state`` (optimizer/scaler/epoch/… for A19 ``--resume``) is stored only
+    when given, so plain weight checkpoints stay byte-for-byte as before.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"state_dict": _unwrap(model).state_dict(), "meta": meta or {}}, path)
+    blob: dict[str, Any] = {"state_dict": _unwrap(model).state_dict(), "meta": meta or {}}
+    if train_state is not None:
+        blob["train_state"] = train_state
+    torch.save(blob, path)
+
+
+def load_train_state(path: str | Path, map_location: str = "cpu") -> dict[str, Any] | None:
+    """Return the A19 training state saved next to a checkpoint, or ``None``.
+
+    Companion to :func:`load_checkpoint` (which rebuilds the model): this pulls the
+    optimizer/scaler/epoch/best/history blob so a run can resume mid-training.
+    """
+    ckpt = torch.load(path, map_location=map_location, weights_only=False)
+    return ckpt.get("train_state")
 
 
 def load_checkpoint(
