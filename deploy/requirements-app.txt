@@ -1,0 +1,21 @@
+# Route Resilience — SLIM dashboard-only deps for public deploy (Oracle ARM / CPU).
+# The dashboard (src/app/app.py -> p3_analysis/resilience.py) reads precomputed
+# data/sample/ artifacts and never loads the model, so NONE of the heavy ML/geo-IO
+# stack (torch, rasterio, osmnx, opencv, scikit-image, smp) is needed here.
+# pyogrio bundles GDAL in its wheel -> no system GDAL/apt required, installs clean
+# on aarch64. Versions mirror the root requirements.txt where they overlap.
+
+streamlit==1.38.0
+folium==0.17.0
+streamlit-folium==0.23.1
+branca==0.7.2
+# geopandas 1.0 dropped the hard fiona dependency and reads via pyogrio (which
+# bundles GDAL in its wheel) -> no system GDAL needed on aarch64. App only uses
+# gpd.read_file(), which is unchanged in 1.0.
+geopandas==1.0.1
+pyogrio==0.9.0
+shapely==2.0.5
+networkx==3.3
+pandas==2.2.2
+numpy==1.26.4
+matplotlib==3.8.2
