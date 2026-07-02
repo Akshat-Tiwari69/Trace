@@ -41,5 +41,6 @@ cache/
 # OS / editor
 .DS_Store
 Thumbs.db
+*.stackdump          # Windows/Cygwin crash dumps (e.g. bash.exe.stackdump)
 .vscode/
 .idea/
