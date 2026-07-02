@@ -82,6 +82,7 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
         resolution_m: float = 1.0, tile_size: int = 512, threshold: float | None = None,
         device: str = "cpu", curve_steps: int = 25, tta: bool = False,
         postprocess: bool = False, min_component_size: int = 50, pp_close_radius: int = 0,
+        fill_holes: int = 0,
         segment_fn: Callable[..., tuple[Path, float]] = segment) -> dict[str, Any]:
     """Run the whole pipeline on one tile and return a summary dict.
 
@@ -94,7 +95,7 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
     print(f"[A5] end-to-end pipeline for '{aoi}'")
     print("[P1] segment imagery → road mask")
     mask_path, coverage = segment_fn(image_path, checkpoint, aoi, interim_dir, tile_size, threshold, device, tta,
-                                     postprocess, min_component_size, pp_close_radius)
+                                     postprocess, min_component_size, pp_close_radius, fill_holes)
     print(f"     → {mask_path}  ({coverage:.2%} road px)")
 
     print("[P2] mask → healed routable graph")
@@ -132,11 +133,14 @@ def main() -> None:
     p.add_argument("--postprocess", action="store_true", help="A10 mask cleanup before P2")
     p.add_argument("--min-component-size", type=int, default=50)
     p.add_argument("--pp-close-radius", type=int, default=0)
+    p.add_argument("--fill-holes", type=int, default=0,
+                   help="A10 postprocess: fill holes up to this area (px); 0 = off")
     args = p.parse_args()
     run(args.image, args.checkpoint, args.aoi, resolution_m=args.resolution_m,
         tile_size=args.tile_size, threshold=args.threshold, device=args.device,
         curve_steps=args.curve_steps, tta=args.tta, postprocess=args.postprocess,
-        min_component_size=args.min_component_size, pp_close_radius=args.pp_close_radius)
+        min_component_size=args.min_component_size, pp_close_radius=args.pp_close_radius,
+        fill_holes=args.fill_holes)
 
 
 if __name__ == "__main__":

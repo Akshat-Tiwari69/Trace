@@ -115,14 +115,16 @@ def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False)
     """
     import cv2
 
+    from src.pipeline.p1_segment.raster_io import imread_gray, imread_rgb
+
     if not pairs:
         return float("nan")
     total = 0.0
     for sat_path, mask_path in pairs:
-        img = cv2.cvtColor(cv2.imread(str(sat_path), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
+        img = imread_rgb(sat_path)
         if grayscale:
             img = cv2.cvtColor(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
-        gt = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE) > 127
+        gt = imread_gray(mask_path) > 127
         pred = predict_large(model, img, tile_size=tile_size, device=device, threshold=thr) > 0
         inter = np.logical_and(pred, gt).sum()
         union = np.logical_or(pred, gt).sum()
@@ -170,7 +172,8 @@ def finetune(cfg: FineTuneConfig) -> dict:
         row = {"epoch": epoch, "train_loss": train_loss, "indian_iou": ind_iou,
                "deepglobe_iou": dg_iou, "indian_gray_iou": gray_iou, "keeps_deepglobe": keeps_dg}
         history.append(row)
-        gap = f" | grey {gray_iou:.4f} ({(gray_iou-ind_iou)/ind_iou*100:+.0f}%)" if cfg.grayscale_p > 0 else ""
+        gap = (f" | grey {gray_iou:.4f} ({(gray_iou-ind_iou)/(ind_iou or 1.0)*100:+.0f}%)"
+               if cfg.grayscale_p > 0 else "")  # `or 1.0`: ind_iou can be 0.0 early — don't crash the run
         print(f"epoch {epoch:02d} | loss {train_loss:.4f} | Indian {ind_iou:.4f} "
               f"(v1 {base_ind:.4f}) | DeepGlobe {dg_iou:.4f} (v1 {base_dg:.4f}){gap} | "
               f"{'KEEPS dg' if keeps_dg else 'regresses dg'}")

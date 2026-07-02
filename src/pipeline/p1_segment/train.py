@@ -71,17 +71,17 @@ def evaluate(
         n = max(n, 1)
         return {"iou": iou_sum / n, "dice": dice_sum / n}
 
-    inter = union = pred_sum = target_sum = 0.0
+    # Accumulate on-device; convert once at the end (avoids a GPU sync per batch).
+    inter = pred_sum = target_sum = 0
     for images, masks in loader:
         images, masks = images.to(device), masks.to(device)
-        preds = (torch.sigmoid(model(images)) >= threshold) > 0.5
+        preds = torch.sigmoid(model(images)) >= threshold
         targets = masks > 0.5
-        i = float((preds & targets).sum())
-        p, t = float(preds.sum()), float(targets.sum())
-        inter += i
-        union += p + t - i
-        pred_sum += p
-        target_sum += t
+        inter = inter + (preds & targets).sum()
+        pred_sum = pred_sum + preds.sum()
+        target_sum = target_sum + targets.sum()
+    inter, pred_sum, target_sum = float(inter), float(pred_sum), float(target_sum)
+    union = pred_sum + target_sum - inter
     eps = 1e-7
     return {"iou": (inter + eps) / (union + eps),
             "dice": (2 * inter + eps) / (pred_sum + target_sum + eps)}
