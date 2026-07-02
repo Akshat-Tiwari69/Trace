@@ -57,6 +57,20 @@ def test_empty_pairs_raises(tmp_path):
         RoadTileDataset([], build_val_transform(64))
 
 
+def test_grayscale_stack_adds_radiometric_aug(tmp_path):
+    """A24: grayscale_p>0 wires in both ToGray and RandomGamma (radiometric)."""
+    names = {type(t).__name__ for t in build_train_transform(64, grayscale_p=0.5).transforms}
+    assert "ToGray" in names and "RandomGamma" in names
+    # off by default (A4/DeepGlobe baseline path unchanged)
+    assert "ToGray" not in {type(t).__name__ for t in build_train_transform(64).transforms}
+
+
+def test_val_transform_grayscale_flag_wires_togray(tmp_path):
+    """A24 PAN-proxy: build_val_transform(grayscale=True) inserts ToGray; off by default."""
+    assert "ToGray" in {type(t).__name__ for t in build_val_transform(64, grayscale=True).transforms}
+    assert "ToGray" not in {type(t).__name__ for t in build_val_transform(64).transforms}
+
+
 def test_crops_per_image_multiplies_length(tmp_path):
     _make_pair(tmp_path, "1")
     _make_pair(tmp_path, "2")

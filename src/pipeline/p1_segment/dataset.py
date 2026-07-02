@@ -46,6 +46,10 @@ def build_train_transform(size: int = 256, occlusion: bool | str = True, graysca
 
     ``grayscale_p`` (A24) randomly desaturates a fraction of tiles so the model
     can't depend on colour — a cheap path to **Cartosat-3 panchromatic** robustness.
+    When on, it also adds **radiometric jitter** (``RandomGamma``): PAN differs from
+    RGB luminance in tone/contrast response, not just colour, so decolorizing alone
+    leaves a gap (measured −11 % on held-out for v3). Gamma augmentation stops the
+    model leaning on RGB radiometry either.
     """
     import albumentations as A
     from albumentations.pytorch import ToTensorV2
@@ -61,7 +65,9 @@ def build_train_transform(size: int = 256, occlusion: bool | str = True, graysca
                                    p=0.4 if heavy else 0.3),
     ]
     if grayscale_p > 0:
-        augs.append(A.ToGray(p=grayscale_p))   # Cartosat-PAN robustness (A24)
+        # Cartosat-PAN robustness (A24): decolorize a fraction AND jitter radiometry
+        # (gamma) so the model can't lean on RGB colour *or* tone response.
+        augs += [A.ToGray(p=grayscale_p), A.RandomGamma(gamma_limit=(70, 130), p=0.4)]
     if occlusion:
         # blank boxes (~1/16–1/6 of the tile) to mimic trees/buildings/vehicles;
         # "heavy" uses more, larger boxes more often (albumentations 2.x API).

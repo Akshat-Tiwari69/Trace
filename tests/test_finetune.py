@@ -74,3 +74,24 @@ def test_finetune_selects_and_saves_releasable_checkpoint(tmp_path):
     model, meta = load_checkpoint(out)
     assert meta["encoder_frozen"] is True
     assert "indian_val_iou" in meta and "deepglobe_val_iou" in meta
+
+
+def test_finetune_grayscale_tracks_pan_proxy(tmp_path):
+    """A24: grayscale_p>0 records the Cartosat-PAN (grayscale) IoU each epoch + in meta."""
+    ft, dg = tmp_path / "ft", tmp_path / "dg"
+    for i in range(5):
+        _write_pair(ft, f"c{i}")
+    for i in range(6):
+        _write_pair(dg, f"d{i}")
+    init = tmp_path / "v1.pt"
+    _tiny_v1_checkpoint(init)
+    out = tmp_path / "v32.pt"
+    cfg = FineTuneConfig(init_checkpoint=init, finetune_dir=ft, deepglobe_dir=dg,
+                         deepglobe_subset=3, deepglobe_val=2, out_path=out, image_size=64,
+                         batch_size=2, epochs=1, finetune_oversample=2, grayscale_p=0.5,
+                         deepglobe_iou_tolerance=1.0, device="cpu")
+    summary = finetune(cfg)
+    # per-epoch grayscale IoU is a real number (not the nan sentinel used when off)
+    assert np.isfinite(summary["history"][0]["indian_gray_iou"])
+    _, meta = load_checkpoint(out)
+    assert "indian_gray_val_iou" in meta and np.isfinite(meta["indian_gray_val_iou"])
