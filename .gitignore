@@ -41,6 +41,7 @@ cache/
 # OS / editor
 .DS_Store
 Thumbs.db
-*.stackdump          # Windows/Cygwin crash dumps (e.g. bash.exe.stackdump)
+# Windows/Cygwin crash dumps (e.g. bash.exe.stackdump) — no inline comments in .gitignore
+*.stackdump
 .vscode/
 .idea/
