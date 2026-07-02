@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from itertools import combinations
 from math import inf, isfinite
+import os
 from pathlib import Path
 
 import branca.colormap as cm
@@ -715,10 +716,72 @@ def apply_design_theme() -> None:
     )
 
 
+MODAL_SEG_URL = os.environ.get("MODAL_SEG_URL")
+
+
+def _call_modal_seg(image_bytes: bytes) -> tuple[bytes, float | None]:
+    """POST an image to the Modal GPU endpoint; return (mask PNG bytes, threshold)."""
+    import base64
+    import json
+    import urllib.request
+
+    body = json.dumps({"image_b64": base64.b64encode(image_bytes).decode()}).encode()
+    req = urllib.request.Request(
+        MODAL_SEG_URL, data=body, headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=240) as resp:
+        out = json.load(resp)
+    if "mask_png_b64" not in out:
+        raise RuntimeError(out.get("error", "unexpected response from endpoint"))
+    return base64.b64decode(out["mask_png_b64"]), out.get("threshold")
+
+
+def render_live_detection() -> None:
+    """Upload a satellite image → segment roads on the serverless GPU (Modal).
+
+    Hidden unless MODAL_SEG_URL is set, so local dev without the endpoint is
+    unaffected. The heavy model runs off-box on a T4 that scales to zero.
+    """
+    if not MODAL_SEG_URL:
+        return
+    with st.expander("🛰️ Live road detection (GPU) — upload a satellite image", expanded=False):
+        upload = st.file_uploader("Satellite / aerial image", type=["png", "jpg", "jpeg"])
+        if upload is None:
+            st.caption(
+                "Roads are segmented on a serverless T4 (Modal). The first call after "
+                "idle takes ~30 s to warm up; subsequent calls are near-instant."
+            )
+            return
+        image_bytes = upload.getvalue()
+        with st.spinner("Segmenting roads on GPU…"):
+            try:
+                mask_png, threshold = _call_modal_seg(image_bytes)
+            except Exception as error:  # noqa: BLE001 — surface any endpoint failure to the user
+                st.error(f"Inference failed: {error}")
+                return
+
+        import io
+
+        import numpy as np
+        from PIL import Image
+
+        orig = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        mask = Image.open(io.BytesIO(mask_png)).convert("L")
+        overlay = np.asarray(orig).copy()
+        overlay[np.asarray(mask) > 0] = [255, 0, 0]
+
+        col1, col2, col3 = st.columns(3)
+        col1.image(orig, caption="Input", use_container_width=True)
+        thr = f"thr {threshold}" if threshold is not None else "roads"
+        col2.image(mask, caption=f"Road mask ({thr})", use_container_width=True)
+        col3.image(overlay, caption="Overlay", use_container_width=True)
+
+
 def main() -> None:
     """Render the interactive F2 dashboard."""
     st.set_page_config(page_title="Route Resilience", layout="wide")
     apply_design_theme()
+    render_live_detection()
     try:
         features, criticality = load_sample_data()
         graph = graph_from_features(features)
