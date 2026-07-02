@@ -112,7 +112,9 @@ def load_checkpoint(
 def _to_chw_tensor(image: np.ndarray) -> torch.Tensor:
     """HxWx3 uint8/float image → normalised (1,3,H,W) float tensor."""
     arr = image.astype(np.float32)
-    if arr.max() > 1.0:
+    # uint8 is always 0–255 (even a near-black tile whose max is ≤1); floats are
+    # 0–1 by contract, so only rescale those if they clearly exceed that range.
+    if image.dtype == np.uint8 or arr.max() > 1.0:
         arr /= 255.0
     arr = (arr - IMAGENET_MEAN) / IMAGENET_STD
     chw = np.transpose(arr, (2, 0, 1))
@@ -176,6 +178,46 @@ def predict_prob(
     return prob[0, 0].cpu().numpy().astype(np.float32)
 
 
+def _auto_batch(device: str, batch_size: int | None) -> int:
+    """Resolve the tile batch size (A28). GPU throughput scales with batch, but a
+    CPU conv already uses every core — batching there only adds overhead — so the
+    default is 16 on an accelerator and 1 (serial) on CPU. Pass an int to override.
+    """
+    if batch_size is not None:
+        return batch_size
+    return 1 if str(device) == "cpu" else 16
+
+
+@torch.no_grad()
+def predict_prob_batch(
+    model: torch.nn.Module,
+    images: list[np.ndarray],
+    device: str = "cpu",
+    tta: bool = False,
+    batch_size: int | None = None,
+) -> list[np.ndarray]:
+    """Probability maps for a list of **same-size** tiles in batched forwards (A28).
+
+    Same per-tile result as calling :func:`predict_prob` in a loop, but runs the
+    model on chunks of ``batch_size`` tiles at once (~B× GPU throughput). Identical
+    outputs under ``model.eval()`` — BatchNorm uses running stats, so each sample is
+    independent of its batch-mates. All ``images`` must share ``H×W``. ``batch_size``
+    defaults to device-aware (:func:`_auto_batch`): serial on CPU, 16 on GPU.
+    """
+    if not images:
+        return []
+    batch_size = _auto_batch(device, batch_size)
+    net = _unwrap(model).to(device)
+    net.eval()
+    out: list[np.ndarray] = []
+    for start in range(0, len(images), batch_size):
+        chunk = images[start : start + batch_size]
+        x = torch.cat([_to_chw_tensor(im) for im in chunk], dim=0).to(device)
+        prob = _dihedral_tta_prob(net, x) if tta else torch.sigmoid(net(x))
+        out.extend(prob[i, 0].cpu().numpy().astype(np.float32) for i in range(prob.shape[0]))
+    return out
+
+
 def _hann2d(size: int) -> np.ndarray:
     """2-D Hann window (+small floor so edge pixels still contribute)."""
     w = np.hanning(size)
@@ -190,22 +232,25 @@ def predict_large_prob(
     stride: int | None = None,
     device: str = "cpu",
     tta: bool = False,
+    batch_size: int | None = None,
 ) -> np.ndarray:
     """Blended probability map for a large image via **overlapping** windows.
 
     Slides ``tile_size`` windows at ``stride`` (default 75 % overlap), weights each
     tile's probabilities by a Hann window and normalises — so roads crossing tile
     seams don't break (A27). Threshold the returned map **once**. Reuses padding
-    for edge windows.
+    for edge windows. Windows run batched (A28, device-aware) rather than one
+    forward per tile — the blended map is unchanged.
     """
     stride = stride or max(1, tile_size * 3 // 4)
-    net = _unwrap(model).to(device)
     h, w = image.shape[:2]
     acc = np.zeros((h, w), np.float32)
     wsum = np.zeros((h, w), np.float32)
     window = _hann2d(tile_size)
     ys = sorted({*range(0, max(1, h - tile_size + 1), stride), max(0, h - tile_size)})
     xs = sorted({*range(0, max(1, w - tile_size + 1), stride), max(0, w - tile_size)})
+    tiles: list[np.ndarray] = []
+    places: list[tuple[int, int, int, int]] = []  # (y0, x0, th, tw) per window
     for y0 in ys:
         for x0 in xs:
             tile = image[y0 : y0 + tile_size, x0 : x0 + tile_size]
@@ -214,10 +259,13 @@ def predict_large_prob(
                 padded = np.zeros((tile_size, tile_size, image.shape[2]), image.dtype)
                 padded[:th, :tw] = tile
                 tile = padded
-            prob = predict_prob(net, tile, device=device, tta=tta)
-            win = window[:th, :tw]
-            acc[y0 : y0 + th, x0 : x0 + tw] += prob[:th, :tw] * win
-            wsum[y0 : y0 + th, x0 : x0 + tw] += win
+            tiles.append(tile)
+            places.append((y0, x0, th, tw))
+    probs = predict_prob_batch(model, tiles, device=device, tta=tta, batch_size=batch_size)
+    for (y0, x0, th, tw), prob in zip(places, probs):
+        win = window[:th, :tw]
+        acc[y0 : y0 + th, x0 : x0 + tw] += prob[:th, :tw] * win
+        wsum[y0 : y0 + th, x0 : x0 + tw] += win
     return acc / np.maximum(wsum, 1e-6)
 
 
@@ -225,7 +273,7 @@ def predict_large_prob(
 def predict_large(
     model: torch.nn.Module,
     image: np.ndarray,
-    tile_size: int = 256,
+    tile_size: int = 512,
     device: str = "cpu",
     threshold: float = 0.5,
     tta: bool = False,

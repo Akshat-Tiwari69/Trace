@@ -37,21 +37,9 @@ def _chip_key(name: str) -> str:
     return m.group(1) if m else Path(name).stem
 
 
-def _to_rgb8(bands: np.ndarray) -> np.ndarray:
-    """First 3 bands (C,H,W) → H×W×3 uint8 via per-channel 2–98% percentile stretch.
-
-    Robust to 8-bit *or* 16-bit imagery; the stretch also tolerates SpaceNet's
-    wide dynamic range without clipping detail to black/white.
-    """
-    rgb = np.stack([bands[0], bands[1], bands[2]], axis=-1).astype(np.float32)
-    out = np.empty(rgb.shape, dtype=np.uint8)
-    for c in range(3):
-        ch = rgb[..., c]
-        lo, hi = np.percentile(ch, 2), np.percentile(ch, 98)
-        if hi <= lo:
-            hi = lo + 1.0
-        out[..., c] = np.clip((ch - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
-    return out
+# Percentile-stretch normaliser lives in raster_io (shared with A26 inference,
+# which must not depend on this data-prep script's internals).
+from src.pipeline.p1_segment.raster_io import to_rgb8 as _to_rgb8
 
 
 def _rasterize_roads_metric(roads, transform, width: int, height: int, crs, buffer_m: float) -> np.ndarray:

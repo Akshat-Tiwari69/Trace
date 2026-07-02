@@ -143,12 +143,10 @@ class RoadTileDataset(Dataset):
         return len(self.pairs) * self.crops_per_image
 
     def _read(self, image_path: Path, mask_path: Path) -> tuple[np.ndarray, np.ndarray]:
-        import cv2
+        from src.pipeline.p1_segment.raster_io import imread_gray, imread_rgb
 
-        image = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-        mask = (mask > 127).astype(np.uint8)  # DeepGlobe masks are 0/255
+        image = imread_rgb(image_path)
+        mask = (imread_gray(mask_path) > 127).astype(np.uint8)  # DeepGlobe masks are 0/255
         return image, mask
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:

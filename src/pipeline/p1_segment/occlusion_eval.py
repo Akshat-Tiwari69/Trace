@@ -40,14 +40,14 @@ def evaluate_occlusion_recall(model, pairs: list[tuple[Path, Path]], device: str
     Occlusion-Recall: of true-road pixels inside the boxes, the fraction predicted.
     Clean IoU: IoU on the *un*-occluded image (the cost side of the trade-off).
     """
-    import cv2
+    from src.pipeline.p1_segment.raster_io import imread_gray, imread_rgb
 
     rng = np.random.default_rng(seed)
     hidden_road = recovered = 0
     inter = union = 0
     for sat_path, mask_path in pairs:
-        img = cv2.cvtColor(cv2.imread(str(sat_path), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
-        gt = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE) > 127
+        img = imread_rgb(sat_path)
+        gt = imread_gray(mask_path) > 127
 
         occ_img, occ = occlude(img, rng)
         pred_occ = predict_large(model, occ_img, tile_size=tile_size, device=device, threshold=threshold) > 0
