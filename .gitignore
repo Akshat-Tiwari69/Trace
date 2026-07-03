@@ -8,6 +8,7 @@ data/interim/*
 data/processed/*
 data/outputs/*
 data/finetune/*
+data/finetune_rural/*
 models/*
 
 # local GPU env + caches (kept off C:, never committed)

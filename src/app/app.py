@@ -926,7 +926,9 @@ def render_live_detection() -> None:
     if upload is None:
         st.caption(
             "Runs the deployed SegFormer model on a serverless T4 (Modal). The first "
-            "call after idle takes ~30 s to warm up; subsequent calls are near-instant."
+            "call after idle takes ~30 s to warm up; subsequent calls are near-instant. "
+            "**Best results at ~0.5 m/pixel** (Google-Earth neighbourhood zoom, roads "
+            "4–10 px wide) — heavily zoomed-in or zoomed-out captures degrade extraction."
         )
         return
     image_bytes = upload.getvalue()
