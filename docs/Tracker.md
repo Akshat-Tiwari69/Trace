@@ -257,6 +257,11 @@ flowchart TD
 
 > Copy the block each working day. Newest on top.
 
+**2026-07-03 (Akshat — A35 kickoff: rural pilot corpus + upload GSD hint)**
+- **Rural pilot fetched with the existing A6 tooling** (`build_finetune_data.py`, Esri XYZ + OSM — the A6/A16 precedent source): AOI `kansbahal_pilot` (bbox 84.6536,22.2023,84.6816,22.2223 @0.5 m/px) → **30 road-bearing (sat, OSM-mask) pairs** in `data/finetune_rural/` (newly gitignored — raw imagery stays out of the repo). QC verdict: OSM covers main lanes; tree occlusion heavy; side tracks unlabeled → **OSM = pre-label only, hand-correct for the benchmark** (A17 procedure), never raw training labels (A12).
+- **Next:** extend to ~5–8 diverse rural AOIs (Odisha/Jharkhand industrial-rural, UP/Bihar villages, Punjab farm grid, Kerala backroads, rural Goa), hand-correct ~30–50 tiles → truthful rural benchmark + v3.3 fine-tune anchor. Labeling is human work — needs Akshat's hands or a team decision.
+- **Dashboard:** upload feature now states the **~0.5 m/pixel GSD guidance** (A34 follow-up) so arbitrary-zoom captures stop producing misleading results.
+
 **2026-07-03 (Akshat — A34: rural-India baseline eval (Kansbahal) + data-sourcing decision)**
 - User goal: strong rural performance. Proposed Google-Earth-Pro imagery + its roads as training data — **declined on license** (Google ToS prohibits ML-training extraction; CLAUDE.md "respect dataset licenses"; GE also has no exportable road labels — that path collapses back to OSM labels, rejected in A12).
 - **Baseline eval (v3.2 @0.52, 3070 Ti, multi-scale on a rural Odisha GE screenshot 3840×2160):** at native scale the model traces **most of the visible network** (road-px 3.2%; overlays in `.tmp/kansbahal_s*.png`) — fragmented in places, railway likely misread as road; downsampling to 0.25× loses everything but highways. **Verdict: rural is mediocre-but-workable, not absent** — the "model is shit" impression came from the dashboard's small thumbnails + the (fixed) A33 crash. Native GE-zoom ≈ training GSD (~0.5 m/px), so scale mismatch wasn't the culprit here, but arbitrary-zoom uploads remain a real hazard → **add a GSD hint/selector to the upload UI** (cheap follow-up).
