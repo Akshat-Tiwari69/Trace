@@ -260,7 +260,7 @@ def semantic_legend() -> folium.Element:
       <span style="color:#D55E00">●</span> disabled junction / links<br>
       <span style="color:#E69F00">━</span> rerouted path<br>
       <span style="color:#aaaaaa">┄</span> healed road<br>
-      <span style="color:#ff00ff">●</span> / <span style="color:#ff00ff">━</span> single-point-of-failure
+      <span style="color:#FB7185">●</span> / <span style="color:#FB7185">━</span> single-point-of-failure
     </div>
     """
     return folium.Element(html)
@@ -296,8 +296,11 @@ def build_map(
     nodes, edges = split_features(features)
     scores = criticality.set_index("node_id")["betweenness"].to_dict()
     maximum = max(float(criticality["betweenness"].max()), 1e-9)
+    # Dark-basemap-readable ramp (deep teal → sky → green → yellow): the old
+    # viridis-style ramp started at near-black purple, so low-criticality roads
+    # were invisible against the dark tiles.
     colour_scale = cm.LinearColormap(
-        colors=["#440154", "#31688e", "#35b779", "#fde725"],
+        colors=["#155E75", "#0EA5E9", "#4ADE80", "#FDE047"],
         vmin=0.0,
         vmax=maximum,
         caption="Road criticality (endpoint betweenness: low to high)",
@@ -307,9 +310,15 @@ def build_map(
     road_map = folium.Map(
         location=[nodes.geometry.y.mean(), nodes.geometry.x.mean()],
         zoom_start=15,
-        tiles="CartoDB dark_matter",
+        tiles=None,
         control_scale=True,
     )
+    folium.TileLayer("CartoDB dark_matter", name="Dark map").add_to(road_map)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri — Source: Esri, Maxar, Earthstar Geographics",
+        name="Satellite",
+    ).add_to(road_map)
     
     if scenario == "Flood":
         from folium.plugins import Draw
@@ -341,7 +350,9 @@ def build_map(
             colour = "#D55E00"
             state = "disabled link"
         elif is_spof:
-            colour = "#ff00ff"
+            # Muted rose (was neon magenta #ff00ff, which drowned the whole
+            # network — most Panaji links are flagged is_bridge).
+            colour = "#FB7185"
             state = "critical bridge"
         else:
             colour = colour_scale(score)
@@ -384,7 +395,7 @@ def build_map(
             elif node_id == selected_node:
                 colour, radius, label = "#56B4E9", 8, "Selected junction"
             elif is_art and show_spof:
-                colour, radius, label = "#ff00ff", 7, "Articulation point"
+                colour, radius, label = "#FB7185", 7, "Articulation point"
             else:
                 colour, radius, label = colour_scale(score), 5, "Critical junction"
                 
@@ -415,6 +426,7 @@ def build_map(
 
     if simulation and simulation.route:
         add_rerouted_path(road_map, graph, simulation.route)
+    folium.LayerControl(position="topright").add_to(road_map)
     colour_scale.add_to(road_map)
     road_map.get_root().html.add_child(semantic_legend())
     return road_map
@@ -841,8 +853,13 @@ def apply_design_theme() -> None:
           [data-testid="stDataFrame"] { border: 1px solid var(--rr-border); border-radius: 12px; overflow: hidden; }
           [data-testid="stAlert"] { border-radius: 10px; border: 1px solid var(--rr-border); }
 
-          /* The Folium map iframe becomes a framed panel */
-          iframe {
+          /* The Folium map iframe becomes a framed panel. Scoped to st_folium only
+             (Streamlit injects hidden utility iframes that must stay unstyled), and
+             height-clamped: streamlit-folium's bidirectional frontend inflates the
+             iframe height attribute (observed 3068px for a 760px map), which was
+             stretching the page with dead space below the map and panel. */
+          iframe[title="streamlit_folium.st_folium"] {
+            height: 640px !important;
             border-radius: 14px;
             border: 1px solid var(--rr-border) !important;
             box-shadow: 0 10px 30px rgba(2,6,17,.45);
@@ -900,44 +917,47 @@ def render_live_detection() -> None:
     """
     if not MODAL_SEG_URL:
         return
-    with st.expander("🛰️ Live road detection (GPU) — upload a satellite image", expanded=False):
-        upload = st.file_uploader("Satellite / aerial image", type=["png", "jpg", "jpeg"])
-        if upload is None:
-            st.caption(
-                "Roads are segmented on a serverless T4 (Modal). The first call after "
-                "idle takes ~30 s to warm up; subsequent calls are near-instant."
-            )
+    st.subheader("Live road detection — serverless GPU")
+    upload = st.file_uploader(
+        "Upload a satellite / aerial image to extract its road network",
+        type=["png", "jpg", "jpeg"],
+        key="live_detection_upload",
+    )
+    if upload is None:
+        st.caption(
+            "Runs the deployed SegFormer model on a serverless T4 (Modal). The first "
+            "call after idle takes ~30 s to warm up; subsequent calls are near-instant."
+        )
+        return
+    image_bytes = upload.getvalue()
+    with st.spinner("Segmenting roads on GPU…"):
+        try:
+            mask_png, threshold = _call_modal_seg(image_bytes)
+        except Exception as error:  # noqa: BLE001 — surface any endpoint failure to the user
+            st.error(f"Inference failed: {error}")
             return
-        image_bytes = upload.getvalue()
-        with st.spinner("Segmenting roads on GPU…"):
-            try:
-                mask_png, threshold = _call_modal_seg(image_bytes)
-            except Exception as error:  # noqa: BLE001 — surface any endpoint failure to the user
-                st.error(f"Inference failed: {error}")
-                return
 
-        import io
+    import io
 
-        import numpy as np
-        from PIL import Image
+    import numpy as np
+    from PIL import Image
 
-        orig = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-        mask = Image.open(io.BytesIO(mask_png)).convert("L")
-        overlay = np.asarray(orig).copy()
-        overlay[np.asarray(mask) > 0] = [255, 0, 0]
+    orig = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    mask = Image.open(io.BytesIO(mask_png)).convert("L")
+    overlay = np.asarray(orig).copy()
+    overlay[np.asarray(mask) > 0] = [255, 0, 0]
 
-        col1, col2, col3 = st.columns(3)
-        col1.image(orig, caption="Input", use_container_width=True)
-        thr = f"thr {threshold}" if threshold is not None else "roads"
-        col2.image(mask, caption=f"Road mask ({thr})", use_container_width=True)
-        col3.image(overlay, caption="Overlay", use_container_width=True)
+    col1, col2, col3 = st.columns(3)
+    col1.image(orig, caption="Input", use_container_width=True)
+    thr = f"thr {threshold}" if threshold is not None else "roads"
+    col2.image(mask, caption=f"Road mask ({thr})", use_container_width=True)
+    col3.image(overlay, caption="Overlay", use_container_width=True)
 
 
 def main() -> None:
     """Render the interactive F2 dashboard."""
     st.set_page_config(page_title="Route Resilience", page_icon="🛰️", layout="wide")
     apply_design_theme()
-    render_live_detection()
     try:
         features, criticality = load_sample_data()
         graph = graph_from_features(features)
@@ -1005,7 +1025,7 @@ def main() -> None:
                 st.markdown("**Baseline Network**")
                 baseline_map_state = st_folium(
                     baseline_map,
-                    height=500,
+                    height=640,
                     use_container_width=True,
                     returned_objects=["last_object_clicked"],
                     key=f"baseline_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{scenario}",
@@ -1014,7 +1034,7 @@ def main() -> None:
                 st.markdown("**Post-Failure Network**")
                 map_state = st_folium(
                     sim_map,
-                    height=500,
+                    height=640,
                     use_container_width=True,
                     returned_objects=["last_object_clicked", "all_drawings"],
                     key=f"network_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{scenario}",
@@ -1023,7 +1043,7 @@ def main() -> None:
             baseline_map_state = None
             map_state = st_folium(
                 sim_map,
-                height=760,
+                height=640,
                 use_container_width=True,
                 returned_objects=["last_object_clicked", "all_drawings"],
                 key=f"network_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{scenario}",
@@ -1033,6 +1053,7 @@ def main() -> None:
             "Brighter roads connect more critical junctions · dashed = healed · "
             "orange = reroute · red = disabled"
         )
+        render_live_detection()
 
     clicked = map_state.get("last_object_clicked") if map_state else None
     drawings = map_state.get("all_drawings") if map_state else None
