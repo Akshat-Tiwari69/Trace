@@ -948,10 +948,12 @@ def render_live_detection() -> None:
     overlay[np.asarray(mask) > 0] = [255, 0, 0]
 
     col1, col2, col3 = st.columns(3)
-    col1.image(orig, caption="Input", use_container_width=True)
+    # use_column_width (not use_container_width): st.image doesn't accept the
+    # latter on the pinned Streamlit 1.38 — it was added in a later release.
+    col1.image(orig, caption="Input", use_column_width=True)
     thr = f"thr {threshold}" if threshold is not None else "roads"
-    col2.image(mask, caption=f"Road mask ({thr})", use_container_width=True)
-    col3.image(overlay, caption="Overlay", use_container_width=True)
+    col2.image(mask, caption=f"Road mask ({thr})", use_column_width=True)
+    col3.image(overlay, caption="Overlay", use_column_width=True)
 
 
 def main() -> None:
