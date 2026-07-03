@@ -23,7 +23,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-DEFAULT_CKPT = "models/deepglobe_mit_b3_scse_512px_best.pt"
+from src.pipeline.p1_segment.model import DEPLOYED_CHECKPOINT, DEPLOYED_RELEASE
+
+DEFAULT_CKPT = DEPLOYED_CHECKPOINT
 DEFAULT_OUT = "data/sample/segmentation_eval.json"
 
 
@@ -63,7 +65,7 @@ def _load_meta(checkpoint: Path) -> dict[str, Any]:
     if not checkpoint.exists():
         raise SystemExit(
             f"checkpoint not found: {checkpoint}\n"
-            "  Download it from the GitHub Release a4-roadseg-v1 into models/."
+            f"  Download it from the GitHub Release {DEPLOYED_RELEASE} into models/."
         )
     return torch.load(checkpoint, map_location="cpu", weights_only=False).get("meta", {})
 
@@ -101,7 +103,8 @@ def _live_demo(checkpoint: Path, image_path: Path, aoi: str, out_dir: Path) -> d
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Package the A4 segmentation evaluation numbers.")
-    p.add_argument("--checkpoint", default=DEFAULT_CKPT, help="trained .pt (Release a4-roadseg-v1)")
+    p.add_argument("--checkpoint", default=DEFAULT_CKPT,
+                   help=f"trained .pt (deployed: Release {DEPLOYED_RELEASE})")
     p.add_argument("--out", default=DEFAULT_OUT, help="where to write the JSON report")
     p.add_argument("--image", default=None, help="optional tile for a live inference demo")
     p.add_argument("--aoi", default="demo", help="AOI id for the demo overlay filename")

@@ -81,7 +81,12 @@ def skeleton_to_graph(
     import sknw
 
     skel = np.asarray(skeleton).astype(np.uint16)
-    raw = sknw.build_sknw(skel, multi=False)
+    # multi=True so parallel skeleton branches (loops, dual carriageways) are
+    # visible here instead of silently dropped inside sknw. The simple nx.Graph
+    # we return still holds one edge per node pair, but the choice is now
+    # deterministic (shortest branch wins) and the loss is counted + reported.
+    # Full MultiGraph support end-to-end is tracked in bugs.md §4 (L effort).
+    raw = sknw.build_sknw(skel, multi=True)
 
     def pixel_to_metric(row: float, col: float) -> tuple[float, float]:
         """Pixel (row, col) → metric world (x, y), or scaled pixels if no grid."""
@@ -96,6 +101,7 @@ def skeleton_to_graph(
         mx, my = pixel_to_metric(row, col)
         graph.add_node(int(node_id), x=mx, y=my)
 
+    parallel_dropped = 0
     for u, v, data in raw.edges(data=True):
         pts = np.asarray(data["pts"], dtype=float)  # (row, col) polyline
         metric = [list(pixel_to_metric(r, c)) for r, c in pts]
@@ -105,13 +111,30 @@ def skeleton_to_graph(
             length_m = float(np.hypot(seg[:, 0], seg[:, 1]).sum())
         else:
             length_m = 0.0
+        ui, vi = int(u), int(v)
+        if ui == vi:
+            # Self-loop artifacts (multi=True surfaces them at ring corners):
+            # zero routing information, and zero-length ones would violate the
+            # length_m > 0 artifact contract. Skip outright.
+            continue
+        if graph.has_edge(ui, vi):
+            # Parallel branch between the same junction pair: a simple graph
+            # holds one edge, so keep the shorter (more direct) branch.
+            parallel_dropped += 1
+            if length_m >= float(graph.edges[ui, vi].get("length_m", 0.0)):
+                continue
         graph.add_edge(
-            int(u),
-            int(v),
+            ui,
+            vi,
             length_m=length_m,
             geometry=metric,
             is_bridged=False,
         )
+
+    if parallel_dropped:
+        print(f"[skeleton_graph] WARNING: {parallel_dropped} parallel skeleton branch(es) "
+              "collapsed to the shorter edge — loops/dual carriageways lose redundancy "
+              "in the simple graph (bugs.md §4)")
 
     _annotate_degree_and_type(graph)
     return graph

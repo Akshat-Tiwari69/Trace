@@ -104,11 +104,23 @@ def rank_table(graph: "nx.Graph", bc: dict[int, float]) -> list[dict]:
     Columns match the §4 contract: ``node_id, betweenness, rank, is_critical``
     (plus ``is_articulation`` from :func:`annotate_cut_structure`, and ``x, y`` so
     the dashboard can place the ranked list on the map).
+
+    Note ``rank`` orders by betweenness — **traffic importance**, not failure
+    importance: an articulation point with modest through-traffic can rank low
+    while still being a hard single point of failure (see ``is_articulation``).
+
+    Requires :func:`annotate_criticality` to have run first (fails loudly on
+    un-annotated nodes rather than silently reporting ``is_critical=False``).
     """
     ranked = sorted(bc, key=lambda n: bc[n], reverse=True)
     rows = []
     for rank, node_id in enumerate(ranked, start=1):
         data = graph.nodes[node_id]
+        if "betweenness" not in data:
+            raise ValueError(
+                f"node {node_id} lacks 'betweenness' — run annotate_criticality() "
+                "before rank_table() (ordering bug in the caller)"
+            )
         rows.append(
             {
                 "node_id": int(node_id),

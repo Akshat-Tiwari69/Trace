@@ -10,6 +10,7 @@ and writes the alignment manifest P2's `build_graph` already consumes
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import numpy as np
@@ -94,9 +95,14 @@ def write_manifest(aoi: str, interim_dir: str | Path, transform, crs) -> Path | 
     out_dir = Path(interim_dir) / aoi
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest = out_dir / "manifest.json"
-    manifest.write_text(json.dumps({
+    payload = json.dumps({
         "crs": str(crs),
         "transform": list(transform)[:6],
         "resolution_m": abs(float(transform[0])),
-    }, indent=2))
+    }, indent=2)
+    # Atomic (A36): temp + os.replace, so a crash mid-write can't leave a
+    # truncated manifest that silently drops P2 into pixel space.
+    tmp = manifest.with_name(manifest.name + ".tmp")
+    tmp.write_text(payload)
+    os.replace(tmp, manifest)
     return manifest

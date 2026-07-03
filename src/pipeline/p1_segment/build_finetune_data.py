@@ -237,6 +237,14 @@ def main() -> None:
           f"failed {len(failed)} of {len(cities)} AOIs -> {out_dir}")
     if failed:
         print(f"  failed AOIs (re-run to retry — completed cities are skipped): {', '.join(failed)}")
+    attempted = built + len(failed)
+    if attempted and len(failed) / attempted > 0.5:
+        # A shared cause (endpoint change, network outage) broke most cities —
+        # exiting 0 here would let a near-empty corpus feed a training run unnoticed.
+        raise SystemExit(
+            f"{len(failed)}/{attempted} attempted AOIs failed — likely a shared cause "
+            "(tile endpoint / network / OSM schema). Fix that before trusting this corpus."
+        )
 
 
 if __name__ == "__main__":

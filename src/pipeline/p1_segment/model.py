@@ -1,10 +1,12 @@
 """Segmentation model: build, checkpoint I/O, and CPU inference (task A4).
 
-We fine-tune a **SegFormer MiT-B0 encoder + U-Net decoder** via
-``segmentation_models_pytorch`` (smp 0.3.4 ships the MiT/SegFormer encoders but
+We fine-tune a **SegFormer MiT encoder + U-Net decoder** via
+``segmentation_models_pytorch`` (smp ships the MiT/SegFormer encoders but
 not a standalone Segformer decoder, and the U-Net decoder gives full-resolution
-masks directly). ``encoder_weights="imagenet"`` fine-tunes pretrained weights —
-never trains from scratch (``docs/Rules.md``). ~5.5M params; fits 8 GB.
+masks directly). The module supports several MiT encoders (mit_b0…mit_b3);
+the **deployed v3.2 checkpoint uses MiT-B3 + SCSE U-Net**.
+``encoder_weights="imagenet"`` fine-tunes pretrained weights —
+never trains from scratch (``docs/Rules.md``).
 
 ``predict_mask`` is the pipeline's ``predict(tile) -> mask_array`` (``TRD.md``):
 a trained model turns one RGB tile into a binary {0,1} road mask on CPU, which
@@ -20,7 +22,13 @@ import numpy as np
 import segmentation_models_pytorch as smp
 import torch
 
-# ImageNet stats — the MiT-b0 encoder is pretrained on ImageNet, so train-time
+# Single source of truth for the deployed segmentation checkpoint (A36).
+# Every CLI default / help text / error message should reference these, not a
+# hard-coded path, so a re-deploy is a one-line change here.
+DEPLOYED_CHECKPOINT = "models/road_pan.pt"
+DEPLOYED_RELEASE = "a4-roadseg-v3.2"
+
+# ImageNet stats — the MiT encoders are pretrained on ImageNet, so train-time
 # augmentation and inference must normalise with the same constants.
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -95,6 +103,8 @@ def load_train_state(path: str | Path, map_location: str = "cpu") -> dict[str, A
     Companion to :func:`load_checkpoint` (which rebuilds the model): this pulls the
     optimizer/scaler/epoch/best/history blob so a run can resume mid-training.
     """
+    # weights_only=False: train_state/meta hold non-tensor objects; map_location
+    # (default "cpu") keeps GPU-trained checkpoints CPU-safe.
     ckpt = torch.load(path, map_location=map_location, weights_only=False)
     return ckpt.get("train_state")
 
@@ -108,11 +118,17 @@ def load_checkpoint(
 
     The encoder/arch default to whatever the checkpoint's ``meta`` says (so a
     mit_b3 Unet+scse checkpoint rebuilds correctly); pass ``encoder`` to override.
-    ``weights_only=False`` because these are our own checkpoints whose ``meta``
-    holds config/metric objects torch 2.6+ would otherwise refuse to unpickle.
+    A checkpoint with **no** ``meta`` is refused (``ValueError``) rather than
+    silently rebuilt as mit_b0/unet — unless ``encoder`` explicitly asserts the
+    architecture.
     """
+    # weights_only=False: our own checkpoints' ``meta`` holds non-tensor
+    # config/metric objects torch 2.6+ would otherwise refuse to unpickle.
+    # map_location (default "cpu") keeps GPU-trained checkpoints CPU-safe.
     ckpt = torch.load(path, map_location=map_location, weights_only=False)
-    meta = ckpt.get("meta", {})
+    meta = ckpt.get("meta") or {}
+    if not meta and encoder is None:
+        raise ValueError(f"{path} has no 'meta' — cannot verify architecture; refusing to guess")
     enc = encoder or meta.get("encoder", "mit_b0")
     model = build_model(
         encoder=enc,

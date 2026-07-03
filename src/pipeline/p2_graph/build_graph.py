@@ -70,6 +70,11 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
     """Run mask → skeleton → graph → heal → reproject → save. Returns (graph, report)."""
     mask = _load_mask(cfg.mask_path)
     transform, crs = _load_alignment(cfg.manifest_path)
+    if transform is None:
+        print(f"[{cfg.aoi}] WARNING: no alignment manifest at {cfg.manifest_path} — "
+              f"graph is built in PIXEL space (resolution_m={cfg.resolution_m}); "
+              "length_m and resilience numbers are not true metres unless "
+              "--resolution-m matches the imagery's real GSD")
 
     skeleton = mask_to_skeleton(mask)
     graph = skeleton_to_graph(skeleton, transform=transform, resolution_m=cfg.resolution_m)

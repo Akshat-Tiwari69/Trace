@@ -118,6 +118,24 @@ def prune_skeleton_spurs(skeleton: np.ndarray, max_spur_len: int = 5) -> np.ndar
     return skel.astype(np.uint8)
 
 
+def add_postprocess_args(parser) -> None:
+    """Add the shared A10 postprocess CLI surface to an ``argparse`` parser.
+
+    Used by both ``predict.py`` and ``run_pipeline.py`` so the two entry points
+    can't drift; the values wire straight into :func:`postprocess_mask`.
+    """
+    parser.add_argument("--postprocess", action="store_true",
+                        help="A10 mask cleanup: drop tiny false components (+ optional open/close/fill)")
+    parser.add_argument("--min-component-size", type=int, default=50,
+                        help="min connected-component size in px to keep (with --postprocess)")
+    parser.add_argument("--pp-open-radius", type=int, default=0,
+                        help="binary-open disk radius (erosive — keep 0 for thin roads; with --postprocess)")
+    parser.add_argument("--pp-close-radius", type=int, default=0,
+                        help="binary-close disk radius to bridge pin-hole gaps (with --postprocess)")
+    parser.add_argument("--fill-holes", type=int, default=0,
+                        help="fill background holes up to this area (px); 0 = off (with --postprocess)")
+
+
 def postprocess_mask(
     mask: np.ndarray,
     min_size: int = 50,

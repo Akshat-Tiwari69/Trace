@@ -226,11 +226,20 @@ def tile_array(
 # 5 · Small IO helpers
 # --------------------------------------------------------------------------- #
 def save_binary_png(mask01: np.ndarray, path: Path) -> None:
-    """Save a {0,1} mask as a PNG holding pixel values 0/1 (per §4 contract)."""
+    """Save a {0,1} mask as a PNG holding pixel values 0/1 (per §4 contract).
+
+    Atomic (A36): temp + ``os.replace`` so a crash mid-write can't leave a
+    truncated mask at the contract path for P2 to consume.
+    """
+    import os
+
     from PIL import Image
 
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Image.fromarray(mask01.astype(np.uint8), mode="L").save(path)
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    Image.fromarray(mask01.astype(np.uint8), mode="L").save(tmp, format="PNG")
+    os.replace(tmp, path)
 
 
 def save_qc_overlay(mask01: np.ndarray, path: Path) -> None:

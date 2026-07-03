@@ -50,6 +50,9 @@ def collapse_degree2_nodes(graph: "nx.Graph") -> int:
     Skips a node when collapsing it would create a self-loop (its two neighbours
     are the same node) or duplicate an existing edge (a parallel edge the simple
     graph can't hold) — those nodes are left in place rather than lose geometry.
+    Note this skip is deliberately **lossless**: keeping the degree-2 node keeps
+    both parallel routes alive (the one real parallel-edge loss site is the
+    sknw build — see ``skeleton_graph.py``).
     """
     collapsed = 0
     for node in list(graph.nodes):
@@ -77,9 +80,11 @@ def prune_short_stubs(graph: "nx.Graph", min_stub_len_m: float, max_iter: int = 
     """Iteratively drop degree-1 spurs shorter than ``min_stub_len_m``. Returns count.
 
     Iterative because trimming one stub can expose another short one behind it.
-    Leaves longer dead-ends (real cul-de-sacs) untouched.
+    Leaves longer dead-ends (real cul-de-sacs) untouched. Warns when the
+    iteration cap is hit, so "done" is distinguishable from "gave up early".
     """
     removed = 0
+    truncated = True
     for _ in range(max_iter):
         stubs = [
             n for n in graph.nodes
@@ -87,9 +92,13 @@ def prune_short_stubs(graph: "nx.Graph", min_stub_len_m: float, max_iter: int = 
             and float(next(iter(graph.edges(n, data=True)))[2].get("length_m", 0.0)) < min_stub_len_m
         ]
         if not stubs:
+            truncated = False
             break
         graph.remove_nodes_from(stubs)
         removed += len(stubs)
+    if truncated:
+        print(f"[simplify] WARNING: prune_short_stubs hit max_iter={max_iter} — "
+              "pruning may be incomplete (deeper stub chains remain)")
     return removed
 
 
@@ -150,6 +159,13 @@ def consolidate_nearby_nodes(graph: "nx.Graph", tol_m: float) -> int:
     several nodes a few metres apart, joined by **sub-tolerance edges**. We union
     the endpoints of every edge shorter than ``tol_m`` into clusters and collapse
     each cluster to its centroid, rewiring outside edges to the kept node.
+
+    **Transitive merging:** clusters are built by union-find over sub-tolerance
+    edges, so the guarantee is "connected by a *chain* of edges each shorter than
+    ``tol_m``" — not mutual pairwise proximity. A cluster's diameter can exceed
+    ``tol_m`` when short edges chain (A–B and B–C both short merges A, B, C even
+    if A–C is farther apart). Acceptable at the default 10 m tolerance; revisit
+    if the tolerance is ever raised.
 
     **Overpass guard (Boeing 2025):** because we only merge along an *existing*
     short edge, two roads that merely *cross* at different grades — which share no
@@ -256,6 +272,10 @@ def simplify_polylines(graph: "nx.Graph", tol_m: float) -> PolylineReport:
     ``length_m`` (the routing weight) is left untouched, since the metric length is
     more accurate than the corner-cutting simplified chord. Run in metric space
     (before reprojection) so ``tol_m`` is true metres.
+
+    Uses ``preserve_topology=True``: the fast variant can self-intersect on
+    sharply-curved input — and the healed cubic-Bézier bridges (``is_bridged``)
+    are exactly that shape. The cost is negligible at road-polyline sizes.
     """
     from shapely.geometry import LineString
 
@@ -267,7 +287,7 @@ def simplify_polylines(graph: "nx.Graph", tol_m: float) -> PolylineReport:
             after += len(geom) if geom else 0
             continue
         before += len(geom)
-        simplified = LineString(geom).simplify(tol_m, preserve_topology=False)
+        simplified = LineString(geom).simplify(tol_m, preserve_topology=True)
         coords = [[float(x), float(y)] for x, y in simplified.coords]
         if len(coords) < 2:  # degenerate guard — keep the original endpoints
             coords = [list(map(float, geom[0])), list(map(float, geom[-1]))]

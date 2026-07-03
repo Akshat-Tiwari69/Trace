@@ -20,7 +20,7 @@ import csv
 from pathlib import Path
 
 from src.pipeline.p2_graph.config import GraphConfig
-from src.pipeline.p2_graph.graph_io import load_graphml, save_geojson
+from src.pipeline.p2_graph.graph_io import atomic_write, load_graphml, save_geojson
 from src.pipeline.p3_analysis.criticality import (
     annotate_criticality,
     annotate_cut_structure,
@@ -30,15 +30,18 @@ from src.pipeline.p3_analysis.resilience import ablation_curve
 
 
 def _write_csv(rows: list[dict], path: Path) -> None:
-    """Write a list of uniform dict rows to CSV (header from the first row)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not rows:
-        path.write_text("")
-        return
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
-        writer.writeheader()
-        writer.writerows(rows)
+    """Write a list of uniform dict rows to CSV atomically (header from row 0)."""
+
+    def _write(tmp: Path) -> None:
+        if not rows:
+            tmp.write_text("")
+            return
+        with tmp.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+
+    atomic_write(path, _write)
 
 
 def analyze(
@@ -55,6 +58,12 @@ def analyze(
     CLI responsive on very large AOIs.
     """
     graph = load_graphml(cfg.graphml_path)
+
+    n = graph.number_of_nodes()
+    if n < 2:
+        raise ValueError(
+            f"graph for {cfg.aoi} has {n} nodes — upstream P1/P2 failure, refusing to analyze"
+        )
 
     bc = annotate_criticality(graph, k=k, critical_fraction=critical_fraction)
     cut = annotate_cut_structure(graph)  # articulation points + bridge edges (S8)

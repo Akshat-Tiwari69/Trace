@@ -68,6 +68,7 @@ class FineTuneConfig:
     epochs: int = 12
     finetune_oversample: int = 3
     crops_per_image: int = 1
+    foreground_bias: float = 0.0         # bugs.md §3: P(road-containing crop); 0 = uniform
     occlusion: bool | str = True         # "heavy" = stronger occlusion aug (A8)
     cldice_weight: float = 0.1           # soft-clDice weight; 0 avoids its 8 GB skeletonize OOM (A12)
     num_workers: int = 0                 # DataLoader workers (0 = safe on low RAM, per A12)
@@ -112,16 +113,30 @@ def _build_optimizer(model: torch.nn.Module, cfg: FineTuneConfig) -> torch.optim
     return torch.optim.AdamW(groups, weight_decay=1.0e-4)
 
 
-@functools.lru_cache(maxsize=None)
-def _read_val_pair(sat_path: str, mask_path: str):
+@functools.lru_cache(maxsize=2048)
+def _read_val_pair_cached(sat_path: str, mask_path: str, sat_mtime: float, mask_mtime: float):
     """Decode a (sat RGB, gt-bool) val pair once and cache it (A28).
 
     The held-out val images are identical every epoch, yet ``_iou_on_pairs`` runs
     ~3× per epoch — this turns 3×epochs disk re-reads/pair into a single read.
-    Callers must treat the returned arrays as read-only (they're shared)."""
+    Keyed on ``(path, mtime)`` so tiles regenerated at the same path are re-read
+    instead of served stale (an unbounded process-lifetime cache would silently
+    pin old arrays in a long-lived run — bugs.md §3), and bounded so a huge val
+    set can't grow memory without limit. Callers must treat the returned arrays
+    as read-only (they're shared)."""
+    del sat_mtime, mask_mtime  # participate in the cache key only
     from src.pipeline.p1_segment.raster_io import imread_gray, imread_rgb
 
     return imread_rgb(sat_path), imread_gray(mask_path) > 127
+
+
+def _read_val_pair(sat_path: str, mask_path: str):
+    """mtime-aware wrapper around the cached reader (keeps the A28 call sites)."""
+    import os
+
+    return _read_val_pair_cached(
+        sat_path, mask_path, os.path.getmtime(sat_path), os.path.getmtime(mask_path)
+    )
 
 
 @torch.no_grad()
@@ -185,7 +200,8 @@ def finetune(cfg: FineTuneConfig) -> dict:
 
     train_ds = RoadTileDataset(train_pairs, build_train_transform(cfg.image_size, occlusion=cfg.occlusion,
                                                                   grayscale_p=cfg.grayscale_p),
-                               crops_per_image=cfg.crops_per_image)
+                               crops_per_image=cfg.crops_per_image,
+                               foreground_bias=cfg.foreground_bias)
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True,
                               num_workers=cfg.num_workers)
     loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=cfg.cldice_weight)
@@ -270,6 +286,8 @@ def main() -> None:
     p.add_argument("--epochs", type=int, default=12)
     p.add_argument("--oversample", type=int, default=3)
     p.add_argument("--crops-per-image", type=int, default=1)
+    p.add_argument("--foreground-bias", type=float, default=0.0,
+                   help="probability a train crop must contain road pixels (bugs.md §3; 0 = uniform)")
     p.add_argument("--occlusion", choices=["standard", "heavy", "none"], default="standard",
                    help="occlusion augmentation strength (A8: 'heavy')")
     p.add_argument("--deepglobe-tol", type=float, default=0.005, help="max allowed DeepGlobe IoU drop vs v1")
@@ -300,7 +318,8 @@ def main() -> None:
         deepglobe_val=args.deepglobe_val, out_path=args.out,
         image_size=args.image_size, batch_size=args.batch_size, lr=args.lr,
         encoder_lr_scale=args.encoder_lr_scale, epochs=args.epochs, finetune_oversample=args.oversample,
-        crops_per_image=args.crops_per_image, occlusion=occlusion, grayscale_p=args.grayscale_p,
+        crops_per_image=args.crops_per_image, foreground_bias=args.foreground_bias,
+        occlusion=occlusion, grayscale_p=args.grayscale_p,
         cldice_weight=args.cldice_weight, num_workers=args.num_workers,
         deepglobe_iou_tolerance=args.deepglobe_tol, device=args.device, resume=args.resume,
     ))

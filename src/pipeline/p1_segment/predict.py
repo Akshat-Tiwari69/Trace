@@ -1,78 +1,136 @@
 """CLI: run the trained segmentation model on imagery → road mask (P1 inference).
 
-The inference half of P1: load a fine-tuned checkpoint (from the A4 notebook),
-predict a binary road mask for an image, and write it at the §4 contract path
+The inference half of P1: load a fine-tuned checkpoint, predict a binary road
+mask for an image, and write it at the §4 contract path
 ``data/interim/{aoi}_mask.png`` that P2 (Shaivi) consumes.
+
+:func:`run_inference` is the single shared path (A36) — both this CLI and
+``run_pipeline.segment()`` call it, so the two entry points can't drift.
 
 Example
 -------
     python -m src.pipeline.p1_segment.predict \
-        --image data/raw/panaji_tile.tif --checkpoint models/segformer_mit_b2_deepglobe.pt --aoi panaji
+        --image data/raw/panaji_tile.tif --checkpoint models/road_pan.pt --aoi panaji
 
-Reads a 3-channel RGB image (jpg/png/3-band tif via OpenCV). Multiband GeoTIFF
-imagery would need a band-selection reader — out of scope here.
+Reads jpg/png via OpenCV and GeoTIFF via rasterio (``read_image_any``, A26):
+1-band PAN is percentile-stretched to 3-channel grey, ≥3-band imagery uses the
+first three bands, and CRS/transform are kept for P2's alignment manifest.
 """
 
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
 
-from src.pipeline.p1_segment.model import load_checkpoint, predict_large, predict_large_prob
+from src.pipeline.p1_segment.model import (
+    DEPLOYED_RELEASE,
+    load_checkpoint,
+    predict_large,
+    predict_large_prob,
+)
 from src.pipeline.p1_segment.osm_mask import save_binary_png
-from src.pipeline.p1_segment.postprocess import postprocess_mask
+from src.pipeline.p1_segment.postprocess import add_postprocess_args, postprocess_mask
+
+_AOI_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
+
+
+def validate_aoi(aoi: str) -> str:
+    """Reject AOI ids that could produce weird/unsafe artifact paths (A36)."""
+    if not _AOI_RE.match(aoi):
+        raise SystemExit(
+            f"invalid --aoi {aoi!r}: must match ^[a-z0-9_-]{{1,64}}$ "
+            "(lowercase letters, digits, '_' and '-' only)"
+        )
+    return aoi
+
+
+def run_inference(
+    image_path: str | Path,
+    checkpoint: str | Path,
+    aoi: str,
+    interim_dir: str | Path = "data/interim",
+    *,
+    tile_size: int | None = None,
+    threshold: float | None = None,
+    blend: bool = True,
+    stride: int | None = None,
+    tta: bool = False,
+    device: str = "cpu",
+    postprocess: bool = False,
+    min_component_size: int = 50,
+    pp_open_radius: int = 0,
+    pp_close_radius: int = 0,
+    fill_holes: int = 0,
+) -> tuple[Path, float]:
+    """Shared P1 inference: image + checkpoint → ``data/interim/{aoi}_mask.png``.
+
+    ``tile_size``/``threshold`` default to the checkpoint's deploy settings
+    (its ``meta``), so a good model isn't hobbled by the wrong CLI values.
+    ``blend`` (default, A27) runs Hann-blended overlapping windows — no
+    tile-seam breaks; ``blend=False`` is the older non-overlapping tiling.
+    ``postprocess`` runs the A10 cleanup before writing. Returns
+    ``(mask_path, road_pixel_fraction)``.
+    """
+    validate_aoi(aoi)
+    from src.pipeline.p1_segment.raster_io import read_image_any, write_manifest
+
+    # A26: rasterio for GeoTIFFs (keeps CRS/transform; handles 1-band PAN), else cv2
+    image, transform, crs = read_image_any(image_path)
+
+    model, meta = load_checkpoint(checkpoint, map_location=device)
+    tile_size = tile_size if tile_size is not None else int(meta.get("image_size", 512))
+    threshold = threshold if threshold is not None else float(meta.get("threshold", 0.5))
+    if blend:
+        prob = predict_large_prob(model, image, tile_size=tile_size, stride=stride,
+                                  device=device, tta=tta)
+        mask = (prob >= threshold).astype("uint8")
+    else:
+        mask = predict_large(model, image, tile_size=tile_size,
+                             device=device, threshold=threshold, tta=tta)
+
+    if postprocess:
+        roads_before = mask.mean()
+        mask = postprocess_mask(mask, min_size=min_component_size,
+                                open_radius=pp_open_radius,
+                                close_radius=pp_close_radius, fill_holes=fill_holes)
+        print(f"[{aoi}] postprocess: roads {roads_before:.2%} -> {mask.mean():.2%}")
+
+    out = Path(interim_dir) / f"{aoi}_mask.png"
+    save_binary_png(mask, out)
+    manifest = write_manifest(aoi, interim_dir, transform, crs)  # A26: georef for P2
+    geo = f" · georeferenced ({crs}) -> {manifest}" if manifest else " · pixel-space (no CRS)"
+    print(f"[{aoi}] {image.shape[1]}x{image.shape[0]}px "
+          f"(encoder {meta.get('encoder', '?')}) -> roads {mask.mean():.2%} of pixels -> {out}{geo}")
+    return out, float(mask.mean())
 
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Predict a road mask from imagery using a trained checkpoint.")
-    p.add_argument("--image", required=True, help="RGB image/tile (jpg/png/3-band tif)")
-    p.add_argument("--checkpoint", required=True, help="trained .pt checkpoint from the A4 notebook")
+    p.add_argument("--image", required=True, help="imagery (jpg/png/GeoTIFF incl. 1-band PAN)")
+    p.add_argument("--checkpoint", required=True,
+                   help=f"trained .pt checkpoint (deployed: Release {DEPLOYED_RELEASE})")
     p.add_argument("--aoi", required=True, help="short AOI id -> data/interim/{aoi}_mask.png")
     p.add_argument("--tile-size", type=int, default=None, help="default: checkpoint meta image_size")
     p.add_argument("--threshold", type=float, default=None, help="default: checkpoint meta threshold")
     p.add_argument("--tta", action="store_true", help="D4 test-time augmentation (8× compute, ~+IoU)")
-    p.add_argument("--blend", action="store_true", help="A27: overlapped Hann-blended inference (no tile-seam breaks)")
+    p.add_argument("--no-blend", action="store_true",
+                   help="disable A27 Hann-blended inference (default ON); falls back to hard tiling")
+    p.add_argument("--blend", action="store_true", help=argparse.SUPPRESS)  # legacy no-op: blend is the default
     p.add_argument("--stride", type=int, default=None, help="blend window stride (default 75%% overlap)")
-    p.add_argument("--postprocess", action="store_true",
-                   help="A10 mask cleanup: drop tiny false components (+ optional close)")
-    p.add_argument("--min-component-size", type=int, default=50,
-                   help="min connected-component size in px to keep (with --postprocess)")
-    p.add_argument("--pp-close-radius", type=int, default=0,
-                   help="binary-close disk radius to bridge pin-hole gaps (with --postprocess)")
+    add_postprocess_args(p)
     p.add_argument("--interim-dir", default="data/interim")
     p.add_argument("--device", default="cpu")
     args = p.parse_args()
 
-    from src.pipeline.p1_segment.raster_io import read_image_any, write_manifest
-
-    # A26: rasterio for GeoTIFFs (keeps CRS/transform; handles 1-band PAN), else cv2
-    image, transform, crs = read_image_any(args.image)
-
-    model, meta = load_checkpoint(args.checkpoint, map_location=args.device)
-    # fall back to the checkpoint's deploy settings (like run_pipeline) so a good
-    # model isn't hobbled by the wrong CLI threshold/resolution
-    tile_size = args.tile_size if args.tile_size is not None else int(meta.get("image_size", 512))
-    threshold = args.threshold if args.threshold is not None else float(meta.get("threshold", 0.5))
-    if args.blend:
-        prob = predict_large_prob(model, image, tile_size=tile_size, stride=args.stride,
-                                  device=args.device, tta=args.tta)
-        mask = (prob >= threshold).astype("uint8")
-    else:
-        mask = predict_large(model, image, tile_size=tile_size,
-                             device=args.device, threshold=threshold, tta=args.tta)
-
-    if args.postprocess:
-        roads_before = mask.mean()
-        mask = postprocess_mask(mask, min_size=args.min_component_size,
-                                close_radius=args.pp_close_radius)
-        print(f"[{args.aoi}] postprocess: roads {roads_before:.2%} -> {mask.mean():.2%}")
-
-    out = Path(args.interim_dir) / f"{args.aoi}_mask.png"
-    save_binary_png(mask, out)
-    manifest = write_manifest(args.aoi, args.interim_dir, transform, crs)  # A26: georef for P2
-    geo = f" · georeferenced ({crs}) -> {manifest}" if manifest else " · pixel-space (no CRS)"
-    print(f"[{args.aoi}] {image.shape[1]}x{image.shape[0]}px "
-          f"(encoder {meta.get('encoder', '?')}) -> roads {mask.mean():.2%} of pixels -> {out}{geo}")
+    run_inference(
+        args.image, args.checkpoint, validate_aoi(args.aoi), args.interim_dir,
+        tile_size=args.tile_size, threshold=args.threshold,
+        blend=not args.no_blend, stride=args.stride, tta=args.tta, device=args.device,
+        postprocess=args.postprocess, min_component_size=args.min_component_size,
+        pp_open_radius=args.pp_open_radius, pp_close_radius=args.pp_close_radius,
+        fill_holes=args.fill_holes,
+    )
 
 
 if __name__ == "__main__":
