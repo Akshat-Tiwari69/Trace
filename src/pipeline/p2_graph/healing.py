@@ -239,6 +239,59 @@ def _polyline_length(points: list[list[float]]) -> float:
     return float(np.hypot(*np.diff(arr, axis=0).T).sum())
 
 
+def _filter_crossing_bridges(
+    graph: "nx.Graph", bridges: list[Bridge]
+) -> tuple[list[Bridge], int]:
+    """Drop candidate bridges whose straight segment crosses an existing road.
+
+    Distance + angle alone can't tell a real gap from a frontage road running
+    parallel to a highway (bugs.md §4): a bridge that jumps *over* an unrelated
+    road link is a phantom route that inflates measured resilience. We reject any
+    candidate whose straight u→v segment ``crosses`` an existing edge it is not
+    incident to (touching at a shared endpoint is fine). An STRtree keeps this
+    near-linear in the number of candidates. Returns ``(kept, n_rejected)``.
+    """
+    from shapely.geometry import LineString
+    from shapely.strtree import STRtree
+
+    edge_lines: list = []
+    edge_ends: list[tuple[int, int]] = []
+    for u, v, data in graph.edges(data=True):
+        geom = data.get("geometry")
+        if geom and len(geom) >= 2:
+            edge_lines.append(LineString(geom))
+        else:
+            edge_lines.append(LineString([
+                (graph.nodes[u]["x"], graph.nodes[u]["y"]),
+                (graph.nodes[v]["x"], graph.nodes[v]["y"]),
+            ]))
+        edge_ends.append((u, v))
+    if not edge_lines:
+        return bridges, 0
+
+    tree = STRtree(edge_lines)
+    kept: list[Bridge] = []
+    rejected = 0
+    for b in bridges:
+        seg = LineString([
+            (graph.nodes[b.u]["x"], graph.nodes[b.u]["y"]),
+            (graph.nodes[b.v]["x"], graph.nodes[b.v]["y"]),
+        ])
+        crosses = False
+        for idx in tree.query(seg):
+            eu, ev = edge_ends[int(idx)]
+            if b.u in (eu, ev) or b.v in (eu, ev):
+                continue  # incident edge — sharing an endpoint is expected
+            if seg.crosses(edge_lines[int(idx)]):
+                crosses = True
+                break
+        if crosses:
+            rejected += 1
+        else:
+            kept.append(b)
+    return kept, rejected
+
+
 # --------------------------------------------------------------------------- #
 # Heal
 # --------------------------------------------------------------------------- #
@@ -251,6 +304,7 @@ class HealReport:
     largest_cc_before: int
     largest_cc_after: int
     bridges_added: int
+    bridges_rejected_crossing: int = 0  # candidates dropped for crossing a real road (§4)
 
     @property
     def connectivity_ratio(self) -> float:
@@ -284,6 +338,8 @@ def heal_graph(
     bridges = find_candidate_bridges(
         graph, comps_before, gap_max_m, angle_max_deg, angle_penalty_factor
     )
+    # Reject bridges that would jump over an existing road (false-bridge guard, §4).
+    bridges, rejected_crossing = _filter_crossing_bridges(graph, bridges)
     bridges.sort(key=lambda b: b.score)
 
     uf = UnionFind(list(graph.nodes))
@@ -321,6 +377,7 @@ def heal_graph(
         largest_cc_before=largest_before,
         largest_cc_after=largest_after,
         bridges_added=added,
+        bridges_rejected_crossing=rejected_crossing,
     )
     return graph, report
 

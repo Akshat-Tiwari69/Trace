@@ -56,12 +56,20 @@ def global_efficiency(
     """
     import networkx as nx
 
+    from src.pipeline.p3_analysis.criticality import auto_k
+
     if k is not None and k <= 0:
         raise ValueError("k must be a positive sample size (or None for exact)")
 
     n = graph.number_of_nodes()
     if n < 2:
         return 0.0
+
+    # Auto-sample above the node threshold when the caller didn't fix sources/k,
+    # so a city-scale ablation click stays responsive (bugs.md §4). Small graphs
+    # (the committed demo) stay exact, so their numbers never drift.
+    if sources is None:
+        k = auto_k(graph, k)
 
     nodes = list(graph.nodes)
     if sources is not None:

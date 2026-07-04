@@ -44,6 +44,26 @@ def mask_to_skeleton(mask01: np.ndarray) -> np.ndarray:
     return skeletonize(binary)
 
 
+def mask_to_skeleton_with_distance(mask01: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Skeleton + a pixel distance-to-background field for road-width recovery.
+
+    Returns ``(skeleton, distance)`` where ``distance[r, c]`` is the Euclidean
+    distance from a road pixel to the nearest background pixel — i.e. the road
+    **half-width** at the centreline. Sampled along each edge in
+    :func:`skeleton_to_graph` to populate ``width_m`` (bugs.md §4).
+
+    We keep ``skeletonize`` for the topology (the validated S3/S4/S5 graph) and
+    take the distance transform of the mask separately, rather than swapping to
+    ``medial_axis`` — same width signal, zero change to the graph structure.
+    """
+    from scipy.ndimage import distance_transform_edt
+
+    if mask01.ndim != 2:
+        raise ValueError("mask must be 2-D (H×W)")
+    binary = np.asarray(mask01) > 0
+    return mask_to_skeleton(binary), distance_transform_edt(binary)
+
+
 def _classify(degree: int) -> str:
     """Map a node's degree to its schema ``type``."""
     if degree == 1:
@@ -55,6 +75,7 @@ def skeleton_to_graph(
     skeleton: np.ndarray,
     transform: "Affine | None" = None,
     resolution_m: float = 1.0,
+    distance: np.ndarray | None = None,
 ) -> "nx.Graph":
     """Build a clean, **metric** NetworkX graph from a skeleton image.
 
@@ -68,14 +89,19 @@ def skeleton_to_graph(
         coordinates are pixels scaled by ``resolution_m``.
     resolution_m :
         Ground sampling distance, used only in the no-transform fallback.
+    distance :
+        Optional pixel distance-to-background field (``H×W``, from
+        :func:`mask_to_skeleton_with_distance`). When given, each edge gets a
+        ``width_m`` attribute = mean road half-width along its centreline × 2 ×
+        pixel size. Purely additive — the topology is unchanged.
 
     Returns
     -------
     nx.Graph
         Nodes carry ``x, y`` (metric), ``degree, type``; edges carry
-        ``length_m`` (metres), ``geometry`` (a metric ``[[x, y], ...]`` polyline)
-        and ``is_bridged=False``. Reproject to lon/lat with
-        :func:`reproject_graph_to_wgs84` before writing for the map.
+        ``length_m`` (metres), ``geometry`` (a metric ``[[x, y], ...]`` polyline),
+        ``is_bridged=False`` and (if ``distance`` given) ``width_m``. Reproject to
+        lon/lat with :func:`reproject_graph_to_wgs84` before writing for the map.
     """
     import networkx as nx
     import sknw
@@ -88,12 +114,25 @@ def skeleton_to_graph(
     # Full MultiGraph support end-to-end is tracked in bugs.md §4 (L effort).
     raw = sknw.build_sknw(skel, multi=True)
 
+    # Pixel size (metres) for width: square-pixel UTM grid, else the GSD.
+    pixel_size_m = abs(float(transform[0])) if transform is not None else float(resolution_m)
+    dist = np.asarray(distance) if distance is not None else None
+
     def pixel_to_metric(row: float, col: float) -> tuple[float, float]:
         """Pixel (row, col) → metric world (x, y), or scaled pixels if no grid."""
         if transform is not None:
             x, y = transform * (col + 0.5, row + 0.5)  # affine takes (col, row)
             return float(x), float(y)
         return col * resolution_m, row * resolution_m
+
+    def edge_width_m(pts: np.ndarray) -> float | None:
+        """Mean road width (metres) sampled from the distance field along ``pts``."""
+        if dist is None or len(pts) == 0:
+            return None
+        rows = np.clip(np.round(pts[:, 0]).astype(int), 0, dist.shape[0] - 1)
+        cols = np.clip(np.round(pts[:, 1]).astype(int), 0, dist.shape[1] - 1)
+        half_width_px = float(dist[rows, cols].mean())  # distance-to-edge = half width
+        return round(2.0 * half_width_px * pixel_size_m, 3)
 
     graph = nx.Graph()
     for node_id, data in raw.nodes(data=True):
@@ -123,13 +162,11 @@ def skeleton_to_graph(
             parallel_dropped += 1
             if length_m >= float(graph.edges[ui, vi].get("length_m", 0.0)):
                 continue
-        graph.add_edge(
-            ui,
-            vi,
-            length_m=length_m,
-            geometry=metric,
-            is_bridged=False,
-        )
+        attrs = {"length_m": length_m, "geometry": metric, "is_bridged": False}
+        width = edge_width_m(pts)
+        if width is not None:
+            attrs["width_m"] = width
+        graph.add_edge(ui, vi, **attrs)
 
     if parallel_dropped:
         print(f"[skeleton_graph] WARNING: {parallel_dropped} parallel skeleton branch(es) "

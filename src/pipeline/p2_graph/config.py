@@ -83,6 +83,16 @@ class GraphConfig:
         return self.interim_dir / self.aoi / "manifest.json"
 
     @property
+    def provenance_path(self) -> Path:
+        """P1 provenance record (checkpoint/threshold/commit) written by inference."""
+        return self.interim_dir / self.aoi / "provenance.json"
+
+    @property
+    def processed_provenance_path(self) -> Path:
+        """Provenance copied next to the processed graph/criticality artifacts."""
+        return self.processed_dir / f"{self.aoi}_provenance.json"
+
+    @property
     def graphml_path(self) -> Path:
         """Output contract: the healed routable graph (GraphML)."""
         return self.processed_dir / f"{self.aoi}_graph.graphml"

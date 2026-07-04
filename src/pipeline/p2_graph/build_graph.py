@@ -30,7 +30,7 @@ from src.pipeline.p2_graph.simplify import (
     simplify_polylines,
 )
 from src.pipeline.p2_graph.skeleton_graph import (
-    mask_to_skeleton,
+    mask_to_skeleton_with_distance,
     prune_degenerate_edges,
     reproject_graph_to_wgs84,
     skeleton_to_graph,
@@ -76,8 +76,9 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
               "length_m and resilience numbers are not true metres unless "
               "--resolution-m matches the imagery's real GSD")
 
-    skeleton = mask_to_skeleton(mask)
-    graph = skeleton_to_graph(skeleton, transform=transform, resolution_m=cfg.resolution_m)
+    skeleton, distance = mask_to_skeleton_with_distance(mask)
+    graph = skeleton_to_graph(skeleton, transform=transform, resolution_m=cfg.resolution_m,
+                              distance=distance)
     prune_degenerate_edges(graph, cfg.min_edge_len_m)  # drop sub-pixel/self-loop edges
 
     graph, report = heal_graph(
@@ -94,7 +95,15 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
         "components_before": report.components_before,
         "components_after": report.components_after,
         "bridges_added": report.bridges_added,
+        "bridges_rejected_crossing": report.bridges_rejected_crossing,
     }
+
+    # Carry the P1 provenance (checkpoint/threshold/commit) into the graph so the
+    # graphml/geojson name the exact model that produced this network (§5A).
+    from src.pipeline.p1_segment.provenance import read_provenance
+    provenance = read_provenance(cfg.provenance_path)
+    if provenance is not None:
+        graph.graph["provenance"] = provenance
 
     simplify_report = None
     if cfg.simplify:

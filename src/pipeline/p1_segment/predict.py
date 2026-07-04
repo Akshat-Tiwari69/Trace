@@ -99,6 +99,13 @@ def run_inference(
     out = Path(interim_dir) / f"{aoi}_mask.png"
     save_binary_png(mask, out)
     manifest = write_manifest(aoi, interim_dir, transform, crs)  # A26: georef for P2
+
+    # Provenance (bugs.md §5A): record which checkpoint/threshold/commit made this
+    # mask, alongside it, so P2/P3 can carry the lineage into every artifact.
+    from src.pipeline.p1_segment.provenance import build_provenance, write_provenance
+    prov = build_provenance(checkpoint, meta, threshold)
+    write_provenance(Path(interim_dir) / aoi / "provenance.json", prov)
+
     geo = f" · georeferenced ({crs}) -> {manifest}" if manifest else " · pixel-space (no CRS)"
     print(f"[{aoi}] {image.shape[1]}x{image.shape[0]}px "
           f"(encoder {meta.get('encoder', '?')}) -> roads {mask.mean():.2%} of pixels -> {out}{geo}")
