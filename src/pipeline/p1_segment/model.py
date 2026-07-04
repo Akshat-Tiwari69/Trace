@@ -302,6 +302,39 @@ def predict_large_prob(
 
 
 @torch.no_grad()
+def predict_large_raster(
+    model: torch.nn.Module,
+    image_path,
+    tile_size: int = 512,
+    threshold: float = 0.5,
+    device: str = "cpu",
+    tta: bool = False,
+    window_px: int = 2048,
+    overlap_px: int = 256,
+) -> np.ndarray:
+    """Binary road mask for a raster too large to hold in RAM (bugs.md §5H).
+
+    Streams overlapping ``window_px`` windows off disk (rasterio/PIL windowed
+    reads), runs the blended :func:`predict_large_prob` on each, thresholds it,
+    and OR-merges the binary result into a single full-size ``uint8`` mask — the
+    only full-resolution array ever allocated. Roads are sparse, so an OR at the
+    window overlaps closes seams without dropping links. Returns the ``{0,1}``
+    mask for the whole raster.
+    """
+    from src.pipeline.p1_segment.raster_io import iter_windows, raster_dimensions
+
+    height, width = raster_dimensions(image_path)
+    mask = np.zeros((height, width), np.uint8)
+    for window, r0, c0 in iter_windows(image_path, window_px=window_px, overlap_px=overlap_px):
+        prob = predict_large_prob(model, window, tile_size=tile_size, device=device, tta=tta)
+        wmask = (prob >= threshold).astype(np.uint8)
+        h, w = wmask.shape
+        region = mask[r0 : r0 + h, c0 : c0 + w]
+        np.bitwise_or(region, wmask, out=region)  # merge; keeps roads at seams
+    return mask
+
+
+@torch.no_grad()
 def predict_large(
     model: torch.nn.Module,
     image: np.ndarray,

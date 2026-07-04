@@ -1262,6 +1262,59 @@ def render_live_detection() -> None:
     col2.image(mask, caption=f"Road mask ({thr})", use_column_width=True)
     col3.image(overlay, caption="Overlay", use_column_width=True)
 
+    _render_upload_analysis(np.asarray(orig), np.asarray(mask))
+
+
+def _render_upload_analysis(orig_rgb: np.ndarray, mask_gray: np.ndarray) -> None:
+    """Close the loop (bugs.md §2B): mask → graph → resilience, shown in-app.
+
+    Runs the CPU P2→P3 pipeline on the extracted mask so an uploaded image gets a
+    *real* resilience analysis — not just a mask preview. Image-space (the upload
+    isn't georeferenced), so the network is drawn over the user's own image.
+    """
+    from src.app.upload_analysis import analyze_mask, render_graph_overlay
+
+    st.markdown("#### Network resilience of your imagery")
+    gsd = st.slider(
+        "Approx. ground resolution (m/pixel)", 0.1, 2.0, 0.5, 0.05,
+        help="Uploads aren't georeferenced — this scales road lengths. ~0.5 m/px "
+             "matches neighbourhood-zoom satellite captures.",
+    )
+    binary = (mask_gray > 0).astype(np.uint8)
+    try:
+        with st.spinner("Building the routable graph and scoring resilience…"):
+            result = analyze_mask(binary, resolution_m=gsd)
+    except ValueError as exc:
+        st.info(str(exc))
+        log_event("upload_analysis_empty")
+        return
+
+    retained = result.resilience_index
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Junctions", f"{result.n_nodes:,}")
+    m2.metric("Road links", f"{result.n_edges:,}")
+    m3.metric(
+        "Efficiency if #1 junction fails", f"{retained:.0%}",
+        delta=f"-{1 - retained:.0%}", delta_color="normal",
+        help="Global efficiency retained after the single most critical junction is lost.",
+    )
+    st.progress(retained, text=f"Network efficiency retained under worst single failure: {retained:.0%}")
+
+    fig = render_graph_overlay(orig_rgb, result)
+    st.pyplot(fig, use_container_width=True)
+    st.caption(
+        f"{result.summary['critical_junctions']} critical junctions · "
+        f"{result.summary['articulation_points']} single-points-of-failure · "
+        "the ringed junction is the worst chokepoint. Lengths assume "
+        f"~{gsd:g} m/pixel (no georeference on uploads)."
+    )
+    st.dataframe(
+        result.criticality[["rank", "node_id", "betweenness", "is_critical", "is_articulation"]].head(10),
+        hide_index=True, use_container_width=True,
+    )
+    log_event("upload_analysis_ok", nodes=result.n_nodes, edges=result.n_edges,
+              ri=round(retained, 3))
+
 
 def main() -> None:
     """Render the interactive F2 dashboard."""

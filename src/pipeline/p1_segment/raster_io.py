@@ -55,6 +55,84 @@ def imread_gray(path: str | Path) -> np.ndarray:
     return img
 
 
+def raster_dimensions(path: str | Path) -> tuple[int, int]:
+    """Return ``(height, width)`` from image metadata **without loading pixels**.
+
+    Used to decide whether an AOI is large enough to need the windowed inference
+    path (bugs.md §5H) before we ever allocate a full-resolution array.
+    """
+    path = Path(path)
+    if path.suffix.lower() in _GEO_SUFFIXES:
+        import rasterio
+
+        with rasterio.open(path) as src:
+            return int(src.height), int(src.width)
+    from PIL import Image
+
+    with Image.open(path) as im:  # PIL reads the header only, not the pixels
+        w, h = im.size
+    return int(h), int(w)
+
+
+def raster_georef(path: str | Path) -> tuple[object, str | None]:
+    """Return ``(transform, crs)`` from metadata without loading pixels.
+
+    Lets the windowed inference path (bugs.md §5H) write the same alignment
+    manifest as the whole-image path, without ever materialising the raster.
+    """
+    path = Path(path)
+    if path.suffix.lower() in _GEO_SUFFIXES:
+        import rasterio
+
+        with rasterio.open(path) as src:
+            return src.transform, (str(src.crs) if src.crs else None)
+    return None, None
+
+
+def iter_windows(
+    path: str | Path, window_px: int = 2048, overlap_px: int = 256
+):
+    """Yield overlapping RGB windows of a (possibly huge) raster, lazily.
+
+    Reads one ``window_px`` tile at a time — GeoTIFFs via rasterio windowed reads
+    (never materialising the whole image), other formats via a PIL crop — so a
+    100 km² AOI streams through inference instead of OOMing the reader
+    (bugs.md §5H). Yields ``(rgb_uint8 HxWx3, row_off, col_off)``; the caller
+    stitches them into the full-size (binary, 1-byte/px) output mask. Windows
+    overlap by ``overlap_px`` so the per-window Hann blending seams are absorbed.
+    """
+    path = Path(path)
+    height, width = raster_dimensions(path)
+    step = max(1, window_px - overlap_px)
+    row_offs = sorted({*range(0, max(1, height - window_px + 1), step), max(0, height - window_px)})
+    col_offs = sorted({*range(0, max(1, width - window_px + 1), step), max(0, width - window_px)})
+
+    if path.suffix.lower() in _GEO_SUFFIXES:
+        import rasterio
+        from rasterio.windows import Window
+
+        with rasterio.open(path) as src:
+            for r0 in row_offs:
+                for c0 in col_offs:
+                    h = min(window_px, height - r0)
+                    w = min(window_px, width - c0)
+                    bands = src.read(window=Window(c0, r0, w, h))  # (C, h, w)
+                    rgb = to_rgb8(np.repeat(bands, 3, axis=0) if bands.shape[0] == 1 else bands)
+                    yield rgb, r0, c0
+        return
+
+    from PIL import Image
+
+    with Image.open(path) as im:
+        im = im.convert("RGB")
+        for r0 in row_offs:
+            for c0 in col_offs:
+                h = min(window_px, height - r0)
+                w = min(window_px, width - c0)
+                crop = im.crop((c0, r0, c0 + w, r0 + h))
+                yield np.asarray(crop), r0, c0
+
+
 def read_image_any(path: str | Path) -> tuple[np.ndarray, object, str | None]:
     """Read imagery → ``(rgb_uint8 HxWx3, transform, crs)``.
 

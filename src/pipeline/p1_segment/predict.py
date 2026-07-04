@@ -28,11 +28,16 @@ from src.pipeline.p1_segment.model import (
     load_checkpoint,
     predict_large,
     predict_large_prob,
+    predict_large_raster,
 )
 from src.pipeline.p1_segment.osm_mask import save_binary_png
 from src.pipeline.p1_segment.postprocess import add_postprocess_args, postprocess_mask
 
 _AOI_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
+
+# Above this size (either dimension), stream the raster in windows rather than
+# loading it whole — the whole-RGB-float image is the OOM risk at pilot scale (§5H).
+WINDOWED_THRESHOLD_PX = 4096
 
 
 def validate_aoi(aoi: str) -> str:
@@ -62,6 +67,8 @@ def run_inference(
     pp_open_radius: int = 0,
     pp_close_radius: int = 0,
     fill_holes: int = 0,
+    windowed: bool | None = None,
+    window_px: int = 2048,
 ) -> tuple[Path, float]:
     """Shared P1 inference: image + checkpoint → ``data/interim/{aoi}_mask.png``.
 
@@ -69,25 +76,46 @@ def run_inference(
     (its ``meta``), so a good model isn't hobbled by the wrong CLI values.
     ``blend`` (default, A27) runs Hann-blended overlapping windows — no
     tile-seam breaks; ``blend=False`` is the older non-overlapping tiling.
-    ``postprocess`` runs the A10 cleanup before writing. Returns
+    ``postprocess`` runs the A10 cleanup before writing.
+
+    ``windowed`` streams a large raster off disk in ``window_px`` tiles instead
+    of loading it whole (bugs.md §5H) — the only full-size array held is the
+    binary mask. ``None`` (default) auto-enables it once the raster exceeds
+    ``WINDOWED_THRESHOLD_PX`` in either dimension. Returns
     ``(mask_path, road_pixel_fraction)``.
     """
     validate_aoi(aoi)
-    from src.pipeline.p1_segment.raster_io import read_image_any, write_manifest
-
-    # A26: rasterio for GeoTIFFs (keeps CRS/transform; handles 1-band PAN), else cv2
-    image, transform, crs = read_image_any(image_path)
+    from src.pipeline.p1_segment.raster_io import (
+        raster_dimensions,
+        raster_georef,
+        read_image_any,
+        write_manifest,
+    )
 
     model, meta = load_checkpoint(checkpoint, map_location=device)
     tile_size = tile_size if tile_size is not None else int(meta.get("image_size", 512))
     threshold = threshold if threshold is not None else float(meta.get("threshold", 0.5))
-    if blend:
-        prob = predict_large_prob(model, image, tile_size=tile_size, stride=stride,
-                                  device=device, tta=tta)
-        mask = (prob >= threshold).astype("uint8")
+
+    height, width = raster_dimensions(image_path)
+    if windowed is None:
+        windowed = max(height, width) > WINDOWED_THRESHOLD_PX
+
+    if windowed:
+        # Stream windows off disk — never materialise the full RGB image.
+        transform, crs = raster_georef(image_path)
+        mask = predict_large_raster(model, image_path, tile_size=tile_size, threshold=threshold,
+                                    device=device, tta=tta, window_px=window_px)
+        print(f"[{aoi}] windowed inference over {width}x{height}px in {window_px}px tiles")
     else:
-        mask = predict_large(model, image, tile_size=tile_size,
-                             device=device, threshold=threshold, tta=tta)
+        # A26: rasterio for GeoTIFFs (keeps CRS/transform; handles 1-band PAN), else cv2
+        image, transform, crs = read_image_any(image_path)
+        if blend:
+            prob = predict_large_prob(model, image, tile_size=tile_size, stride=stride,
+                                      device=device, tta=tta)
+            mask = (prob >= threshold).astype("uint8")
+        else:
+            mask = predict_large(model, image, tile_size=tile_size,
+                                 device=device, threshold=threshold, tta=tta)
 
     if postprocess:
         roads_before = mask.mean()
@@ -107,7 +135,7 @@ def run_inference(
     write_provenance(Path(interim_dir) / aoi / "provenance.json", prov)
 
     geo = f" · georeferenced ({crs}) -> {manifest}" if manifest else " · pixel-space (no CRS)"
-    print(f"[{aoi}] {image.shape[1]}x{image.shape[0]}px "
+    print(f"[{aoi}] {width}x{height}px "
           f"(encoder {meta.get('encoder', '?')}) -> roads {mask.mean():.2%} of pixels -> {out}{geo}")
     return out, float(mask.mean())
 
@@ -125,6 +153,11 @@ def main() -> None:
                    help="disable A27 Hann-blended inference (default ON); falls back to hard tiling")
     p.add_argument("--blend", action="store_true", help=argparse.SUPPRESS)  # legacy no-op: blend is the default
     p.add_argument("--stride", type=int, default=None, help="blend window stride (default 75%% overlap)")
+    p.add_argument("--windowed", dest="windowed", action="store_true", default=None,
+                   help=f"stream the raster in windows (auto-enabled above {WINDOWED_THRESHOLD_PX}px, §5H)")
+    p.add_argument("--no-windowed", dest="windowed", action="store_false",
+                   help="force whole-image inference even for a large raster")
+    p.add_argument("--window-px", type=int, default=2048, help="window size for --windowed inference")
     add_postprocess_args(p)
     p.add_argument("--interim-dir", default="data/interim")
     p.add_argument("--device", default="cpu")
@@ -136,7 +169,7 @@ def main() -> None:
         blend=not args.no_blend, stride=args.stride, tta=args.tta, device=args.device,
         postprocess=args.postprocess, min_component_size=args.min_component_size,
         pp_open_radius=args.pp_open_radius, pp_close_radius=args.pp_close_radius,
-        fill_holes=args.fill_holes,
+        fill_holes=args.fill_holes, windowed=args.windowed, window_px=args.window_px,
     )
 
 
