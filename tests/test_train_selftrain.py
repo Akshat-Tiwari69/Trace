@@ -18,7 +18,15 @@ def _write_pairs(folder, n, size=64):
 
 
 def test_unlabeled_dataset_yields_two_perturbed_views(tmp_path):
+    import random
+
     from src.pipeline.p1_segment.train_selftrain import UnlabeledTileDataset, list_images
+
+    # Seed so the probabilistic 'strong' photometric augmentation reliably fires —
+    # the perturbation has p<1, so an unlucky global RNG state (test ordering) could
+    # otherwise leave the two views identical and flake this assertion.
+    random.seed(0)
+    np.random.seed(0)
 
     d = tmp_path / "corpus"
     _write_pairs(d, 3, size=80)

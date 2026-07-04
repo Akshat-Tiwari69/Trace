@@ -5,9 +5,12 @@ from dataclasses import dataclass
 import io
 from itertools import combinations
 import json
+import logging
 from math import inf, isfinite
 import os
 from pathlib import Path
+import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -336,8 +339,15 @@ def build_map(
     show_healed: bool,
     show_spof: bool,
     failure_mode: str,
+    center: list[float] | None = None,
+    zoom: float | None = None,
 ) -> folium.Map:
-    """Build the map with criticality, selection, failure, and reroute states."""
+    """Build the map with criticality, selection, failure, and reroute states.
+
+    ``center``/``zoom`` (when both given) restore the user's last viewport so the
+    map doesn't snap back to the whole-network bounds on every rerun — the
+    canonical streamlit-folium round-trip (bugs.md §2C).
+    """
     nodes, edges = split_features(features)
     scores = criticality.set_index("node_id")["betweenness"].to_dict()
     maximum = max(float(criticality["betweenness"].max()), 1e-9)
@@ -352,16 +362,19 @@ def build_map(
     disabled_nodes = simulation.disabled_nodes if simulation else ()
 
     road_map = folium.Map(
-        location=[nodes.geometry.y.mean(), nodes.geometry.x.mean()],
-        zoom_start=15,  # fallback if the bounds below are degenerate
+        location=center or [nodes.geometry.y.mean(), nodes.geometry.x.mean()],
+        zoom_start=zoom or 15,  # fallback if the bounds below are degenerate
         tiles=None,
         control_scale=True,
     )
-    min_x, min_y, max_x, max_y = (float(value) for value in nodes.total_bounds)
-    if all(isfinite(value) for value in (min_x, min_y, max_x, max_y)) and (
-        min_x < max_x or min_y < max_y
-    ):
-        road_map.fit_bounds([[min_y, min_x], [max_y, max_x]])
+    # Only auto-fit to the whole network when we have no remembered viewport —
+    # otherwise honour the user's last pan/zoom (bugs.md §2C).
+    if center is None or zoom is None:
+        min_x, min_y, max_x, max_y = (float(value) for value in nodes.total_bounds)
+        if all(isfinite(value) for value in (min_x, min_y, max_x, max_y)) and (
+            min_x < max_x or min_y < max_y
+        ):
+            road_map.fit_bounds([[min_y, min_x], [max_y, max_x]])
     folium.TileLayer("CartoDB dark_matter", name="Dark map").add_to(road_map)
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
@@ -722,21 +735,44 @@ def render_panel(
             )
         )
 
+    current_closures = st.session_state.get("disabled_nodes", ())
+    single_active = current_closures and st.session_state.get("ablation_source") == "single"
+    add_more = bool(single_active)  # once one junction is down, the button accumulates
+
     simulate_column, reset_column = st.columns(2)
     if simulate_column.button(
-        "Simulate closure",
+        "Add closure" if add_more else "Simulate closure",
         type="primary",
         use_container_width=True,
-        help="Disable the selected junction and recompute routes and resilience.",
+        help=("Add the selected junction to the active closures (compound disaster)."
+              if add_more else
+              "Disable the selected junction and recompute routes and resilience."),
     ):
-        st.session_state["disabled_nodes"] = (int(selected),)
+        # Accumulate closures so users can model a compound disaster (§2D).
+        base = set(current_closures) if add_more else set()
+        st.session_state["disabled_nodes"] = tuple(sorted(base | {int(selected)}))
         st.session_state["ablation_source"] = "single"
+        log_event("simulate_closure", n_closed=len(base) + 1, compound=add_more)
         st.rerun()
     if reset_column.button("Reset", use_container_width=True):
         st.session_state["disabled_nodes"] = ()
         st.session_state["ablation_source"] = None
         st.session_state["reset_counter"] = st.session_state.get("reset_counter", 0) + 1
+        st.session_state.pop("map_center", None)  # reframe to the whole network
+        st.session_state.pop("map_zoom", None)
         st.rerun()
+
+    # Active-closure chips: each removable so a compound scenario can be pared back.
+    if single_active and len(current_closures) >= 1:
+        st.caption("Active closures — click to remove:")
+        chip_cols = st.columns(min(len(current_closures), 4))
+        for i, node in enumerate(current_closures):
+            if chip_cols[i % len(chip_cols)].button(f"✕ {node}", key=f"rm_closure_{node}"):
+                remaining = tuple(n for n in current_closures if n != node)
+                st.session_state["disabled_nodes"] = remaining
+                if not remaining:
+                    st.session_state["ablation_source"] = None
+                st.rerun()
 
     layer_one, layer_two, layer_three = st.columns(3)
     layer_one.checkbox("Critical nodes", value=True, key="show_critical")
@@ -782,9 +818,36 @@ def render_panel(
         )
 
     st.subheader("Top critical junctions")
-    top_nodes = critical_nodes[["rank", "node_id", "betweenness"]].head(5).copy()
-    top_nodes["betweenness"] = top_nodes["betweenness"].map(lambda value: f"{value:.3f}")
-    st.dataframe(top_nodes, hide_index=True, use_container_width=True)
+    # Numeric scores (not stringified) so sorting is true-numeric and the score
+    # bar renders; clicking a row selects that junction and recentres the map (§2D).
+    ranked = critical_nodes[["rank", "node_id", "betweenness"]].copy()
+    max_bw = max(float(ranked["betweenness"].max()), 1e-9)
+    table_event = st.dataframe(
+        ranked,
+        hide_index=True,
+        use_container_width=True,
+        height=240,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="rank_table",
+        column_config={
+            "betweenness": st.column_config.ProgressColumn(
+                "Score", min_value=0.0, max_value=max_bw, format="%.3f",
+            ),
+        },
+    )
+    selected_rows = table_event.selection.rows if table_event and table_event.selection else []
+    if selected_rows:
+        picked = int(ranked.iloc[selected_rows[0]]["node_id"])
+        if picked != int(st.session_state.get("selected_node", -1)):
+            st.session_state["selected_node"] = picked
+            # Recentre on the picked junction (the viewport round-trip keeps zoom).
+            match = nodes[nodes["node_id"].astype(int) == picked]
+            if not match.empty:
+                st.session_state["map_center"] = [
+                    float(match.geometry.y.iloc[0]), float(match.geometry.x.iloc[0]),
+                ]
+            st.rerun()
     st.caption(f"Network: {len(nodes):,} junctions · {len(edges):,} road links")
 
     st.divider()
@@ -967,6 +1030,23 @@ def apply_design_theme() -> None:
     )
 
 
+# Minimal-viable observability (bugs.md §5F): structured logs to stderr (picked up
+# by journald on the deployed box) + a lightweight usage counter, so "how many
+# people used it / how many uploads failed" is answerable without extra infra.
+log = logging.getLogger("trace.app")
+if not log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [trace.app] %(message)s"))
+    log.addHandler(_h)
+    log.setLevel(logging.INFO)
+
+
+def log_event(event: str, **fields: object) -> None:
+    """Emit one structured usage/telemetry line (event + key=value fields)."""
+    extra = " ".join(f"{k}={v}" for k, v in fields.items())
+    log.info("%s %s", event, extra)
+
+
 MODAL_SEG_URL = os.environ.get("MODAL_SEG_URL")
 MAX_UPLOAD_MB = 20  # keep in sync with [server] maxUploadSize in .streamlit/config.toml
 UPLOAD_GUIDANCE = (
@@ -977,14 +1057,19 @@ UPLOAD_GUIDANCE = (
 )
 
 
-def _call_modal_seg(image_bytes: bytes) -> tuple[bytes, float | None]:
-    """POST an image to the Modal GPU endpoint; return (mask PNG bytes, threshold)."""
-    body = json.dumps(
-        {
-            "image_b64": base64.b64encode(image_bytes).decode(),
-            "key": os.environ.get("MODAL_SEG_KEY", ""),
-        }
-    ).encode()
+# Bound concurrent GPU calls so a burst of uploads can't pin every Streamlit
+# worker thread on a 120 s blocking request (bugs.md §5C). A cache hit never
+# reaches here, so only genuine inference calls consume a slot.
+_MODAL_MAX_INFLIGHT = 2
+_modal_semaphore = threading.BoundedSemaphore(_MODAL_MAX_INFLIGHT)
+
+
+class EndpointBusyError(RuntimeError):
+    """Raised when all in-flight GPU slots are taken (surface a 'retry' message)."""
+
+
+def _post_modal_once(body: bytes) -> dict:
+    """One POST to the Modal endpoint → parsed JSON (raises on transport/HTTP errors)."""
     req = urllib.request.Request(
         MODAL_SEG_URL, data=body, headers={"Content-Type": "application/json"}
     )
@@ -994,9 +1079,56 @@ def _call_modal_seg(image_bytes: bytes) -> tuple[bytes, float | None]:
             raise RuntimeError(f"endpoint returned HTTP {status}")
         raw = resp.read()
     try:
-        out = json.loads(raw)
+        return json.loads(raw)
     except json.JSONDecodeError as error:
         raise RuntimeError("endpoint returned a non-JSON response") from error
+
+
+def _is_retryable(error: Exception) -> bool:
+    """Cold-start / transient failures are worth a retry; 4xx client errors are not."""
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code >= 500  # 5xx transient; 401/413/etc. won't fix themselves
+    if isinstance(error, urllib.error.URLError):  # incl. socket timeout
+        return True
+    return False
+
+
+def _call_modal_seg(image_bytes: bytes, retries: int = 2) -> tuple[bytes, float | None]:
+    """POST an image to the Modal GPU endpoint; return (mask PNG bytes, threshold).
+
+    Retries transient/cold-start failures with a short backoff (a scaled-to-zero
+    container may 5xx or time out on the first hit), but never retries a 4xx —
+    those are deterministic (bad key, oversized image). Concurrency-bounded so
+    simultaneous uploads queue rather than starve the app (bugs.md §5C/§6).
+    """
+    body = json.dumps(
+        {
+            "image_b64": base64.b64encode(image_bytes).decode(),
+            "key": os.environ.get("MODAL_SEG_KEY", ""),
+        }
+    ).encode()
+
+    if not _modal_semaphore.acquire(blocking=False):
+        raise EndpointBusyError(
+            "The GPU endpoint is busy with other requests — please retry in a moment."
+        )
+    try:
+        last: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                out = _post_modal_once(body)
+                break
+            except Exception as error:  # noqa: BLE001 — classify, then retry or raise
+                last = error
+                if attempt < retries and _is_retryable(error):
+                    time.sleep(1.5 * (attempt + 1))  # linear backoff for a warming GPU
+                    continue
+                raise
+        else:  # pragma: no cover - loop always breaks or raises
+            raise last  # type: ignore[misc]
+    finally:
+        _modal_semaphore.release()
+
     if "mask_png_b64" not in out:
         raise RuntimeError(out.get("error", "unexpected response from endpoint"))
     try:
@@ -1016,6 +1148,8 @@ def _call_modal_seg_cached(image_bytes: bytes) -> tuple[bytes, float | None]:
 
 def _seg_error_message(error: Exception) -> str:
     """Map an endpoint failure to a human-readable message (never a raw repr)."""
+    if isinstance(error, EndpointBusyError):
+        return str(error)
     if isinstance(error, urllib.error.HTTPError):
         if error.code in (401, 403):
             return (
@@ -1111,9 +1245,11 @@ def render_live_detection() -> None:
         except Exception as error:  # noqa: BLE001 — every failure maps to a human message
             status.update(label="Road extraction failed", state="error", expanded=True)
             st.error(_seg_error_message(error))
+            log_event("upload_failed", kind=type(error).__name__, px=f"{width}x{height}")
             return
         st.write("Road mask received.")
         status.update(label="Road network extracted", state="complete", expanded=False)
+        log_event("upload_ok", px=f"{width}x{height}", mb=round(len(image_bytes) / 1_048_576, 2))
 
     overlay = np.asarray(orig).copy()
     overlay[np.asarray(mask) > 0] = [255, 0, 0]
@@ -1191,6 +1327,78 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    tab_map, tab_method = st.tabs(["Map", "Methodology"])
+    with tab_method:
+        render_methodology()
+    with tab_map:
+        render_dashboard_view(features, criticality, graph, resilience_curve, critical_ids)
+
+
+def render_methodology() -> None:
+    """Credibility tab (bugs.md §2A): what the metrics mean + shipped eval numbers.
+
+    Surfaces the eval artifacts already committed under ``data/sample/`` (IoU,
+    APLS, graph quality) that otherwise live only in docs a judge never opens.
+    """
+    import json
+
+    st.subheader("How Route Resilience works")
+    st.markdown(
+        "1. **Extract** — a fine-tuned SegFormer road segmenter turns satellite "
+        "imagery into a road mask.\n"
+        "2. **Vectorise** — the mask is skeletonised, gap-healed, and simplified "
+        "into a routable graph (junctions + road links).\n"
+        "3. **Analyse** — betweenness centrality flags chokepoint junctions; the "
+        "**Resilience Index** is the network's *global efficiency* after a failure "
+        "relative to intact (1.00 = no degradation, lower = worse)."
+    )
+    st.caption(
+        "Resilience uses global efficiency (mean inverse shortest-path length), which "
+        "stays finite even when a failure disconnects the network — unlike raw "
+        "average path length."
+    )
+
+    st.subheader("Model & network quality (held-out evaluation)")
+    sample_dir = SAMPLE_GEOJSON.parent
+    reports = {
+        "Segmentation (SpaceNet-Mumbai held-out)": "segmentation_eval.json",
+        "Routing similarity — APLS": "panaji_demo_apls.json",
+        "Graph quality": "panaji_demo_graph_eval.json",
+    }
+    shown = False
+    for label, fname in reports.items():
+        path = sample_dir / fname
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        shown = True
+        with st.expander(label, expanded=False):
+            st.json(data, expanded=False)
+    if not shown:
+        st.info("Evaluation artifacts are generated by the pipeline into `data/sample/`.")
+
+    prov_path = sample_dir / "panaji_demo_provenance.json"
+    if prov_path.exists():
+        try:
+            st.caption(f"Model provenance: {json.loads(prov_path.read_text())}")
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    st.caption(
+        "Accessibility: the map is mouse-driven, but every junction is also "
+        "reachable via the junction picker and the ranked table in the Map tab, "
+        "and all colour states carry text labels."
+    )
+
+
+def render_dashboard_view(
+    features, criticality, graph, resilience_curve, critical_ids
+) -> None:
+    """The interactive Map tab: network map + control panel."""
+    disabled_nodes = st.session_state.get("disabled_nodes", ())
     if disabled_nodes:
         with st.spinner("Simulating failure…"):
             simulation = simulate_ablation(DATA_FINGERPRINT, graph, disabled_nodes)
@@ -1202,6 +1410,11 @@ def main() -> None:
     show_spof = st.session_state.get("show_spof", True)
     failure_mode = st.session_state.get("failure_mode", SINGLE_MODE)
 
+    # Remembered viewport (bugs.md §2C): fed into every map so pan/zoom survives
+    # reruns. Reset clears it (via reset_counter) so the map reframes deliberately.
+    map_center = st.session_state.get("map_center")
+    map_zoom = st.session_state.get("map_zoom")
+
     sim_map = build_map(
         features,
         criticality,
@@ -1212,11 +1425,16 @@ def main() -> None:
         show_healed,
         show_spof,
         failure_mode,
+        center=map_center,
+        zoom=map_zoom,
     )
 
     view_mode = st.session_state.get("view_mode", "Interactive Map")
     map_column, panel_column = st.columns([6.5, 3.5], gap="medium")
 
+    # Stable keys (only the reset counter) so the iframe is NOT remounted on every
+    # selection/toggle — the round-tripped center/zoom keeps the view in place.
+    reset_n = st.session_state.get("reset_counter", 0)
     with map_column:
         if view_mode == "Side-by-Side Comparison":
             baseline_map = build_map(
@@ -1229,6 +1447,8 @@ def main() -> None:
                 show_healed,
                 show_spof,
                 failure_mode,
+                center=map_center,
+                zoom=map_zoom,
             )
             col1, col2 = st.columns(2)
             with col1:
@@ -1237,8 +1457,8 @@ def main() -> None:
                     baseline_map,
                     height=640,
                     use_container_width=True,
-                    returned_objects=["last_object_clicked"],
-                    key=f"baseline_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{failure_mode}",
+                    returned_objects=["last_object_clicked", "center", "zoom"],
+                    key=f"baseline_map_{reset_n}",
                 )
             with col2:
                 st.markdown("**Post-Failure Network**")
@@ -1246,8 +1466,8 @@ def main() -> None:
                     sim_map,
                     height=640,
                     use_container_width=True,
-                    returned_objects=["last_object_clicked", "all_drawings"],
-                    key=f"network_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{failure_mode}",
+                    returned_objects=["last_object_clicked", "all_drawings", "center", "zoom"],
+                    key=f"network_map_{reset_n}",
                 )
         else:
             baseline_map_state = None
@@ -1255,8 +1475,8 @@ def main() -> None:
                 sim_map,
                 height=640,
                 use_container_width=True,
-                returned_objects=["last_object_clicked", "all_drawings"],
-                key=f"network_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{failure_mode}",
+                returned_objects=["last_object_clicked", "all_drawings", "center", "zoom"],
+                key=f"network_map_{reset_n}",
             )
 
         st.caption(
@@ -1265,6 +1485,15 @@ def main() -> None:
             "basemap tiles fail to load."
         )
         render_live_detection()
+
+    # Persist the viewport the component reports so the next rerun rebuilds the map
+    # where the user left it (guarded against the None first render).
+    if map_state:
+        _center = map_state.get("center")
+        if isinstance(_center, dict) and "lat" in _center and "lng" in _center:
+            st.session_state["map_center"] = [_center["lat"], _center["lng"]]
+        if map_state.get("zoom") is not None:
+            st.session_state["map_zoom"] = map_state["zoom"]
 
     clicked = map_state.get("last_object_clicked") if map_state else None
     drawings = map_state.get("all_drawings") if map_state else None
