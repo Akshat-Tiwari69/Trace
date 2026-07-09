@@ -33,6 +33,27 @@ def test_nodes_in_polygon_selects_enclosed():
     assert set(nodes_in_polygon(g, poly)) == {0, 1, 4, 5}          # the 2×2 corner
 
 
+def test_nodes_in_polygon_matches_brute_force_contains():
+    """STRtree-accelerated selection must match a naive per-node ``covers`` loop
+    (bugs.md §4 — the O(V) contains() loop was replaced with an STRtree query;
+    behavior must stay identical)."""
+    import random
+
+    from shapely.geometry import Point, Polygon
+
+    rng = random.Random(7)
+    g = nx.Graph()
+    for i in range(200):
+        g.add_node(i, x=rng.uniform(-10, 10), y=rng.uniform(-10, 10))
+
+    poly_coords = [[-4.0, -6.0], [5.0, -3.0], [3.0, 7.0], [-6.0, 4.0]]  # irregular quad
+    poly = Polygon(poly_coords)
+    brute_force = {n for n, d in g.nodes(data=True) if poly.covers(Point(d["x"], d["y"]))}
+
+    assert set(nodes_in_polygon(g, poly_coords)) == brute_force
+    assert len(brute_force) > 0  # sanity: the polygon actually selects some nodes
+
+
 def test_nodes_below_elevation():
     g = _grid(2)
     for n in g.nodes:

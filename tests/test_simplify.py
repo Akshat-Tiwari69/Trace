@@ -55,16 +55,27 @@ def test_collapse_collapses_whole_chain():
     assert g.edges[0, 5]["length_m"] == pytest.approx(50.0)
 
 
-def test_collapse_skips_triangle():
-    """Every triangle node is degree-2, but collapsing would duplicate an edge."""
-    g = nx.Graph()
+def test_collapse_merges_triangle_into_parallel_edge():
+    """A triangle's degree-2 node merges into a parallel (keyed) edge.
+
+    Pre-A37 the simple graph skipped this (a duplicate edge couldn't be held) —
+    keeping all three nodes and dropping the merge. The MultiGraph now performs
+    the merge: one node collapses and a second keyed edge appears between its
+    neighbours (a real alternate route around the triangle).
+    """
+    g = nx.MultiGraph()
     _edge(g, 0, (0, 0), 1, (10, 0))
     _edge(g, 1, (10, 0), 2, (5, 8))
     _edge(g, 2, (5, 8), 0, (0, 0))
     _annotate_degree_and_type(g)
 
-    assert collapse_degree2_nodes(g) == 0         # left intact
-    assert g.number_of_nodes() == 3
+    collapsed = collapse_degree2_nodes(g)
+    assert collapsed == 1                          # one degree-2 node merged
+    assert g.number_of_nodes() == 2
+    # The two survivors are joined by TWO keyed edges: the original side of the
+    # triangle + the merged detour through the collapsed node. Redundancy kept.
+    u, v = list(g.nodes)
+    assert len(g[u][v]) == 2
 
 
 # --------------------------------------------------------------------------- #

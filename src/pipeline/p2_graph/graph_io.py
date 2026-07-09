@@ -75,10 +75,17 @@ def save_graphml(graph: "nx.Graph", path: Path) -> None:
 
 
 def load_graphml(path: Path) -> "nx.Graph":
-    """Read a GraphML graph back, decoding edge geometry from its JSON string."""
+    """Read a GraphML graph back, decoding edge geometry from its JSON string.
+
+    ``force_multigraph=True`` so the loaded type is always a MultiGraph, even
+    when this particular file has no parallel edges — otherwise nx.read_graphml
+    infers plain Graph/MultiGraph from the file's own ``<graph edgedefault>``
+    tag, and callers branching on ``is_multigraph()`` would silently see a
+    different type per-file (bugs.md §4 / A37).
+    """
     import networkx as nx
 
-    graph = nx.read_graphml(str(path), node_type=int)
+    graph = nx.read_graphml(str(path), node_type=int, force_multigraph=True)
     for _, _, data in graph.edges(data=True):
         geom = data.get("geometry")
         if isinstance(geom, str):
@@ -97,7 +104,12 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
     style junctions and roads separately; node features expose ``betweenness`` /
     ``is_critical`` for the criticality heatmap, edges expose ``is_bridged`` so
     healed roads can be drawn distinctly (``docs/Design.md`` §1, honesty).
+
+    On a MultiGraph each keyed edge becomes its own LineString feature carrying
+    an ``edge_key`` property, so parallel branches (loops, dual carriageways)
+    survive the GeoJSON round-trip instead of being collapsed.
     """
+    multi = graph.is_multigraph()
     features: list[dict] = []
 
     def rounded(coord: list) -> list:
@@ -121,7 +133,13 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
             }
         )
 
-    for u, v, data in graph.edges(data=True):
+    # keys=True only on a MultiGraph; the key is recorded as ``edge_key`` so a
+    # parallel edge is distinguishable on reload (load_geojson_graph rebuilds a
+    # MultiGraph and re-keys deterministically by insertion order).
+    edges = graph.edges(data=True, keys=True) if multi else (
+        (u, v, 0, d) for u, v, d in graph.edges(data=True)
+    )
+    for u, v, key, data in edges:
         coords = data.get("geometry") or [
             [graph.nodes[u]["x"], graph.nodes[u]["y"]],
             [graph.nodes[v]["x"], graph.nodes[v]["y"]],
@@ -130,6 +148,7 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
             "feature_type": "edge",
             "u": int(u),
             "v": int(v),
+            "edge_key": int(key),
             "length_m": round(float(data.get("length_m", 0.0)), 3),
             "is_bridged": bool(data.get("is_bridged", False)),
             "is_bridge": bool(data.get("is_bridge", False)),
@@ -137,6 +156,8 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
         }
         if data.get("width_m") is not None:  # optional road width (bugs.md §4)
             props["width_m"] = round(float(data["width_m"]), 3)
+        if data.get("confidence") is not None:  # optional mean prob (bugs.md §4, A37)
+            props["confidence"] = round(float(data["confidence"]), 3)
         features.append(
             {
                 "type": "Feature",
@@ -160,18 +181,22 @@ def save_geojson(graph: "nx.Graph", path: Path) -> None:
     atomic_write(Path(path), lambda tmp: tmp.write_text(payload))
 
 
-def load_geojson_graph(path: Path) -> "nx.Graph":
-    """Rebuild a NetworkX graph from a :func:`graph_to_geojson` FeatureCollection.
+def load_geojson_graph(path: Path) -> "nx.MultiGraph":
+    """Rebuild a NetworkX MultiGraph from a :func:`graph_to_geojson` FeatureCollection.
 
     The inverse of :func:`graph_to_geojson`: node Point features restore
     ``x, y, degree, type, betweenness, is_critical``; edge LineString features
-    restore ``length_m, is_bridged, edge_betweenness``. Lets the committed
+    restore ``length_m, is_bridged, edge_betweenness`` (and ``width_m`` /
+    ``confidence`` when present). Returns a **MultiGraph** so parallel branches
+    (loops, dual carriageways) keep their own keyed edges — the GeoJSON
+    ``edge_key`` property is informational; NetworkX re-keys by insertion order
+    on ``add_edge``, which matches the writer's order. Lets the committed
     ``data/sample/`` GeoJSON be re-analysed without the (gitignored) GraphML.
     """
     import networkx as nx
 
     fc = json.loads(Path(path).read_text())
-    graph = nx.Graph()
+    graph = nx.MultiGraph()
     for key, value in fc.get("meta", {}).items():  # restore build-time metadata
         graph.graph[key] = value
     for feat in fc["features"]:
@@ -199,6 +224,8 @@ def load_geojson_graph(path: Path) -> "nx.Graph":
             )
             if props.get("width_m") is not None:  # optional road width (bugs.md §4)
                 attrs["width_m"] = float(props["width_m"])
+            if props.get("confidence") is not None:  # optional mean prob (A37)
+                attrs["confidence"] = float(props["confidence"])
             graph.add_edge(int(props["u"]), int(props["v"]), **attrs)
     _validate_edge_lengths(graph, Path(path))
     return graph

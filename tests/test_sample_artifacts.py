@@ -63,7 +63,10 @@ def test_sample_graph_roundtrips_through_geojson(tmp_path):
     assert again.number_of_edges() == graph.number_of_edges()
 
     # Attribute survival on a spot-checked edge and the feature count.
-    u, v, data = next(iter(graph.edges(data=True)))
-    assert "length_m" in again.edges[u, v] and "is_bridged" in again.edges[u, v]
+    # MultiGraph edges are keyed: graph.edges[u, v] is a {key: attrs} dict, so
+    # pull the single (u, v, key) triple and address the reloaded edge by key.
+    u, v, key, data = next(iter(graph.edges(data=True, keys=True)))
+    reloaded = again.edges[u, v, key] if again.is_multigraph() else again.edges[u, v]
+    assert "length_m" in reloaded and "is_bridged" in reloaded
     n_features = len(graph_to_geojson(graph)["features"])
     assert n_features == graph.number_of_nodes() + graph.number_of_edges()

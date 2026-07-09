@@ -109,18 +109,32 @@ def annotate_cut_structure(graph: "nx.Graph") -> dict:
     Note: ``is_bridge`` (graph-theoretic cut edge) is **not** ``is_bridged`` (an
     edge the healing step inferred) — different concepts, deliberately named
     distinctly. Works on disconnected graphs (NetworkX handles each component).
+
+    On a MultiGraph, ``nx.bridges`` returns ``(u, v, key)`` triples — a parallel
+    edge is only a bridge if its *individual* removal disconnects the graph
+    (rare: both endpoints of a parallel pair are still connected via the sibling
+    edge, so parallel edges are almost never bridges, which is correct).
     """
     import networkx as nx
 
     articulation = set(nx.articulation_points(graph))
-    bridges = {frozenset(e) for e in nx.bridges(graph)}
+    # nx.bridges yields (u, v) on both Graph and MultiGraph (the key is omitted
+    # even for multigraphs in networkx 3.x — a parallel edge is never a bridge
+    # because its sibling preserves connectivity). Compare by the unordered pair.
+    raw_bridges = list(nx.bridges(graph))
+    bridge_pairs = {frozenset((u, v)) for u, v in raw_bridges}
 
     for node_id in graph.nodes:
         graph.nodes[node_id]["is_articulation"] = node_id in articulation
-    for u, v in graph.edges:
-        graph.edges[u, v]["is_bridge"] = frozenset((u, v)) in bridges
+    multi = graph.is_multigraph()
+    if multi:
+        for u, v, k in graph.edges(keys=True):
+            graph.edges[u, v, k]["is_bridge"] = frozenset((u, v)) in bridge_pairs
+    else:
+        for u, v in graph.edges:
+            graph.edges[u, v]["is_bridge"] = frozenset((u, v)) in bridge_pairs
 
-    return {"n_articulation": len(articulation), "n_bridges": len(bridges)}
+    return {"n_articulation": len(articulation), "n_bridges": len(raw_bridges)}
 
 
 def rank_table(graph: "nx.Graph", bc: dict[int, float]) -> list[dict]:
@@ -164,11 +178,23 @@ def rank_table(graph: "nx.Graph", bc: dict[int, float]) -> list[dict]:
 # S9 — caching + k-sample approximation for large graphs
 # --------------------------------------------------------------------------- #
 def _graph_fingerprint(graph: "nx.Graph", weight: str) -> int:
-    """Cheap structural hash of the graph (node count + sorted weighted edges)."""
-    edges = tuple(sorted(
-        (min(u, v), max(u, v), round(float(d.get(weight, 0.0)), 3))
-        for u, v, d in graph.edges(data=True)
-    ))
+    """Cheap structural hash of the graph (node count + sorted weighted edges).
+
+    On a MultiGraph the edge key is folded in so two graphs that differ only by
+    a parallel branch hash differently (otherwise the cache would silently serve
+    a simple-graph betweenness for a multi-edge graph).
+    """
+    multi = graph.is_multigraph()
+    if multi:
+        edges = tuple(sorted(
+            (min(u, v), max(u, v), k, round(float(d.get(weight, 0.0)), 3))
+            for u, v, k, d in graph.edges(data=True, keys=True)
+        ))
+    else:
+        edges = tuple(sorted(
+            (min(u, v), max(u, v), round(float(d.get(weight, 0.0)), 3))
+            for u, v, d in graph.edges(data=True)
+        ))
     return hash((graph.number_of_nodes(), edges))
 
 

@@ -68,6 +68,11 @@ def _densify(graph, interval_m: float):
         length = float(d.get("length_m", 0.0))
         k = max(1, round(length / interval_m)) if interval_m > 0 else 1
         if k <= 1:
+            # dense is a plain Graph, so a short parallel edge (u, v now a
+            # MultiGraph-sourced input, A37) would silently overwrite its
+            # sibling here; keep the shorter one — the one Dijkstra would
+            # actually route over.
+            length = min(length, dense.edges[u, v]["length_m"]) if dense.has_edge(u, v) else length
             dense.add_edge(u, v, length_m=max(length, 1e-6))
             continue
         ux, uy = graph.nodes[u]["x"], graph.nodes[u]["y"]
