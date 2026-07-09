@@ -16,17 +16,41 @@ placement.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import threading
 
 import networkx as nx
 import numpy as np
 import pandas as pd
+
+# One heavy CPU analysis (skeletonize -> heal -> simplify -> betweenness) at a
+# time: this runs in-process on a 4-core ARM box (bugs.md §5H), and a single
+# pass already uses multiple cores itself, so N concurrent uploads would
+# starve every other session rather than just queue behind one job. Mirrors
+# app.py's `_modal_semaphore` GPU-concurrency guard (bugs.md §5C) but tighter
+# (1 vs 2) since this is the CPU every other Streamlit session also depends
+# on. `acquire(blocking=False)` so a saturated box surfaces an explicit
+# "busy, retry" message instead of silently queuing behind the scenes.
+# A full filesystem job queue (bugs.md §5H, M-L) stays deferred; this
+# semaphore is the interim guard.
+_ANALYSIS_MAX_INFLIGHT = 1
+_analysis_semaphore = threading.BoundedSemaphore(_ANALYSIS_MAX_INFLIGHT)
+
+# Reject masks larger than this before the CPU pipeline runs — same ceiling as
+# app.py's `Image.MAX_IMAGE_PIXELS` decompression-bomb guard (4096x4096), kept
+# in sync so an upload that passed the earlier PIL check doesn't blow up the
+# skeletonize/betweenness pass instead.
+MAX_MASK_PIXELS = 4096 * 4096
+
+
+class AnalysisBusyError(RuntimeError):
+    """Raised when another upload analysis is already running on this box."""
 
 
 @dataclass
 class AnalysisResult:
     """Everything the dashboard needs to present an uploaded network's analysis."""
 
-    graph: nx.Graph
+    graph: nx.MultiGraph  # skeleton_to_graph builds a MultiGraph (parallel branches, A37)
     criticality: pd.DataFrame            # node_id, betweenness, rank, is_critical, is_articulation, x, y
     resilience_index: float              # RI after losing the #1 chokepoint (worst single failure)
     top_node: int | None                 # the #1 critical junction (None for a trivial graph)
@@ -47,74 +71,95 @@ def analyze_mask(
     so ``length_m`` is only as accurate as this estimate — surfaced to the user).
     Raises ``ValueError`` when the mask yields a degenerate graph (<2 junctions),
     i.e. the segmentation found essentially no roads — the same fail-loud contract
-    the batch pipeline uses, so a blank result is never silently presented.
+    the batch pipeline uses, so a blank result is never silently presented; also
+    raised when the mask is over the pixel-count ceiling (checked before any
+    work runs). Raises ``AnalysisBusyError`` when another analysis is already
+    running on this box (bugs.md §5H concurrency guard) — checked after the
+    size guard so an oversized mask is rejected without taking the slot.
     """
-    from src.pipeline.p2_graph.healing import heal_graph
-    from src.pipeline.p2_graph.simplify import (
-        consolidate_graph,
-        simplify_graph,
-        simplify_polylines,
-    )
-    from src.pipeline.p2_graph.skeleton_graph import (
-        mask_to_skeleton_with_distance,
-        prune_degenerate_edges,
-        skeleton_to_graph,
-    )
-    from src.pipeline.p3_analysis.criticality import (
-        annotate_criticality,
-        annotate_cut_structure,
-        rank_table,
-    )
-    from src.pipeline.p3_analysis.resilience import global_efficiency
-
-    binary = (np.asarray(mask01) > 0).astype(np.uint8)
-    skeleton, distance = mask_to_skeleton_with_distance(binary)
-    graph = skeleton_to_graph(skeleton, transform=None, resolution_m=resolution_m, distance=distance)
-    prune_degenerate_edges(graph, min_edge_len_m=resolution_m)  # drop sub-pixel/self-loop edges
-
-    graph, _heal = heal_graph(graph)
-    simplify_graph(graph)
-    consolidate_graph(graph)
-    simplify_polylines(graph, tol_m=1.5)
-
-    if graph.number_of_nodes() < 2 or graph.number_of_edges() < 1:
+    mask01 = np.asarray(mask01)
+    if mask01.size > MAX_MASK_PIXELS:
         raise ValueError(
-            "the extracted mask has essentially no road network — try a clearer "
-            "or better-resolution capture (~0.5 m/pixel neighbourhood zoom)."
+            f"That image is {mask01.size / 1e6:.1f} MP — larger than the "
+            f"{MAX_MASK_PIXELS / 1e6:.0f} MP limit for in-app analysis. Crop or "
+            "downscale it and try again."
         )
 
-    bc = annotate_criticality(graph, critical_fraction=critical_fraction)
-    annotate_cut_structure(graph)
-    rows = rank_table(graph, bc)
-    criticality = pd.DataFrame(rows)
+    if not _analysis_semaphore.acquire(blocking=False):
+        raise AnalysisBusyError(
+            "Another analysis is running on this box right now — please retry "
+            "in a moment."
+        )
+    try:
+        from src.pipeline.p2_graph.healing import heal_graph
+        from src.pipeline.p2_graph.simplify import (
+            consolidate_graph,
+            simplify_graph,
+            simplify_polylines,
+        )
+        from src.pipeline.p2_graph.skeleton_graph import (
+            mask_to_skeleton_with_distance,
+            prune_degenerate_edges,
+            skeleton_to_graph,
+        )
+        from src.pipeline.p3_analysis.criticality import (
+            annotate_criticality,
+            annotate_cut_structure,
+            rank_table,
+        )
+        from src.pipeline.p3_analysis.resilience import global_efficiency
 
-    # Headline number: how much routing efficiency the worst single junction loss
-    # costs — the product's core "resilience" statement for the uploaded network.
-    base_eff = global_efficiency(graph)
-    top_node = int(criticality.iloc[0]["node_id"]) if not criticality.empty else None
-    if top_node is not None and base_eff > 0:
-        perturbed = graph.copy()
-        perturbed.remove_node(top_node)
-        ri = global_efficiency(perturbed) / base_eff
-    else:
-        ri = 1.0
-    ri = float(max(0.0, min(1.0, ri)))
+        binary = (mask01 > 0).astype(np.uint8)
+        skeleton, distance = mask_to_skeleton_with_distance(binary)
+        graph = skeleton_to_graph(skeleton, transform=None, resolution_m=resolution_m, distance=distance)
+        prune_degenerate_edges(graph, min_edge_len_m=resolution_m)  # drop sub-pixel/self-loop edges
 
-    return AnalysisResult(
-        graph=graph,
-        criticality=criticality,
-        resilience_index=ri,
-        top_node=top_node,
-        n_nodes=graph.number_of_nodes(),
-        n_edges=graph.number_of_edges(),
-        resolution_m=resolution_m,
-        summary={
-            "critical_junctions": int(criticality["is_critical"].sum()) if not criticality.empty else 0,
-            "articulation_points": int(criticality["is_articulation"].sum())
-            if "is_articulation" in criticality else 0,
-            "worst_junction": top_node,
-        },
-    )
+        graph, _heal = heal_graph(graph)
+        simplify_graph(graph)
+        consolidate_graph(graph)
+        simplify_polylines(graph, tol_m=1.5)
+
+        if graph.number_of_nodes() < 2 or graph.number_of_edges() < 1:
+            raise ValueError(
+                "the extracted mask has essentially no road network — try a clearer "
+                "or better-resolution capture (~0.5 m/pixel neighbourhood zoom)."
+            )
+
+        bc = annotate_criticality(graph, critical_fraction=critical_fraction)
+        annotate_cut_structure(graph)
+        rows = rank_table(graph, bc)
+        criticality = pd.DataFrame(rows)
+
+        # Headline number: how much routing efficiency the worst single junction
+        # loss costs — the product's core "resilience" statement for the
+        # uploaded network.
+        base_eff = global_efficiency(graph)
+        top_node = int(criticality.iloc[0]["node_id"]) if not criticality.empty else None
+        if top_node is not None and base_eff > 0:
+            perturbed = graph.copy()
+            perturbed.remove_node(top_node)
+            ri = global_efficiency(perturbed) / base_eff
+        else:
+            ri = 1.0
+        ri = float(max(0.0, min(1.0, ri)))
+
+        return AnalysisResult(
+            graph=graph,
+            criticality=criticality,
+            resilience_index=ri,
+            top_node=top_node,
+            n_nodes=graph.number_of_nodes(),
+            n_edges=graph.number_of_edges(),
+            resolution_m=resolution_m,
+            summary={
+                "critical_junctions": int(criticality["is_critical"].sum()) if not criticality.empty else 0,
+                "articulation_points": int(criticality["is_articulation"].sum())
+                if "is_articulation" in criticality else 0,
+                "worst_junction": top_node,
+            },
+        )
+    finally:
+        _analysis_semaphore.release()
 
 
 def render_graph_overlay(image_rgb: np.ndarray, result: AnalysisResult):

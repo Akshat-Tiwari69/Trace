@@ -162,15 +162,20 @@ def split_features(
 
 
 @st.cache_resource(show_spinner="Building routable graph...")
-def graph_from_features(fingerprint: str, _features: gpd.GeoDataFrame) -> nx.Graph:
+def graph_from_features(fingerprint: str, _features: gpd.GeoDataFrame) -> nx.MultiGraph:
     """Convert the map-ready GeoJSON features into a routable graph.
 
     ``fingerprint`` identifies the data source in the cache key.
     ``_features`` is underscore-prefixed so Streamlit skips hashing the
     (unhashable) GeoDataFrame for the cache key — required under cache_resource.
+
+    MultiGraph (not Graph): the sample GeoJSON can carry parallel edges between
+    the same (u, v) — loops, dual carriageways — and ``add_edge`` on a plain
+    Graph silently overwrites them, collapsing the redundancy the resilience
+    metric is meant to reward (bugs.md §4 / A37).
     """
     nodes, edges = split_features(_features)
-    graph = nx.Graph()
+    graph = nx.MultiGraph()
     for _, node in nodes.iterrows():
         node_id = int(node["node_id"])
         graph.add_node(
@@ -196,10 +201,22 @@ def graph_from_features(fingerprint: str, _features: gpd.GeoDataFrame) -> nx.Gra
     return graph
 
 
-def path_length(graph: nx.Graph, path: tuple[int, ...] | list[int]) -> float:
+def _min_edge_data(graph: nx.MultiGraph, u: int, v: int) -> dict:
+    """Return the shortest (``length_m``-minimal) parallel edge's data for (u, v).
+
+    ``nx.shortest_path(weight="length_m")`` routes over the min-weight parallel
+    edge between a pair of nodes, so anything reconstructing that route's length
+    or geometry must agree on the *same* edge — otherwise a longer/shorter
+    parallel twin (loop, dual carriageway) would silently mismatch the path
+    Dijkstra actually chose (bugs.md §4 / A37).
+    """
+    return min(graph[u][v].values(), key=lambda data: float(data["length_m"]))
+
+
+def path_length(graph: nx.MultiGraph, path: tuple[int, ...] | list[int]) -> float:
     """Return a path's total length in metres."""
     return sum(
-        float(graph.edges[start, end]["length_m"])
+        float(_min_edge_data(graph, start, end)["length_m"])
         for start, end in zip(path, path[1:])
     )
 
@@ -209,7 +226,7 @@ def edge_key(start: int, end: int) -> tuple[int, int]:
     return min(start, end), max(start, end)
 
 
-def representative_reroute(graph: nx.Graph, disabled_node: int) -> RouteResult | None:
+def representative_reroute(graph: nx.MultiGraph, disabled_node: int) -> RouteResult | None:
     """Find the most affected finite detour across a disabled junction."""
     neighbours = list(graph.neighbors(disabled_node))
     if len(neighbours) < 2:
@@ -256,7 +273,7 @@ def representative_reroute(graph: nx.Graph, disabled_node: int) -> RouteResult |
         for start, end in zip(rerouted_path, rerouted_path[1:]):
             if edge_key(start, end) not in baseline_edges:
                 contribution = (
-                    100.0 * float(graph.edges[start, end]["length_m"]) / baseline_length
+                    100.0 * float(_min_edge_data(graph, start, end)["length_m"]) / baseline_length
                 )
                 delay_segments.append((f"{start}–{end}", contribution))
 
@@ -281,7 +298,7 @@ def representative_reroute(graph: nx.Graph, disabled_node: int) -> RouteResult |
 
 
 @st.cache_data(show_spinner="Simulating failure...")
-def simulate_ablation(graph_fingerprint: str, _graph: nx.Graph, nodes: tuple[int, ...]) -> SimulationResult:
+def simulate_ablation(graph_fingerprint: str, _graph: nx.MultiGraph, nodes: tuple[int, ...]) -> SimulationResult:
     """Disable nodes and compute resilience plus a representative reroute (if single node)."""
     metrics = resilience_index(_graph, removed_nodes=list(nodes))
     route = representative_reroute(_graph, nodes[0]) if len(nodes) == 1 else None
@@ -295,7 +312,13 @@ def simulate_ablation(graph_fingerprint: str, _graph: nx.Graph, nodes: tuple[int
 
 
 def semantic_legend() -> folium.Element:
-    """Create a labelled map legend for semantic route states."""
+    """Create a labelled map legend for semantic route states.
+
+    Folds the criticality ramp in as a CSS gradient bar (bugs.md §2C P2
+    cosmetic) so the encoding lives in one place instead of this HTML legend
+    plus a separate branca colormap bar plastered on the map corner.
+    """
+    ramp_css = ", ".join(TOKENS[f"ramp_{i}"] for i in range(4))
     html = f"""
     <div style="position: fixed; bottom: 36px; right: 12px; z-index: 9999;
                 background: rgba(13,21,38,.92); color: {TOKENS["text"]}; padding: 10px 14px;
@@ -308,18 +331,28 @@ def semantic_legend() -> folium.Element:
       <span style="color:{TOKENS["disabled"]}">●</span> / <span style="color:{TOKENS["disabled"]}">┄</span> disabled junction / links (dashed)<br>
       <b style="color:{TOKENS["reroute"]}; font-size: 14px;">━</b> rerouted path (thick solid)<br>
       <span style="color:{TOKENS["ramp_2"]}">┄</span> healed road (dashed = inferred)<br>
-      <span style="color:{TOKENS["spof"]}">●</span> / <span style="color:{TOKENS["spof"]}">━</span> single-point-of-failure
+      <span style="color:{TOKENS["spof"]}">●</span> / <span style="color:{TOKENS["spof"]}">━</span> single-point-of-failure<br>
+      <div style="margin-top: 6px;">
+        <span style="font-size: 10.5px; letter-spacing: .04em; color: {TOKENS["muted"]};">
+          Road criticality (low → high)
+        </span>
+        <div style="width: 150px; height: 10px; border-radius: 5px; margin-top: 3px;
+                    border: 1px solid {TOKENS["border"]};
+                    background: linear-gradient(to right, {ramp_css});"></div>
+      </div>
     </div>
     """
     return folium.Element(html)
 
 
-def add_rerouted_path(road_map: folium.Map, graph: nx.Graph, route: RouteResult) -> None:
+def add_rerouted_path(road_map: folium.Map, graph: nx.MultiGraph, route: RouteResult) -> None:
     """Draw the rerouted path last so its orange highlight stays visible."""
     if route.rerouted_path is None:
         return
     for start, end in zip(route.rerouted_path, route.rerouted_path[1:]):
-        coordinates = graph.edges[start, end]["coordinates"]
+        # Same min-length parallel edge the route was computed over, so the
+        # drawn geometry matches the routed segment (see _min_edge_data).
+        coordinates = _min_edge_data(graph, start, end)["coordinates"]
         folium.PolyLine(
             [(latitude, longitude) for longitude, latitude in coordinates],
             color=TOKENS["reroute"],
@@ -329,10 +362,112 @@ def add_rerouted_path(road_map: folium.Map, graph: nx.Graph, route: RouteResult)
         ).add_to(road_map)
 
 
+@st.cache_data(show_spinner=False)
+def compute_edge_styles(
+    fingerprint: str,
+    _edges: gpd.GeoDataFrame,
+    _scores: dict[int, float],
+    _colour_scale: cm.LinearColormap,
+    disabled_nodes: tuple[int, ...],
+    show_healed: bool,
+    show_spof: bool,
+) -> gpd.GeoDataFrame:
+    """Vectorized per-edge style columns for the single GeoJson road layer.
+
+    Replaces the old per-edge ``folium.PolyLine`` loop (bugs.md §2C P2): what
+    actually dominated rerun time at scale was instantiating ~500 individual
+    Folium objects (each its own Jinja template + id), not the score→colour
+    lookup — so this builds one styled GeoDataFrame via pandas/numpy ops
+    instead of a Python ``for`` loop, and the caller renders it as one
+    ``folium.GeoJson`` layer.
+
+    Cache-keyed on ``(fingerprint, disabled_nodes, show_healed, show_spof)``:
+    ``_edges``/``_scores``/``_colour_scale`` are pinned to the data
+    fingerprint (same invariant ``simulate_ablation``/``generate_geojson_export``
+    already rely on elsewhere in this file), so they're safe to leave
+    unhashed. ``disabled_nodes`` is threaded through as an explicit hashable
+    argument — not read from session state inside this function — so a new
+    ablation always invalidates the cache instead of risking a stale style.
+    """
+    edges = _edges
+    is_bridged = (
+        edges["is_bridged"].map(_truthy)
+        if "is_bridged" in edges.columns
+        else pd.Series(False, index=edges.index)
+    )
+    if not show_healed:
+        edges = edges.loc[~is_bridged]
+        is_bridged = is_bridged.loc[edges.index]
+
+    is_bridge = (
+        edges["is_bridge"].map(_truthy)
+        if "is_bridge" in edges.columns
+        else pd.Series(False, index=edges.index)
+    )
+    start = edges["u"].astype(int)
+    end = edges["v"].astype(int)
+    score = np.maximum(
+        start.map(_scores).fillna(0.0).astype(float).to_numpy(),
+        end.map(_scores).fillna(0.0).astype(float).to_numpy(),
+    )
+    is_disabled = (start.isin(disabled_nodes) | end.isin(disabled_nodes)).to_numpy()
+    is_spof = (is_bridge & show_spof).to_numpy()
+    is_bridged_arr = is_bridged.to_numpy()
+
+    # Precedence mirrors the original if/elif chain exactly: disabled beats
+    # spof beats the criticality ramp for colour/state; spof beats
+    # disabled-or-bridged for weight; disabled beats spof for opacity.
+    colour = np.select(
+        [is_disabled, is_spof],
+        [TOKENS["disabled"], TOKENS["spof"]],
+        default=pd.Series(score).map(_colour_scale).to_numpy(),
+    )
+    state = np.select(
+        [is_disabled, is_spof, is_bridged_arr],
+        ["disabled link", "critical bridge", "healed link"],
+        default="observed link",
+    )
+    weight = np.select(
+        [is_spof, is_disabled | is_bridged_arr],
+        [5, 4],
+        default=3,
+    )
+    opacity = np.select(
+        [is_disabled, is_spof],
+        [0.45, 0.95],
+        default=0.85,
+    )
+    dash_array = np.where(is_bridged_arr | is_disabled, "8 6", None)
+
+    styled = edges[["geometry"]].copy()
+    styled["u"] = start.to_numpy()
+    styled["v"] = end.to_numpy()
+    styled["score"] = np.round(score, 3)
+    styled["state"] = state
+    styled["color"] = colour
+    styled["weight"] = weight.astype(int)
+    styled["opacity"] = opacity
+    styled["dash_array"] = dash_array
+    return gpd.GeoDataFrame(styled, geometry="geometry", crs=edges.crs)
+
+
+def _edge_style_function(feature: dict) -> dict:
+    """Per-feature Leaflet style read from the pre-computed style columns."""
+    props = feature["properties"]
+    style = {
+        "color": props["color"],
+        "weight": props["weight"],
+        "opacity": props["opacity"],
+    }
+    if props.get("dash_array"):
+        style["dashArray"] = props["dash_array"]
+    return style
+
+
 def build_map(
     features: gpd.GeoDataFrame,
     criticality: pd.DataFrame,
-    graph: nx.Graph,
+    graph: nx.MultiGraph,
     selected_node: int,
     simulation: SimulationResult | None,
     show_critical: bool,
@@ -398,39 +533,23 @@ def build_map(
             edit_options={'poly': {'allowIntersection': False}}
         ).add_to(road_map)
 
-    for _, edge in edges.iterrows():
-        is_bridged = _truthy(edge.get("is_bridged"))
-        is_bridge = _truthy(edge.get("is_bridge"))
-        if is_bridged and not show_healed:
-            continue
-        start, end = int(edge["u"]), int(edge["v"])
-        score = max(float(scores.get(start, 0.0)), float(scores.get(end, 0.0)))
-        is_disabled = start in disabled_nodes or end in disabled_nodes
-        is_spof = is_bridge and show_spof
-
-        if is_disabled:
-            colour = TOKENS["disabled"]
-            state = "disabled link"
-        elif is_spof:
-            # Muted rose (was neon magenta #ff00ff, which drowned the whole
-            # network — most Panaji links are flagged is_bridge).
-            colour = TOKENS["spof"]
-            state = "critical bridge"
-        else:
-            colour = colour_scale(score)
-            state = "healed link" if is_bridged else "observed link"
-
-        coordinates = [
-            (latitude, longitude) for longitude, latitude in edge.geometry.coords
-        ]
-        folium.PolyLine(
-            coordinates,
-            color=colour,
-            weight=5 if is_spof else (4 if is_disabled or is_bridged else 3),
-            opacity=0.45 if is_disabled else (0.95 if is_spof else 0.85),
-            dash_array="8 6" if is_bridged or is_disabled else None,
-            tooltip=f"Road {start}–{end} · criticality {score:.3f} · {state}",
-        ).add_to(road_map)
+    # Single vectorized GeoJson layer (bugs.md §2C P2) replaces one
+    # folium.PolyLine per edge — style columns are recomputed from the live
+    # simulation/toggle state on every call (see compute_edge_styles), so
+    # disabled/rerouted state never goes stale.
+    styled_edges = compute_edge_styles(
+        DATA_FINGERPRINT, edges, scores, colour_scale, disabled_nodes, show_healed, show_spof,
+    )
+    folium.GeoJson(
+        styled_edges,
+        name="Road network",
+        style_function=_edge_style_function,
+        tooltip=folium.GeoJsonTooltip(
+            fields=["u", "v", "score", "state"],
+            aliases=["From junction", "To junction", "Criticality", "State"],
+            localize=True,
+        ),
+    ).add_to(road_map)
 
     critical_ids = set(criticality.loc[criticality["is_critical"].map(_truthy), "node_id"].astype(int))
     articulation_ids = set()
@@ -478,7 +597,8 @@ def build_map(
     if simulation and simulation.route:
         add_rerouted_path(road_map, graph, simulation.route)
     folium.LayerControl(position="topright").add_to(road_map)
-    colour_scale.add_to(road_map)
+    # The criticality ramp is now folded into semantic_legend() as a CSS
+    # gradient bar (bugs.md §2C P2 cosmetic) — no separate branca bar.
     road_map.get_root().html.add_child(semantic_legend())
     return road_map
 
@@ -697,7 +817,6 @@ def render_panel(
         st.caption(ri_context)
 
     st.subheader("Scenario controls")
-    view_mode = st.radio("View Mode", ["Interactive Map", "Side-by-Side Comparison"], horizontal=True, key="view_mode")
     failure_mode = st.radio(
         "Failure mode",
         [SINGLE_MODE, FLOOD_MODE],
@@ -1272,7 +1391,7 @@ def _render_upload_analysis(orig_rgb: np.ndarray, mask_gray: np.ndarray) -> None
     *real* resilience analysis — not just a mask preview. Image-space (the upload
     isn't georeferenced), so the network is drawn over the user's own image.
     """
-    from src.app.upload_analysis import analyze_mask, render_graph_overlay
+    from src.app.upload_analysis import AnalysisBusyError, analyze_mask, render_graph_overlay
 
     st.markdown("#### Network resilience of your imagery")
     gsd = st.slider(
@@ -1284,6 +1403,10 @@ def _render_upload_analysis(orig_rgb: np.ndarray, mask_gray: np.ndarray) -> None
     try:
         with st.spinner("Building the routable graph and scoring resilience…"):
             result = analyze_mask(binary, resolution_m=gsd)
+    except AnalysisBusyError as exc:
+        st.warning(str(exc))
+        log_event("upload_analysis_busy")
+        return
     except ValueError as exc:
         st.info(str(exc))
         log_event("upload_analysis_empty")
@@ -1482,55 +1605,24 @@ def render_dashboard_view(
         zoom=map_zoom,
     )
 
-    view_mode = st.session_state.get("view_mode", "Interactive Map")
     map_column, panel_column = st.columns([6.5, 3.5], gap="medium")
 
     # Stable keys (only the reset counter) so the iframe is NOT remounted on every
     # selection/toggle — the round-tripped center/zoom keeps the view in place.
     reset_n = st.session_state.get("reset_counter", 0)
     with map_column:
-        if view_mode == "Side-by-Side Comparison":
-            baseline_map = build_map(
-                features,
-                criticality,
-                graph,
-                int(st.session_state["selected_node"]),
-                None,
-                show_critical,
-                show_healed,
-                show_spof,
-                failure_mode,
-                center=map_center,
-                zoom=map_zoom,
-            )
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**Baseline Network**")
-                baseline_map_state = st_folium(
-                    baseline_map,
-                    height=640,
-                    use_container_width=True,
-                    returned_objects=["last_object_clicked", "center", "zoom"],
-                    key=f"baseline_map_{reset_n}",
-                )
-            with col2:
-                st.markdown("**Post-Failure Network**")
-                map_state = st_folium(
-                    sim_map,
-                    height=640,
-                    use_container_width=True,
-                    returned_objects=["last_object_clicked", "all_drawings", "center", "zoom"],
-                    key=f"network_map_{reset_n}",
-                )
-        else:
-            baseline_map_state = None
-            map_state = st_folium(
-                sim_map,
-                height=640,
-                use_container_width=True,
-                returned_objects=["last_object_clicked", "all_drawings", "center", "zoom"],
-                key=f"network_map_{reset_n}",
-            )
+        # Side-by-side baseline/simulation comparison mode was removed
+        # (bugs.md §2C P2): the two panes never synced pan/zoom, doubled the
+        # chrome, and streamlit-folium's own docs flag DualMap as flaky —
+        # the orange reroute + dimmed disabled edges already show the
+        # before/after story in this one map.
+        map_state = st_folium(
+            sim_map,
+            height=640,
+            use_container_width=True,
+            returned_objects=["last_object_clicked", "all_drawings", "center", "zoom"],
+            key=f"network_map_{reset_n}",
+        )
 
         st.caption(
             "Brighter roads connect more critical junctions · dashed = inferred/healed · "
@@ -1575,8 +1667,6 @@ def render_dashboard_view(
             st.session_state["disabled_nodes"] = new_disabled
             st.session_state["ablation_source"] = "flood" if new_disabled else None
             st.rerun()
-    if not clicked and baseline_map_state:
-        clicked = baseline_map_state.get("last_object_clicked")
     click_signature = (
         (round(float(clicked["lat"]), 7), round(float(clicked["lng"]), 7))
         if clicked and "lat" in clicked and "lng" in clicked

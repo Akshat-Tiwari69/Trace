@@ -107,3 +107,134 @@ def test_analyze_mask_rejects_empty_mask():
 
     with pytest.raises(ValueError):
         analyze_mask(np.zeros((128, 128), np.uint8), resolution_m=0.5)
+
+
+# --------------------------------------------------------------------------- #
+# A37 follow-up — upload-analysis concurrency guard + mask-size ceiling
+# (bugs.md §5H "no concurrency/queueing guard" applied to the in-process
+# CPU pipeline, not just the ARM-box-level deploy concern).
+# --------------------------------------------------------------------------- #
+def test_analyze_mask_rejects_oversized_mask(monkeypatch):
+    import pytest
+
+    from src.app import upload_analysis
+
+    # Lower the ceiling instead of allocating a real 16MP+ array.
+    monkeypatch.setattr(upload_analysis, "MAX_MASK_PIXELS", 100)
+    with pytest.raises(ValueError, match="MP"):
+        upload_analysis.analyze_mask(np.ones((20, 20), np.uint8), resolution_m=0.5)
+
+
+def test_analyze_mask_busy_when_semaphore_saturated(monkeypatch):
+    """A saturated semaphore returns AnalysisBusyError without running the pipeline."""
+    import pytest
+
+    from src.app import upload_analysis
+
+    calls = []
+
+    def _should_not_run(*args, **kwargs):
+        calls.append(1)
+        raise AssertionError("pipeline should not run while the semaphore is saturated")
+
+    monkeypatch.setattr(
+        "src.pipeline.p2_graph.skeleton_graph.mask_to_skeleton_with_distance",
+        _should_not_run,
+    )
+
+    assert upload_analysis._analysis_semaphore.acquire(blocking=False)
+    try:
+        with pytest.raises(upload_analysis.AnalysisBusyError):
+            upload_analysis.analyze_mask(np.ones((256, 256), np.uint8), resolution_m=0.5)
+    finally:
+        upload_analysis._analysis_semaphore.release()
+    assert calls == []  # the heavy pipeline was never entered
+
+    # The slot is free again afterwards — a subsequent call runs normally.
+    mask = np.zeros((256, 256), np.uint8)
+    for r in (64, 128, 192):
+        mask[r - 1:r + 2, 20:236] = 1
+    for c in (64, 128, 192):
+        mask[20:236, c - 1:c + 2] = 1
+    monkeypatch.undo()
+    result = upload_analysis.analyze_mask(mask, resolution_m=0.5)
+    assert result.n_nodes > 0
+
+
+# --------------------------------------------------------------------------- #
+# A37 follow-up — vectorized edge-style computation for the single GeoJson
+# road layer (bugs.md §2C P2, replacing the per-edge folium.PolyLine loop).
+# Pure pandas/numpy: importable and callable without a Streamlit runtime.
+# --------------------------------------------------------------------------- #
+def _tiny_edge_gdf():
+    import geopandas as gpd
+    from shapely.geometry import LineString
+
+    return gpd.GeoDataFrame(
+        {
+            "u": [1, 3, 5, 7],
+            "v": [2, 4, 6, 8],
+            "is_bridged": [False, True, False, False],
+            "is_bridge": [False, False, True, False],
+            "geometry": [LineString([(0, 0), (1, 1)]) for _ in range(4)],
+        }
+    )
+
+
+def _tiny_colour_scale():
+    import branca.colormap as cm
+
+    from src.app.app import TOKENS
+
+    return cm.LinearColormap(
+        colors=[TOKENS["ramp_0"], TOKENS["ramp_1"], TOKENS["ramp_2"], TOKENS["ramp_3"]],
+        vmin=0.0,
+        vmax=1.0,
+    )
+
+
+def test_compute_edge_styles_matches_original_precedence():
+    from src.app.app import TOKENS, compute_edge_styles
+
+    edges = _tiny_edge_gdf()
+    scores = {1: 0.0, 2: 1.0, 3: 0.5, 4: 0.5, 5: 0.2, 6: 0.2, 7: 0.9, 8: 0.9}
+    styled = compute_edge_styles(
+        "test-fp-a", edges, scores, _tiny_colour_scale(),
+        disabled_nodes=(7, 8), show_healed=True, show_spof=True,
+    )
+    by_pair = {(int(r.u), int(r.v)): r for r in styled.itertuples()}
+
+    observed = by_pair[(1, 2)]
+    assert observed.state == "observed link"
+    assert observed.dash_array is None
+
+    healed = by_pair[(3, 4)]
+    assert healed.state == "healed link"
+    assert healed.dash_array == "8 6"
+    assert healed.weight == 4
+
+    spof = by_pair[(5, 6)]
+    assert spof.state == "critical bridge"
+    assert spof.color == TOKENS["spof"]
+    assert spof.weight == 5
+    assert spof.dash_array is None
+
+    disabled = by_pair[(7, 8)]
+    assert disabled.state == "disabled link"
+    assert disabled.color == TOKENS["disabled"]
+    assert disabled.dash_array == "8 6"
+    assert disabled.opacity == 0.45
+
+
+def test_compute_edge_styles_show_healed_false_drops_bridged_edges():
+    from src.app.app import compute_edge_styles
+
+    edges = _tiny_edge_gdf()
+    scores = {1: 0.0, 2: 1.0, 3: 0.5, 4: 0.5, 5: 0.2, 6: 0.2, 7: 0.9, 8: 0.9}
+    styled = compute_edge_styles(
+        "test-fp-b", edges, scores, _tiny_colour_scale(),
+        disabled_nodes=(), show_healed=False, show_spof=True,
+    )
+    pairs = set(zip(styled["u"].astype(int), styled["v"].astype(int)))
+    assert (3, 4) not in pairs  # the healed/bridged edge was suppressed
+    assert (1, 2) in pairs
