@@ -16,7 +16,6 @@
 - [ ] §3 real-PAN validation of the grayscale proxy — **data-blocked** (needs Cartosat chips)
 - [ ] §5E geopandas major alignment — **operator** (joint dev+prod test)
 - [ ] §6 Caddy rate limiting — **operator** (third-party module install)
-- [ ] §9.1 four-tab app restructure — **deferred** (product decision; Methodology tab exists)
 
 ### Operator checklist (Akshat, on the boxes)
 
@@ -638,7 +637,7 @@ Single-file Streamlit + Folium app: demo AOIs from `data/sample/`, image upload 
 
 ## 8. Prioritized roadmap (impact × effort)
 
-> Waves 1–2 are fully shipped (A36). Wave 3: items 1 (upload loop), 4a (pre-tiling) shipped in A36-L; item 2's MultiGraph half shipped in A37; the probability-map contract half, the A18 spike (3), the job queue (4b), and the four-tab restructure (5) remain — see the Status section.
+> Waves 1–2 are fully shipped (A36). Wave 3: items 1 (upload loop) + 4a (pre-tiling) shipped in A36-L; item 2 shipped across A37 (MultiGraph) + A39 (probability-map contract, per-edge confidence); 4b (filesystem job queue) and 5 (four-tab restructure) shipped in A39. Only item 3 — the A18 SAM-Road++ spike — remains (GPU + external-repo authorization).
 
 ### Wave 1 — this week, mostly S-effort, kills every P0
 1. **Dashboard correctness trio:** cache the Modal call on image bytes (§2B); stable map key + viewport round-trip (§2C, the one M here); `delta_color="normal"` (§2D).
