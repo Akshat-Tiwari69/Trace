@@ -492,12 +492,20 @@ def build_map(
     failure_mode: str,
     center: list[float] | None = None,
     zoom: float | None = None,
+    minimal: bool = False,
 ) -> folium.Map:
     """Build the map with criticality, selection, failure, and reroute states.
 
     ``center``/``zoom`` (when both given) restore the user's last viewport so the
     map doesn't snap back to the whole-network bounds on every rerun — the
     canonical streamlit-folium round-trip (bugs.md §2C).
+
+    ``minimal`` (bugs.md §9.1, Briefing tab): a cheaper, chrome-less variant —
+    single tile layer, no layer control, no draw tool, no full legend (ramp
+    only), and only critical + disabled junctions as dots (ignores the
+    show_critical/show_spof toggles and selected_node, which the Briefing tab
+    doesn't expose). Edge styling/rerouting is unchanged — that's the
+    criticality/simulation story itself, not chrome.
     """
     nodes, edges = split_features(features)
     scores = criticality.set_index("node_id")["betweenness"].to_dict()
@@ -527,13 +535,14 @@ def build_map(
         ):
             road_map.fit_bounds([[min_y, min_x], [max_y, max_x]])
     folium.TileLayer("CartoDB dark_matter", name="Dark map").add_to(road_map)
-    folium.TileLayer(
-        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        attr="Esri — Source: Esri, Maxar, Earthstar Geographics",
-        name="Satellite",
-    ).add_to(road_map)
+    if not minimal:
+        folium.TileLayer(
+            tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            attr="Esri — Source: Esri, Maxar, Earthstar Geographics",
+            name="Satellite",
+        ).add_to(road_map)
 
-    if failure_mode == FLOOD_MODE:
+    if not minimal and failure_mode == FLOOD_MODE:
         from folium.plugins import Draw
         Draw(
             export=False,
@@ -573,12 +582,14 @@ def build_map(
         articulation_ids = set(criticality.loc[criticality["is_articulation"].map(_truthy), "node_id"].astype(int))
 
     nodes_to_show = set()
-    if show_critical:
+    if minimal:
         nodes_to_show.update(critical_ids)
-    if show_spof:
-        nodes_to_show.update(articulation_ids)
-
-    nodes_to_show.add(selected_node)
+    else:
+        if show_critical:
+            nodes_to_show.update(critical_ids)
+        if show_spof:
+            nodes_to_show.update(articulation_ids)
+        nodes_to_show.add(selected_node)
     nodes_to_show.update(disabled_nodes)
 
     if nodes_to_show:
@@ -612,11 +623,35 @@ def build_map(
 
     if simulation and simulation.route:
         add_rerouted_path(road_map, graph, simulation.route)
-    folium.LayerControl(position="topright").add_to(road_map)
-    # The criticality ramp is now folded into semantic_legend() as a CSS
-    # gradient bar (bugs.md §2C P2 cosmetic) — no separate branca bar.
-    road_map.get_root().html.add_child(semantic_legend())
+    if minimal:
+        road_map.get_root().html.add_child(ramp_legend())
+    else:
+        folium.LayerControl(position="topright").add_to(road_map)
+        # The criticality ramp is now folded into semantic_legend() as a CSS
+        # gradient bar (bugs.md §2C P2 cosmetic) — no separate branca bar.
+        road_map.get_root().html.add_child(semantic_legend())
     return road_map
+
+
+def ramp_legend() -> folium.Element:
+    """Chrome-less legend for the Briefing tab (bugs.md §9.1): ramp only, no
+    network-states list — the Briefing map has no disabled/reroute toggles to
+    explain beyond what the single "Simulate the worst failure" button does."""
+    ramp_css = ", ".join(TOKENS[f"ramp_{i}"] for i in range(4))
+    html = f"""
+    <div style="position: fixed; bottom: 20px; right: 12px; z-index: 9999;
+                background: rgba(13,21,38,.92); color: {TOKENS["text"]}; padding: 8px 12px;
+                border: 1px solid {TOKENS["border"]}; border-radius: 10px; font-size: 11px;
+                font-family: 'Fira Sans', sans-serif; box-shadow: 0 8px 24px rgba(2,6,17,.5);">
+      <span style="font-size: 10px; letter-spacing: .04em; color: {TOKENS["muted"]};">
+        Road criticality (low → high)
+      </span>
+      <div style="width: 140px; height: 9px; border-radius: 5px; margin-top: 3px;
+                  border: 1px solid {TOKENS["border"]};
+                  background: linear-gradient(to right, {ramp_css});"></div>
+    </div>
+    """
+    return folium.Element(html)
 
 
 def nearest_critical_node(
@@ -764,13 +799,159 @@ def _clear_last_map_click() -> None:
     st.session_state["last_map_click"] = None
 
 
+def _run_top_chokepoint_demo(critical_nodes: pd.DataFrame) -> None:
+    """Shared demo-CTA logic (bugs.md §9.1): disable the #1-ranked chokepoint.
+
+    Used by both the Briefing tab's "Simulate the worst failure" button and the
+    Analysis tab's "Run demo" button so the ablation itself lives in one place.
+    """
+    st.session_state["disabled_nodes"] = (int(critical_nodes.iloc[0]["node_id"]),)
+    st.session_state["ablation_source"] = "single"
+    st.rerun()
+
+
+def _reset_simulation() -> None:
+    """Shared reset logic (bugs.md §9.1), used by both the Analysis and Briefing tabs."""
+    st.session_state["disabled_nodes"] = ()
+    st.session_state["ablation_source"] = None
+    st.session_state["reset_counter"] = st.session_state.get("reset_counter", 0) + 1
+    st.session_state.pop("map_center", None)  # reframe to the whole network
+    st.session_state.pop("map_zoom", None)
+    st.rerun()
+
+
+def _explain_failure(simulation: SimulationResult) -> str:
+    """One-sentence plain-language explanation of an ablation (Briefing tab, bugs.md §9.1)."""
+    node = simulation.disabled_nodes[0]
+    efficiency_loss = (1.0 - simulation.resilience_index) * 100
+    if simulation.largest_cc_fraction < 0.99:
+        return (
+            f"Losing junction {node} splits the network — "
+            f"{1 - simulation.largest_cc_fraction:.0%} of junctions become unreachable."
+        )
+    route = simulation.route
+    if route and route.rerouted_path and isfinite(route.travel_time_delta_pct):
+        return (
+            f"Losing junction {node} cuts network efficiency by {efficiency_loss:.0f}% "
+            f"and forces a {route.travel_time_delta_pct:.0f}% longer detour on the worst-hit route."
+        )
+    return f"Losing junction {node} cuts network efficiency by {efficiency_loss:.0f}%."
+
+
+def render_briefing(
+    features: gpd.GeoDataFrame,
+    criticality: pd.DataFrame,
+    graph: nx.MultiGraph,
+    simulation: SimulationResult | None,
+) -> None:
+    """Briefing tab (bugs.md §9.1): the judge/demo persona's one-screen pitch.
+
+    Full-width hero, chrome-less map (build_map(minimal=True)), three headline
+    metrics, and a single button that reuses the Analysis tab's demo-CTA logic
+    (_run_top_chokepoint_demo) rather than duplicating the ablation.
+    """
+    nodes, edges = split_features(features)
+    critical_nodes = criticality[criticality["is_critical"].map(_truthy)].sort_values("rank")
+
+    st.subheader("See what one failure costs this city")
+    st.caption(
+        "Route Resilience extracts a routable road network from satellite imagery "
+        "and shows which junctions the network can least afford to lose."
+    )
+
+    ri = simulation.resilience_index if simulation else 1.0
+    metric_junctions, metric_links, metric_ri = st.columns(3)
+    metric_junctions.metric("Junctions", f"{len(nodes):,}")
+    metric_links.metric("Road links", f"{len(edges):,}")
+    metric_ri.metric(
+        "Resilience Index",
+        f"{ri:.3f}",
+        delta=f"{(ri - 1.0) * 100:.1f}%" if simulation else None,
+        delta_color="normal",
+        help="Global efficiency after failure divided by baseline global efficiency.",
+    )
+
+    selected_for_map = (
+        simulation.disabled_nodes[0] if simulation else int(critical_nodes.iloc[0]["node_id"])
+    )
+    briefing_map = build_map(
+        features,
+        criticality,
+        graph,
+        selected_for_map,
+        simulation,
+        show_critical=True,
+        show_healed=True,
+        show_spof=False,
+        failure_mode=SINGLE_MODE,
+        minimal=True,
+    )
+    # No returned_objects / viewport round-trip: the Briefing map is static
+    # (fit-bounds every rerun), keyed only off the shared reset counter.
+    reset_n = st.session_state.get("reset_counter", 0)
+    st_folium(
+        briefing_map,
+        height=420,
+        use_container_width=True,
+        returned_objects=[],
+        key=f"briefing_map_{reset_n}",
+    )
+
+    if simulation:
+        st.success(_explain_failure(simulation))
+        if st.button("Reset", key="briefing_reset"):
+            _reset_simulation()
+    elif st.button(
+        "Simulate the worst failure",
+        type="primary",
+        use_container_width=True,
+        help="Knock out the network's top-ranked chokepoint and see the impact.",
+        key="briefing_simulate",
+    ):
+        _run_top_chokepoint_demo(critical_nodes)
+
+
+def render_export_controls(
+    features: gpd.GeoDataFrame,
+    simulation: SimulationResult | None,
+    critical_nodes: pd.DataFrame,
+    resilience_curve: pd.DataFrame | None,
+) -> None:
+    """Export downloads (bugs.md §9.1) — moved from the flat panel into a popover."""
+    export_col1, export_col2 = st.columns(2)
+    with export_col1:
+        geojson_data = generate_geojson_export(
+            DATA_FINGERPRINT, features, simulation.disabled_nodes if simulation else ()
+        )
+        st.download_button(
+            label="Download GeoJSON",
+            data=geojson_data,
+            file_name="network_state.geojson",
+            mime="application/geo+json",
+            use_container_width=True,
+            help="Download the current map state including disabled nodes and rerouted edges."
+        )
+    with export_col2:
+        png_data = generate_summary_png(simulation, critical_nodes, resilience_curve)
+        st.download_button(
+            label="Download Summary",
+            data=png_data,
+            file_name="resilience_summary.png",
+            mime="image/png",
+            use_container_width=True,
+            help="Download a high-resolution PNG summarizing metrics, curve, and top critical nodes."
+        )
+
+
 def render_panel(
     features: gpd.GeoDataFrame,
     criticality: pd.DataFrame,
     simulation: SimulationResult | None,
     resilience_curve: pd.DataFrame | None = None,
 ) -> None:
-    """Render controls, metrics, ranked hotspots, and live charts."""
+    """Analysis tab's panel (bugs.md §9.1): metrics + export popover, then
+    Scenario/Rankings/Curves sub-tabs. Reorganized from one flat panel — the
+    logic in each sub-tab is unchanged, just relocated."""
     nodes, edges = split_features(features)
     critical_nodes = criticality[criticality["is_critical"].map(_truthy)].sort_values("rank")
     critical_ids = critical_nodes["node_id"].astype(int).tolist()
@@ -781,15 +962,6 @@ def render_panel(
         "Route Resilience maps a city's road network from satellite imagery and "
         "shows which junctions the network can least afford to lose."
     )
-    if st.button(
-        "Run demo: disable the #1 chokepoint",
-        type="primary",
-        use_container_width=True,
-        help="One click: knock out the top-ranked junction and watch the network react.",
-    ):
-        st.session_state["disabled_nodes"] = (int(critical_nodes.iloc[0]["node_id"]),)
-        st.session_state["ablation_source"] = "single"
-        st.rerun()
 
     ri = simulation.resilience_index if simulation else 1.0
     route = simulation.route if simulation else None
@@ -831,6 +1003,39 @@ def render_panel(
                     f"{random_ri:.0%} efficiency — this scenario retains {ri:.0%}."
                 )
         st.caption(ri_context)
+
+    with st.popover("Export", use_container_width=True):
+        render_export_controls(features, simulation, critical_nodes, resilience_curve)
+
+    scenario_tab, rankings_tab, curves_tab = st.tabs(["Scenario", "Rankings", "Curves"])
+    with scenario_tab:
+        render_scenario_tab(
+            criticality, edges, critical_nodes, critical_ids, scores, ranks, simulation, route
+        )
+    with rankings_tab:
+        render_rankings_tab(critical_nodes, nodes, edges)
+    with curves_tab:
+        render_curves_tab(resilience_curve)
+
+
+def render_scenario_tab(
+    criticality: pd.DataFrame,
+    edges: gpd.GeoDataFrame,
+    critical_nodes: pd.DataFrame,
+    critical_ids: list[int],
+    scores: dict[int, float],
+    ranks: dict[int, float],
+    simulation: SimulationResult | None,
+    route: RouteResult | None,
+) -> None:
+    """Scenario sub-tab (bugs.md §9.1): failure-mode picker, closures, toggles, status."""
+    if st.button(
+        "Run demo: disable the #1 chokepoint",
+        type="primary",
+        use_container_width=True,
+        help="One click: knock out the top-ranked junction and watch the network react.",
+    ):
+        _run_top_chokepoint_demo(critical_nodes)
 
     st.subheader("Scenario controls")
     failure_mode = st.radio(
@@ -890,12 +1095,7 @@ def render_panel(
         log_event("simulate_closure", n_closed=len(base) + 1, compound=add_more)
         st.rerun()
     if reset_column.button("Reset", use_container_width=True):
-        st.session_state["disabled_nodes"] = ()
-        st.session_state["ablation_source"] = None
-        st.session_state["reset_counter"] = st.session_state.get("reset_counter", 0) + 1
-        st.session_state.pop("map_center", None)  # reframe to the whole network
-        st.session_state.pop("map_zoom", None)
-        st.rerun()
+        _reset_simulation()
 
     # Active-closure chips: each removable so a compound scenario can be pared back.
     if single_active and len(current_closures) >= 1:
@@ -936,22 +1136,32 @@ def render_panel(
     else:
         st.info("No simulation running. Select a junction, then simulate its closure.")
 
-    if resilience_curve is not None:
-        st.subheader("Resilience Degradation Curve")
-        curve_data = resilience_curve.set_index("n_removed")
-        if "targeted_resilience_index" in curve_data.columns and "random_resilience_index" in curve_data.columns:
-            chart_data = curve_data.rename(columns={
-                "targeted_resilience_index": "Targeted failure",
-                "random_resilience_index": "Random failure"
-            })[["Targeted failure", "Random failure"]]
-        else:
-            chart_data = curve_data
-        st.line_chart(
-            chart_data,
-            color=[TOKENS["disabled"], TOKENS["selected"]] if len(chart_data.columns) == 2 else None,
-            height=200,
-        )
 
+def render_curves_tab(resilience_curve: pd.DataFrame | None) -> None:
+    """Curves sub-tab (bugs.md §9.1): the resilience degradation chart."""
+    if resilience_curve is None:
+        st.info("Resilience curve not available for this dataset.")
+        return
+    st.subheader("Resilience Degradation Curve")
+    curve_data = resilience_curve.set_index("n_removed")
+    if "targeted_resilience_index" in curve_data.columns and "random_resilience_index" in curve_data.columns:
+        chart_data = curve_data.rename(columns={
+            "targeted_resilience_index": "Targeted failure",
+            "random_resilience_index": "Random failure"
+        })[["Targeted failure", "Random failure"]]
+    else:
+        chart_data = curve_data
+    st.line_chart(
+        chart_data,
+        color=[TOKENS["disabled"], TOKENS["selected"]] if len(chart_data.columns) == 2 else None,
+        height=200,
+    )
+
+
+def render_rankings_tab(
+    critical_nodes: pd.DataFrame, nodes: gpd.GeoDataFrame, edges: gpd.GeoDataFrame
+) -> None:
+    """Rankings sub-tab (bugs.md §9.1): the selectable chokepoint leaderboard."""
     st.subheader("Top critical junctions")
     # Numeric scores (not stringified) so sorting is true-numeric and the score
     # bar renders; clicking a row selects that junction and recentres the map (§2D).
@@ -984,34 +1194,6 @@ def render_panel(
                 ]
             st.rerun()
     st.caption(f"Network: {len(nodes):,} junctions · {len(edges):,} road links")
-
-    st.divider()
-    st.subheader("Export & Reports")
-    export_col1, export_col2 = st.columns(2)
-
-    with export_col1:
-        geojson_data = generate_geojson_export(
-            DATA_FINGERPRINT, features, simulation.disabled_nodes if simulation else ()
-        )
-        st.download_button(
-            label="Download GeoJSON",
-            data=geojson_data,
-            file_name="network_state.geojson",
-            mime="application/geo+json",
-            use_container_width=True,
-            help="Download the current map state including disabled nodes and rerouted edges."
-        )
-
-    with export_col2:
-        png_data = generate_summary_png(simulation, critical_nodes, resilience_curve)
-        st.download_button(
-            label="Download Summary",
-            data=png_data,
-            file_name="resilience_summary.png",
-            mime="image/png",
-            use_container_width=True,
-            help="Download a high-resolution PNG summarizing metrics, curve, and top critical nodes."
-        )
 
 
 def apply_design_theme() -> None:
@@ -1531,6 +1713,15 @@ def main() -> None:
             criticality.sort_values("rank").iloc[0]["node_id"]
         )
     disabled_nodes = st.session_state.get("disabled_nodes", ())
+    # Computed once per rerun and shared by the Briefing and Analysis tabs
+    # (both need the current ablation's metrics) rather than re-simulating —
+    # simulate_ablation is cache_data-keyed on disabled_nodes anyway, but this
+    # avoids even the cache-lookup duplication (bugs.md §9.1).
+    if disabled_nodes:
+        with st.spinner("Simulating failure…"):
+            simulation = simulate_ablation(DATA_FINGERPRINT, graph, disabled_nodes)
+    else:
+        simulation = None
 
     # Full-width brand header with an honest state chip: the pulsing accent
     # chip only appears while a simulation is actually active.
@@ -1560,11 +1751,19 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    tab_map, tab_method = st.tabs(["Map", "Methodology"])
+    tab_briefing, tab_analysis, tab_upload, tab_method = st.tabs(
+        ["Briefing", "Analysis", "Your imagery", "Methodology"]
+    )
+    with tab_briefing:
+        render_briefing(features, criticality, graph, simulation)
+    with tab_analysis:
+        render_dashboard_view(
+            features, criticality, graph, resilience_curve, critical_ids, simulation
+        )
+    with tab_upload:
+        render_live_detection()
     with tab_method:
         render_methodology()
-    with tab_map:
-        render_dashboard_view(features, criticality, graph, resilience_curve, critical_ids)
 
 
 def render_methodology() -> None:
@@ -1622,22 +1821,17 @@ def render_methodology() -> None:
 
     st.caption(
         "Accessibility: the map is mouse-driven, but every junction is also "
-        "reachable via the junction picker and the ranked table in the Map tab, "
+        "reachable via the junction picker and the ranked table in the Analysis tab, "
         "and all colour states carry text labels."
     )
 
 
 def render_dashboard_view(
-    features, criticality, graph, resilience_curve, critical_ids
+    features, criticality, graph, resilience_curve, critical_ids, simulation
 ) -> None:
-    """The interactive Map tab: network map + control panel."""
-    disabled_nodes = st.session_state.get("disabled_nodes", ())
-    if disabled_nodes:
-        with st.spinner("Simulating failure…"):
-            simulation = simulate_ablation(DATA_FINGERPRINT, graph, disabled_nodes)
-    else:
-        simulation = None
-
+    """The Analysis tab (bugs.md §9.1): the planner's full tooling — network map
+    + control panel. ``simulation`` is computed once in main() and shared with
+    the Briefing tab rather than re-simulated here."""
     show_critical = st.session_state.get("show_critical", True)
     show_healed = st.session_state.get("show_healed", True)
     show_spof = st.session_state.get("show_spof", True)
@@ -1686,7 +1880,6 @@ def render_dashboard_view(
             "orange = reroute · red = disabled. The network overlay renders even if "
             "basemap tiles fail to load."
         )
-        render_live_detection()
 
     # Persist the viewport the component reports so the next rerun rebuilds the map
     # where the user left it (guarded against the None first render).
