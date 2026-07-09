@@ -19,6 +19,28 @@ if TYPE_CHECKING:
     import networkx as nx
 
 
+# Above this many nodes, exact all-pairs betweenness (O(V·E)) makes an
+# interactive ablation click take tens of seconds; sample this many sources
+# instead — benchmarked at Spearman ~0.98 vs exact on a 2,500-node grid (S9).
+AUTO_K_NODE_THRESHOLD = 1000
+AUTO_K_SAMPLES = 150
+
+
+def auto_k(graph: "nx.Graph", k: int | None) -> int | None:
+    """Resolve the betweenness sample size for the interactive path (bugs.md §4).
+
+    Honours an explicit ``k`` if given; otherwise returns ``AUTO_K_SAMPLES`` once
+    the graph exceeds ``AUTO_K_NODE_THRESHOLD`` (so city-scale graphs stay
+    responsive) and ``None`` (exact) below it — small graphs like the committed
+    demo are unaffected, so their numbers never drift.
+    """
+    if k is not None:
+        return k
+    if graph.number_of_nodes() > AUTO_K_NODE_THRESHOLD:
+        return AUTO_K_SAMPLES
+    return None
+
+
 def compute_betweenness(
     graph: "nx.Graph",
     weight: str = "length_m",
@@ -28,12 +50,15 @@ def compute_betweenness(
     """Return ``{node_id: betweenness}`` normalised to ``[0, 1]``.
 
     ``k`` (if given and < node count) switches to k-sample approximate
-    betweenness for speed on large graphs; ``seed`` keeps it reproducible.
+    betweenness for speed on large graphs; ``k=None`` auto-selects sampling above
+    ``AUTO_K_NODE_THRESHOLD`` nodes (see :func:`auto_k`). ``seed`` keeps it
+    reproducible.
     """
     import networkx as nx
 
     n = graph.number_of_nodes()
-    use_k = k if (k is not None and k < n) else None
+    resolved = auto_k(graph, k)
+    use_k = resolved if (resolved is not None and resolved < n) else None
     return nx.betweenness_centrality(
         graph, k=use_k, weight=weight, normalized=True, seed=seed
     )
@@ -104,11 +129,23 @@ def rank_table(graph: "nx.Graph", bc: dict[int, float]) -> list[dict]:
     Columns match the §4 contract: ``node_id, betweenness, rank, is_critical``
     (plus ``is_articulation`` from :func:`annotate_cut_structure`, and ``x, y`` so
     the dashboard can place the ranked list on the map).
+
+    Note ``rank`` orders by betweenness — **traffic importance**, not failure
+    importance: an articulation point with modest through-traffic can rank low
+    while still being a hard single point of failure (see ``is_articulation``).
+
+    Requires :func:`annotate_criticality` to have run first (fails loudly on
+    un-annotated nodes rather than silently reporting ``is_critical=False``).
     """
     ranked = sorted(bc, key=lambda n: bc[n], reverse=True)
     rows = []
     for rank, node_id in enumerate(ranked, start=1):
         data = graph.nodes[node_id]
+        if "betweenness" not in data:
+            raise ValueError(
+                f"node {node_id} lacks 'betweenness' — run annotate_criticality() "
+                "before rank_table() (ordering bug in the caller)"
+            )
         rows.append(
             {
                 "node_id": int(node_id),
@@ -143,17 +180,29 @@ class BetweennessCache:
     node-ablation click operates on a *perturbed* graph whose fingerprint differs,
     so it recomputes — but every read of the unchanged baseline is a free cache
     hit. Recompute only when the graph (or weight/k/seed) actually changes.
+
+    Bounded (LRU, ``maxsize``) so a long session of distinct ablations can't grow
+    the store without limit — the baseline plus a working set of recent
+    perturbations is all that's ever hot (bugs.md §4).
     """
 
-    def __init__(self) -> None:
-        self._store: dict = {}
+    def __init__(self, maxsize: int = 64) -> None:
+        from collections import OrderedDict
+
+        self._store: "OrderedDict" = OrderedDict()
+        self._maxsize = maxsize
 
     def get(self, graph: "nx.Graph", weight: str = "length_m",
             k: int | None = None, seed: int = 42) -> dict[int, float]:
         key = (_graph_fingerprint(graph, weight), weight, k, seed)
-        if key not in self._store:
-            self._store[key] = compute_betweenness(graph, weight=weight, k=k, seed=seed)
-        return self._store[key]
+        if key in self._store:
+            self._store.move_to_end(key)  # mark most-recently-used
+            return self._store[key]
+        value = compute_betweenness(graph, weight=weight, k=k, seed=seed)
+        self._store[key] = value
+        if len(self._store) > self._maxsize:
+            self._store.popitem(last=False)  # evict least-recently-used
+        return value
 
     def clear(self) -> None:
         self._store.clear()

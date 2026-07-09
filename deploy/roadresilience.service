@@ -7,7 +7,9 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/Trace
 Environment=PYTHONPATH=%h/Trace
-ExecStart=%h/Trace/.venv/bin/streamlit run src/app/app.py --server.port 8501 --server.address 0.0.0.0 --server.headless true --browser.gatherUsageStats false
+# Bind to loopback ONLY — Caddy (80/443) is the sole public entrypoint and
+# proxies to 127.0.0.1:8501. Never bind 0.0.0.0 / open 8501 publicly.
+ExecStart=%h/Trace/.venv/bin/streamlit run src/app/app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false
 Restart=on-failure
 RestartSec=5
 

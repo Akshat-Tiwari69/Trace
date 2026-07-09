@@ -9,7 +9,28 @@ P2 code path is identical, only the input mask differs.
 from __future__ import annotations
 
 import dataclasses
+import re
 from pathlib import Path
+
+# AOI ids are interpolated into artifact filenames (mask/graph/CSV paths), so
+# they must never carry path separators or traversal sequences.
+_AOI_PATTERN = re.compile(r"^[a-z0-9_-]{1,64}$")
+
+
+def sanitize_aoi(aoi: str) -> str:
+    """Validate an AOI id for safe use in artifact paths; return it unchanged.
+
+    Accepts only ``^[a-z0-9_-]{1,64}$`` (lowercase letters, digits, underscore,
+    hyphen). Anything else — path separators, ``..``, spaces, uppercase, empty —
+    raises ``ValueError`` so a hostile or mistyped id can never escape the data
+    directories via path interpolation.
+    """
+    if not isinstance(aoi, str) or not _AOI_PATTERN.fullmatch(aoi):
+        raise ValueError(
+            f"invalid AOI id {aoi!r}: must be 1-64 chars of lowercase letters, "
+            "digits, '_' or '-' (no path separators, dots, or spaces)"
+        )
+    return aoi
 
 
 @dataclasses.dataclass
@@ -47,6 +68,10 @@ class GraphConfig:
     interim_dir: Path = Path("data/interim")
     processed_dir: Path = Path("data/processed")
 
+    def __post_init__(self) -> None:
+        """Guard every path-interpolating consumer: reject unsafe AOI ids."""
+        sanitize_aoi(self.aoi)
+
     @property
     def mask_path(self) -> Path:
         """Input contract: the binary road mask from P1 (or the OSM spike)."""
@@ -56,6 +81,16 @@ class GraphConfig:
     def manifest_path(self) -> Path:
         """Optional grid alignment (CRS + transform) written alongside the mask."""
         return self.interim_dir / self.aoi / "manifest.json"
+
+    @property
+    def provenance_path(self) -> Path:
+        """P1 provenance record (checkpoint/threshold/commit) written by inference."""
+        return self.interim_dir / self.aoi / "provenance.json"
+
+    @property
+    def processed_provenance_path(self) -> Path:
+        """Provenance copied next to the processed graph/criticality artifacts."""
+        return self.processed_dir / f"{self.aoi}_provenance.json"
 
     @property
     def graphml_path(self) -> Path:

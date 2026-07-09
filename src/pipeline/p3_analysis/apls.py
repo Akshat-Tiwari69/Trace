@@ -108,16 +108,22 @@ def _apls_oneway(src, dst, snap: dict, n_samples: int, weight: str, seed: int) -
 
     nodes = list(src.nodes)
     if len(nodes) < 2:
-        return 1.0
+        # A <2-node graph can't support any routing claim — that's a failure of
+        # the graph, not a perfect score.
+        print("[apls] WARNING: <2 nodes in one direction — scoring 0.0")
+        return 0.0
     rng = random.Random(seed)
     contribs: list[float] = []
+    skipped = 0
     for _ in range(n_samples):
         a, b = rng.sample(nodes, 2)
         try:
             length_src = nx.shortest_path_length(src, a, b, weight=weight)
         except nx.NetworkXNoPath:
+            skipped += 1
             continue  # unreachable in src → not a routing claim, skip
         if length_src <= 0:
+            skipped += 1
             continue
         a2, b2 = snap.get(a), snap.get(b)
         if a2 is None or b2 is None or a2 == b2:
@@ -129,7 +135,17 @@ def _apls_oneway(src, dst, snap: dict, n_samples: int, weight: str, seed: int) -
             contribs.append(0.0)
             continue
         contribs.append(max(0.0, 1.0 - abs(length_src - length_dst) / length_src))
-    return sum(contribs) / len(contribs) if contribs else 1.0
+    if not contribs:
+        # Every sampled pair was unreachable — a severely fragmented graph, which
+        # is exactly the failure APLS exists to catch. A perfect-score fallback
+        # here would report 1.0 for a graph that can't route anything.
+        print(f"[apls] WARNING: all {n_samples} sampled pairs unreachable "
+              "(insufficient_reachable_pairs) — scoring 0.0, not 1.0")
+        return 0.0
+    if skipped > n_samples // 2:
+        print(f"[apls] WARNING: {skipped}/{n_samples} sampled pairs unreachable — "
+              "effective sample is small; treat this score with caution")
+    return sum(contribs) / len(contribs)
 
 
 def apls(
@@ -183,10 +199,17 @@ def build_osm_truth(bbox: tuple[float, float, float, float], path: Path):
     import osmnx as ox
 
     west, south, east, north = bbox
-    osm = ox.graph_from_bbox(
-        north=north, south=south, east=east, west=west,
-        network_type="drive", simplify=True, retain_all=True, truncate_by_edge=True,
-    )
+    try:
+        osm = ox.graph_from_bbox(
+            north=north, south=south, east=east, west=west,
+            network_type="drive", simplify=True, retain_all=True, truncate_by_edge=True,
+        )
+    except Exception as exc:  # Overpass down / rate-limited / network error
+        raise SystemExit(
+            f"OSM ground-truth fetch failed ({type(exc).__name__}: {exc}).\n"
+            "  Overpass may be unreachable or rate-limited — retry in a few minutes,\n"
+            f"  or reuse a previously cached truth file at {path} if one exists."
+        ) from exc
     relabel = {osmid: i for i, osmid in enumerate(osm.nodes)}
     truth = nx.Graph()
     for osmid, i in relabel.items():

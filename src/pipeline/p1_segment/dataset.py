@@ -125,6 +125,14 @@ class RoadTileDataset(Dataset):
     window each time, so a 1024px DeepGlobe tile (16 non-overlapping windows)
     is actually used instead of sampling just one crop per epoch. Big data-
     efficiency win; keep it at 1 for deterministic val (centre crop).
+
+    ``foreground_bias`` (bugs.md §3): with this probability, a sampled crop is
+    required to contain at least one road pixel — road fraction is only ~5–8 %,
+    so uniform crops often carry zero gradient signal. Implemented as rejection
+    resampling of the whole transform (up to 50 tries, then keep the last crop),
+    so it composes with any augmentation stack and any albumentations version.
+    ``0.0`` (default) is the previous uniform behavior. Source tiles with no
+    road pixels at all are passed through unchanged (retrying is futile).
     """
 
     def __init__(
@@ -132,12 +140,16 @@ class RoadTileDataset(Dataset):
         pairs: list[tuple[Path, Path]],
         transform: Any | None = None,
         crops_per_image: int = 1,
+        foreground_bias: float = 0.0,
     ) -> None:
         if not pairs:
             raise ValueError("RoadTileDataset got no (image, mask) pairs")
+        if not 0.0 <= foreground_bias <= 1.0:
+            raise ValueError(f"foreground_bias must be in [0, 1], got {foreground_bias}")
         self.pairs = pairs
         self.transform = transform
         self.crops_per_image = max(1, crops_per_image)
+        self.foreground_bias = foreground_bias
 
     def __len__(self) -> int:
         return len(self.pairs) * self.crops_per_image
@@ -150,9 +162,17 @@ class RoadTileDataset(Dataset):
         return image, mask
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        import random
+
         image, mask = self._read(*self.pairs[idx % len(self.pairs)])
         if self.transform is not None:
             out = self.transform(image=image, mask=mask)
+            if (self.foreground_bias > 0 and mask.any()
+                    and random.random() < self.foreground_bias):
+                for _ in range(49):  # rejection-resample: require a road pixel
+                    if float(out["mask"].sum()) > 0:
+                        break
+                    out = self.transform(image=image, mask=mask)
             image, mask = out["image"], out["mask"]
             mask = mask.unsqueeze(0).float()
             return image, mask

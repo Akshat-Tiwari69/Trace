@@ -12,9 +12,9 @@ Plain English: an "entity" is just a *thing the system keeps track of*. Here are
 |---|---|---|
 | **AOI** (Area of Interest) | A city/region being analyzed | `aoi_id`, `name`, `bbox`, `crs` |
 | **ImageTile** | One satellite image patch | `tile_id`, `aoi_id`, `source` (Sentinel-2/LISS-IV/Cartosat-3), `resolution_m`, `path`, `crs`, `transform` |
-| **RoadMask** | Binary road/not-road image from Phase I | `mask_id`, `tile_id`, `path`, `model_version`, `threshold` |
+| **RoadMask** | Binary road/not-road image from Phase I | `mask_id`, `tile_id`, `path`, `model_version`, `threshold` — *`model_version`/`threshold` are specified but not yet persisted in artifacts (see `bugs.md` §5A provenance finding)* |
 | **RoadGraph** | The routable network for an AOI (the core entity) | `graph_id`, `aoi_id`, `node_count`, `edge_count`, `crs` |
-| **GraphNode** | An intersection or endpoint | `node_id`, `geometry` (lat/lon), `degree`, `type` (intersection / endpoint / bridged), `betweenness`, `is_critical`, `is_disabled` |
+| **GraphNode** | An intersection or endpoint | `node_id`, `geometry` (lat/lon), `degree`, `type` (intersection / endpoint / bridged), `betweenness`, `is_critical`, `is_disabled` — *`is_disabled` is **runtime-only** (dashboard session state); it is never persisted in artifacts* |
 | **GraphEdge** | A road segment between two nodes | `edge_id`, `u`, `v`, `geometry`, `length_m` (weight), `is_bridged`, `edge_betweenness` |
 | **CriticalityResult** | Centrality scores + ranking for a graph | `graph_id`, per-node/edge scores, `rank` |
 | **SimulationScenario** | One node-ablation stress test | `scenario_id`, `graph_id`, `disabled_nodes[]`, `resilience_index`, `travel_time_delta_pct`, `largest_cc_fraction` |
@@ -26,15 +26,15 @@ Plain English: an "entity" is just a *thing the system keeps track of*. Here are
 |---|---|---|
 | `data/raw/` | Source imagery, OSM extracts | GeoTIFF, OSM PBF/GeoJSON *(git-ignored)* |
 | `data/interim/` | Image tiles, label masks | GeoTIFF, PNG/NPY |
-| `data/processed/` | Road graph, criticality scores | **GraphML** or **GeoPackage**, CSV/Parquet |
+| `data/processed/` | Road graph, criticality scores | **GraphML** (+ GeoJSON for the dashboard), CSV/Parquet — *GeoPackage was listed as an option but is unused in practice* |
 | `data/outputs/` | Exports, scenario results, reports | GeoJSON, JSON/CSV |
 | `models/` | Trained model checkpoints | `.pt`/`.pth` *(git-ignored)* |
 
-**Core graph schema (GraphML / GeoPackage):**
+**Core graph schema (GraphML; GeoPackage unused in practice — artifacts ship as GraphML/GeoJSON):**
 
 ```
 Node:  node_id (int, unique) | x, y (float) | degree (int)
-       | type (str) | betweenness (float 0–1) | is_critical (bool) | is_disabled (bool)
+       | type (str) | betweenness (float 0–1) | is_critical (bool) | is_disabled (bool, runtime-only — never persisted)
 Edge:  u (int) | v (int) | length_m (float > 0) | geometry (LineString)
        | is_bridged (bool) | edge_betweenness (float 0–1)
 ```

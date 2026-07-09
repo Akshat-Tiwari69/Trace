@@ -17,11 +17,47 @@ Coordinates are expected in WGS84 lon/lat by the time this runs (call
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     import networkx as nx
+
+
+def atomic_write(path: Path, writer: Callable[[Path], None]) -> None:
+    """Write to ``<path>.tmp`` via ``writer``, then atomically replace ``path``.
+
+    A crash mid-write leaves the previous artifact intact (the dashboard reads
+    these files live), instead of a truncated GraphML/GeoJSON/CSV. The temp file
+    lives in the same directory so ``os.replace`` stays atomic (same filesystem).
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        writer(tmp)
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)  # no-op after a successful replace
+
+
+def _validate_edge_lengths(graph: "nx.Graph", source: Path) -> None:
+    """Enforce the artifact contract: every edge must carry ``length_m > 0``.
+
+    Zero-length (coincident-node) edges silently corrupt the shortest-path
+    metrics downstream — ``global_efficiency`` skips ``dist <= 0`` pairs, so a
+    degenerate edge reads as "unreachable" and under-counts efficiency. Fail
+    loudly at load time instead.
+    """
+    for u, v, data in graph.edges(data=True):
+        length = float(data.get("length_m", 0.0))
+        if length <= 0.0:
+            raise ValueError(
+                f"edge ({u}, {v}) in {source} has length_m={length} — the graph "
+                "contract requires length_m > 0 on every edge (upstream P2 should "
+                "have pruned degenerate edges; re-run the graph build)"
+            )
 
 
 def save_graphml(graph: "nx.Graph", path: Path) -> None:
@@ -32,11 +68,10 @@ def save_graphml(graph: "nx.Graph", path: Path) -> None:
     for _, _, data in out.edges(data=True):
         if isinstance(data.get("geometry"), list):
             data["geometry"] = json.dumps(data["geometry"])
-    for key in ("heal", "simplify", "consolidate", "polyline"):  # graph-level metadata → JSON string
+    for key in ("heal", "simplify", "consolidate", "polyline", "provenance"):  # graph-level metadata → JSON string
         if isinstance(out.graph.get(key), dict):
             out.graph[key] = json.dumps(out.graph[key])
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    nx.write_graphml(out, str(path))
+    atomic_write(Path(path), lambda tmp: nx.write_graphml(out, str(tmp)))
 
 
 def load_graphml(path: Path) -> "nx.Graph":
@@ -48,9 +83,10 @@ def load_graphml(path: Path) -> "nx.Graph":
         geom = data.get("geometry")
         if isinstance(geom, str):
             data["geometry"] = json.loads(geom)
-    for key in ("heal", "simplify", "consolidate", "polyline"):  # decode graph-level metadata
+    for key in ("heal", "simplify", "consolidate", "polyline", "provenance"):  # decode graph-level metadata
         if isinstance(graph.graph.get(key), str):
             graph.graph[key] = json.loads(graph.graph[key])
+    _validate_edge_lengths(graph, Path(path))
     return graph
 
 
@@ -90,35 +126,38 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
             [graph.nodes[u]["x"], graph.nodes[u]["y"]],
             [graph.nodes[v]["x"], graph.nodes[v]["y"]],
         ]
+        props = {
+            "feature_type": "edge",
+            "u": int(u),
+            "v": int(v),
+            "length_m": round(float(data.get("length_m", 0.0)), 3),
+            "is_bridged": bool(data.get("is_bridged", False)),
+            "is_bridge": bool(data.get("is_bridge", False)),
+            "edge_betweenness": float(data.get("edge_betweenness", 0.0)),
+        }
+        if data.get("width_m") is not None:  # optional road width (bugs.md §4)
+            props["width_m"] = round(float(data["width_m"]), 3)
         features.append(
             {
                 "type": "Feature",
                 "geometry": {"type": "LineString", "coordinates": [rounded(c) for c in coords]},
-                "properties": {
-                    "feature_type": "edge",
-                    "u": int(u),
-                    "v": int(v),
-                    "length_m": round(float(data.get("length_m", 0.0)), 3),
-                    "is_bridged": bool(data.get("is_bridged", False)),
-                    "is_bridge": bool(data.get("is_bridge", False)),
-                    "edge_betweenness": float(data.get("edge_betweenness", 0.0)),
-                },
+                "properties": props,
             }
         )
 
     fc = {"type": "FeatureCollection", "features": features}
     # Carry build-time graph metadata (authoritative heal/simplify stats) so the
     # evaluator reports true numbers instead of re-deriving them from the graph.
-    meta = {k: graph.graph[k] for k in ("heal", "simplify", "consolidate", "polyline") if k in graph.graph}
+    meta = {k: graph.graph[k] for k in ("heal", "simplify", "consolidate", "polyline", "provenance") if k in graph.graph}
     if meta:
         fc["meta"] = meta
     return fc
 
 
 def save_geojson(graph: "nx.Graph", path: Path) -> None:
-    """Write the graph as a GeoJSON FeatureCollection."""
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(graph_to_geojson(graph)))
+    """Write the graph as a GeoJSON FeatureCollection (atomically)."""
+    payload = json.dumps(graph_to_geojson(graph))
+    atomic_write(Path(path), lambda tmp: tmp.write_text(payload))
 
 
 def load_geojson_graph(path: Path) -> "nx.Graph":
@@ -152,12 +191,14 @@ def load_geojson_graph(path: Path) -> "nx.Graph":
     for feat in fc["features"]:
         props = feat["properties"]
         if props.get("feature_type") == "edge":
-            graph.add_edge(
-                int(props["u"]),
-                int(props["v"]),
+            attrs = dict(
                 length_m=float(props.get("length_m", 0.0)),
                 is_bridged=bool(props.get("is_bridged", False)),
                 is_bridge=bool(props.get("is_bridge", False)),
                 edge_betweenness=float(props.get("edge_betweenness", 0.0)),
             )
+            if props.get("width_m") is not None:  # optional road width (bugs.md §4)
+                attrs["width_m"] = float(props["width_m"])
+            graph.add_edge(int(props["u"]), int(props["v"]), **attrs)
+    _validate_edge_lengths(graph, Path(path))
     return graph

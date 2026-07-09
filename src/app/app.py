@@ -1,25 +1,67 @@
 """Interactive Streamlit dashboard for road-network resilience."""
 
+import base64
 from dataclasses import dataclass
+import io
 from itertools import combinations
+import json
+import logging
 from math import inf, isfinite
 import os
 from pathlib import Path
+import threading
+import time
+import urllib.error
+import urllib.request
 
 import branca.colormap as cm
 import folium
 import geopandas as gpd
 import networkx as nx
+import numpy as np
 import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
-from folium.plugins import FastMarkerCluster
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import io
+from matplotlib.figure import Figure
+from PIL import Image
 
 from src.pipeline.p3_analysis.resilience import resilience_index
+
+# Refuse to decode anything above 4096x4096 px (PIL decompression-bomb guard
+# for the public upload path; PIL errors at 2x this pixel count).
+Image.MAX_IMAGE_PIXELS = 4096 * 4096
+
+# Single source of truth for every colour in the app: the CSS theme, the map
+# legend, edge/marker styling, the charts, and the PNG export all read from
+# here. The ramp_* stops are cividis clipped to its upper range (0.3-1.0),
+# colourblind-safe and legible on dark tiles; precomputed once from
+# matplotlib.cm.cividis(np.linspace(0.3, 1.0, 4)) and hardcoded.
+TOKENS: dict[str, str] = {
+    "bg": "#0B1220",
+    "surface": "#121C30",
+    "surface_2": "#16233B",
+    "border": "#24334E",
+    "border_strong": "#33456A",
+    "text": "#E2E8F0",
+    "muted": "#8FA3BF",
+    "amber": "#F59E0B",
+    "amber_deep": "#D97706",
+    "blue": "#38BDF8",
+    "white": "#FFFFFF",
+    "selected": "#56B4E9",
+    "disabled": "#D55E00",
+    "reroute": "#E69F00",
+    "spof": "#FB7185",
+    "ramp_0": "#4F576C",
+    "ramp_1": "#848279",
+    "ramp_2": "#C0B16A",
+    "ramp_3": "#FEE838",
+}
+
+SINGLE_MODE = "Single junction"
+FLOOD_MODE = "Flood area (draw on map)"
 
 
 def find_repo_root() -> Path:
@@ -33,6 +75,11 @@ def find_repo_root() -> Path:
 REPO_ROOT = find_repo_root()
 SAMPLE_GEOJSON = REPO_ROOT / "data" / "sample" / "panaji_demo_graph.geojson"
 SAMPLE_CRITICALITY = REPO_ROOT / "data" / "sample" / "panaji_demo_criticality.csv"
+
+# Cache fingerprint derived from the data source, threaded through the cached
+# graph builder and ablation so a future second dataset can't silently serve
+# Panaji results from a stale cache entry.
+DATA_FINGERPRINT = SAMPLE_GEOJSON.relative_to(REPO_ROOT).as_posix()
 
 
 def _truthy(value: object) -> bool:
@@ -115,9 +162,10 @@ def split_features(
 
 
 @st.cache_resource(show_spinner="Building routable graph...")
-def graph_from_features(_features: gpd.GeoDataFrame) -> nx.Graph:
+def graph_from_features(fingerprint: str, _features: gpd.GeoDataFrame) -> nx.Graph:
     """Convert the map-ready GeoJSON features into a routable graph.
 
+    ``fingerprint`` identifies the data source in the cache key.
     ``_features`` is underscore-prefixed so Streamlit skips hashing the
     (unhashable) GeoDataFrame for the cache key — required under cache_resource.
     """
@@ -237,7 +285,7 @@ def simulate_ablation(graph_fingerprint: str, _graph: nx.Graph, nodes: tuple[int
     """Disable nodes and compute resilience plus a representative reroute (if single node)."""
     metrics = resilience_index(_graph, removed_nodes=list(nodes))
     route = representative_reroute(_graph, nodes[0]) if len(nodes) == 1 else None
-    
+
     return SimulationResult(
         disabled_nodes=nodes,
         resilience_index=float(metrics["resilience_index"]),
@@ -248,19 +296,19 @@ def simulate_ablation(graph_fingerprint: str, _graph: nx.Graph, nodes: tuple[int
 
 def semantic_legend() -> folium.Element:
     """Create a labelled map legend for semantic route states."""
-    html = """
+    html = f"""
     <div style="position: fixed; bottom: 36px; right: 12px; z-index: 9999;
-                background: rgba(13,21,38,.92); color: #E2E8F0; padding: 10px 14px;
-                border: 1px solid #24334E; border-radius: 10px; font-size: 12px;
+                background: rgba(13,21,38,.92); color: {TOKENS["text"]}; padding: 10px 14px;
+                border: 1px solid {TOKENS["border"]}; border-radius: 10px; font-size: 12px;
                 line-height: 1.75; font-family: 'Fira Sans', sans-serif;
                 box-shadow: 0 8px 24px rgba(2,6,17,.5); backdrop-filter: blur(6px);">
       <b style="font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase;
-                color: #8FA3BF;">Network states</b><br>
-      <span style="color:#56B4E9">●</span> selected junction<br>
-      <span style="color:#D55E00">●</span> disabled junction / links<br>
-      <span style="color:#E69F00">━</span> rerouted path<br>
-      <span style="color:#aaaaaa">┄</span> healed road<br>
-      <span style="color:#FB7185">●</span> / <span style="color:#FB7185">━</span> single-point-of-failure
+                color: {TOKENS["muted"]};">Network states</b><br>
+      <span style="color:{TOKENS["selected"]}">●</span> selected junction<br>
+      <span style="color:{TOKENS["disabled"]}">●</span> / <span style="color:{TOKENS["disabled"]}">┄</span> disabled junction / links (dashed)<br>
+      <b style="color:{TOKENS["reroute"]}; font-size: 14px;">━</b> rerouted path (thick solid)<br>
+      <span style="color:{TOKENS["ramp_2"]}">┄</span> healed road (dashed = inferred)<br>
+      <span style="color:{TOKENS["spof"]}">●</span> / <span style="color:{TOKENS["spof"]}">━</span> single-point-of-failure
     </div>
     """
     return folium.Element(html)
@@ -274,7 +322,7 @@ def add_rerouted_path(road_map: folium.Map, graph: nx.Graph, route: RouteResult)
         coordinates = graph.edges[start, end]["coordinates"]
         folium.PolyLine(
             [(latitude, longitude) for longitude, latitude in coordinates],
-            color="#E69F00",
+            color=TOKENS["reroute"],
             weight=7,
             opacity=1.0,
             tooltip=f"Rerouted road {start}–{end}",
@@ -290,17 +338,23 @@ def build_map(
     show_critical: bool,
     show_healed: bool,
     show_spof: bool,
-    scenario: str,
+    failure_mode: str,
+    center: list[float] | None = None,
+    zoom: float | None = None,
 ) -> folium.Map:
-    """Build the map with criticality, selection, failure, and reroute states."""
+    """Build the map with criticality, selection, failure, and reroute states.
+
+    ``center``/``zoom`` (when both given) restore the user's last viewport so the
+    map doesn't snap back to the whole-network bounds on every rerun — the
+    canonical streamlit-folium round-trip (bugs.md §2C).
+    """
     nodes, edges = split_features(features)
     scores = criticality.set_index("node_id")["betweenness"].to_dict()
     maximum = max(float(criticality["betweenness"].max()), 1e-9)
-    # Dark-basemap-readable ramp (deep teal → sky → green → yellow): the old
-    # viridis-style ramp started at near-black purple, so low-criticality roads
-    # were invisible against the dark tiles.
+    # Colourblind-safe ramp: cividis clipped to its upper range (0.3-1.0) so
+    # low-criticality roads stay visible against the dark tiles (see TOKENS).
     colour_scale = cm.LinearColormap(
-        colors=["#155E75", "#0EA5E9", "#4ADE80", "#FDE047"],
+        colors=[TOKENS["ramp_0"], TOKENS["ramp_1"], TOKENS["ramp_2"], TOKENS["ramp_3"]],
         vmin=0.0,
         vmax=maximum,
         caption="Road criticality (endpoint betweenness: low to high)",
@@ -308,19 +362,27 @@ def build_map(
     disabled_nodes = simulation.disabled_nodes if simulation else ()
 
     road_map = folium.Map(
-        location=[nodes.geometry.y.mean(), nodes.geometry.x.mean()],
-        zoom_start=15,
+        location=center or [nodes.geometry.y.mean(), nodes.geometry.x.mean()],
+        zoom_start=zoom or 15,  # fallback if the bounds below are degenerate
         tiles=None,
         control_scale=True,
     )
+    # Only auto-fit to the whole network when we have no remembered viewport —
+    # otherwise honour the user's last pan/zoom (bugs.md §2C).
+    if center is None or zoom is None:
+        min_x, min_y, max_x, max_y = (float(value) for value in nodes.total_bounds)
+        if all(isfinite(value) for value in (min_x, min_y, max_x, max_y)) and (
+            min_x < max_x or min_y < max_y
+        ):
+            road_map.fit_bounds([[min_y, min_x], [max_y, max_x]])
     folium.TileLayer("CartoDB dark_matter", name="Dark map").add_to(road_map)
     folium.TileLayer(
         tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
         attr="Esri — Source: Esri, Maxar, Earthstar Geographics",
         name="Satellite",
     ).add_to(road_map)
-    
-    if scenario == "Flood":
+
+    if failure_mode == FLOOD_MODE:
         from folium.plugins import Draw
         Draw(
             export=False,
@@ -347,12 +409,12 @@ def build_map(
         is_spof = is_bridge and show_spof
 
         if is_disabled:
-            colour = "#D55E00"
+            colour = TOKENS["disabled"]
             state = "disabled link"
         elif is_spof:
             # Muted rose (was neon magenta #ff00ff, which drowned the whole
             # network — most Panaji links are flagged is_bridge).
-            colour = "#FB7185"
+            colour = TOKENS["spof"]
             state = "critical bridge"
         else:
             colour = colour_scale(score)
@@ -380,49 +442,38 @@ def build_map(
         nodes_to_show.update(critical_ids)
     if show_spof:
         nodes_to_show.update(articulation_ids)
-    
+
     nodes_to_show.add(selected_node)
     nodes_to_show.update(disabled_nodes)
 
     if nodes_to_show:
-        cluster_data = []
+        # Plain CircleMarkers in a named group: clustering hid the ~36 markers
+        # at city zoom and left an unnamed entry in the layer control.
+        marker_group = folium.FeatureGroup(name="Critical junctions")
         for _, node in nodes[nodes["node_id"].isin(nodes_to_show)].iterrows():
             node_id = int(node["node_id"])
             score = float(scores.get(node_id, 0.0))
             is_art = node_id in articulation_ids
             if node_id in disabled_nodes:
-                colour, radius, label = "#D55E00", 9, "Disabled junction"
+                colour, radius, label = TOKENS["disabled"], 9, "Disabled junction"
             elif node_id == selected_node:
-                colour, radius, label = "#56B4E9", 8, "Selected junction"
+                colour, radius, label = TOKENS["selected"], 8, "Selected junction"
             elif is_art and show_spof:
-                colour, radius, label = "#FB7185", 7, "Articulation point"
+                colour, radius, label = TOKENS["spof"], 7, "Articulation point"
             else:
                 colour, radius, label = colour_scale(score), 5, "Critical junction"
-                
-            cluster_data.append([
-                float(node.geometry.y),
-                float(node.geometry.x),
-                radius,
-                2 if node_id == selected_node or node_id in disabled_nodes else 1,
-                colour,
-                f"{label} {node_id} &middot; score {score:.3f}"
-            ])
 
-        callback = """
-        function (row) {
-            var marker = L.circleMarker([row[0], row[1]], {
-                radius: row[2],
-                color: '#ffffff',
-                weight: row[3],
-                fill: true,
-                fillColor: row[4],
-                fillOpacity: 1.0
-            });
-            marker.bindTooltip(row[5]);
-            return marker;
-        };
-        """
-        FastMarkerCluster(cluster_data, callback=callback).add_to(road_map)
+            folium.CircleMarker(
+                location=[float(node.geometry.y), float(node.geometry.x)],
+                radius=radius,
+                color=TOKENS["white"],
+                weight=2 if node_id == selected_node or node_id in disabled_nodes else 1,
+                fill=True,
+                fill_color=colour,
+                fill_opacity=1.0,
+                tooltip=f"{label} {node_id} · score {score:.3f}",
+            ).add_to(marker_group)
+        marker_group.add_to(road_map)
 
     if simulation and simulation.route:
         add_rerouted_path(road_map, graph, simulation.route)
@@ -454,7 +505,7 @@ def nearest_critical_node(
 
 
 def render_charts(simulation: SimulationResult) -> None:
-    """Render Design.md's live travel-impact and delay-contributor charts."""
+    """Render Design.md's delay-contributor chart for the active reroute."""
     route = simulation.route
     if route is None:
         if len(simulation.disabled_nodes) > 1:
@@ -469,33 +520,23 @@ def render_charts(simulation: SimulationResult) -> None:
         )
         return
 
-    st.subheader("Travel impact")
-    trend = pd.DataFrame(
-        {
-            "Disabled junctions": [0, 1],
-            "Travel-time increase (%)": [0.0, route.travel_time_delta_pct],
-        }
-    )
-    st.line_chart(
-        trend,
-        x="Disabled junctions",
-        y="Travel-time increase (%)",
-        color="#E69F00",
-        height=180,
-    )
-
     if route.delay_segments:
         st.caption("Top delay contributors on the detour")
         delays = pd.DataFrame(
             route.delay_segments,
             columns=["Road", "Delay contribution (%)"],
         ).set_index("Road")
-        st.bar_chart(delays, color="#E69F00", height=190)
+        st.bar_chart(delays, color=TOKENS["reroute"], height=190)
 
 
-def generate_geojson_export(features: gpd.GeoDataFrame, disabled_nodes: tuple[int, ...]) -> str:
-    """Generate GeoJSON string of the current network state."""
-    export_df = features.copy()
+@st.cache_data(show_spinner=False)
+def generate_geojson_export(
+    fingerprint: str,
+    _features: gpd.GeoDataFrame,
+    disabled_nodes: tuple[int, ...],
+) -> str:
+    """Generate GeoJSON of the current network state (cached per ablation)."""
+    export_df = _features.copy()
     if disabled_nodes:
         is_disabled_node = (export_df["feature_type"] == "node") & (export_df["node_id"].isin(disabled_nodes))
         export_df.loc[is_disabled_node, "status"] = "disabled"
@@ -511,27 +552,26 @@ def generate_summary_png(
     resilience_curve: pd.DataFrame | None
 ) -> bytes:
     """Generate a high-res PNG summary of the current state."""
-    from matplotlib.figure import Figure
     fig = Figure(figsize=(10, 8))
-    fig.patch.set_facecolor('#1E1E2E')
-    
-    fig.suptitle("Route Resilience - Network Summary", color='white', fontsize=20, y=0.95)
-    
+    fig.patch.set_facecolor(TOKENS["bg"])
+
+    fig.suptitle("Route Resilience - Network Summary", color=TOKENS["text"], fontsize=20, y=0.95)
+
     ax_metrics = fig.add_subplot(2, 2, 1)
     ax_metrics.axis('off')
-    ax_metrics.set_facecolor('#1E1E2E')
-    
+    ax_metrics.set_facecolor(TOKENS["bg"])
+
     ri = simulation.resilience_index if simulation else 1.0
-    ax_metrics.text(0.1, 0.7, f"Resilience Index:\n{ri:.3f}", color='white', fontsize=18, fontweight='bold')
-    
+    ax_metrics.text(0.1, 0.7, f"Resilience Index:\n{ri:.3f}", color=TOKENS["text"], fontsize=18, fontweight='bold')
+
     if simulation and simulation.route:
         delay = f"+{simulation.route.travel_time_delta_pct:.1f}%"
     elif simulation and len(simulation.disabled_nodes) > 1:
         delay = "N/A"
     else:
         delay = "0.0%"
-    ax_metrics.text(0.1, 0.3, f"Travel Time Impact:\n{delay}", color='#E69F00', fontsize=18, fontweight='bold')
-    
+    ax_metrics.text(0.1, 0.3, f"Travel Time Impact:\n{delay}", color=TOKENS["reroute"], fontsize=18, fontweight='bold')
+
     ax_table = fig.add_subplot(2, 2, 2)
     ax_table.axis('off')
     top5 = critical_nodes.head(5)[["node_id", "betweenness"]].copy()
@@ -545,33 +585,47 @@ def generate_summary_png(
     table.auto_set_font_size(False)
     table.set_fontsize(12)
     table.scale(1, 2)
-    
+
     for (row, col), cell in table.get_celld().items():
-        cell.set_facecolor('#2D2D3D' if row > 0 else '#4C4C6D')
-        cell.set_text_props(color='white')
-        cell.set_edgecolor('#1E1E2E')
+        cell.set_facecolor(TOKENS["surface"] if row > 0 else TOKENS["border_strong"])
+        cell.set_text_props(color=TOKENS["text"])
+        cell.set_edgecolor(TOKENS["bg"])
 
     if resilience_curve is not None:
         ax_curve = fig.add_subplot(2, 1, 2)
-        ax_curve.set_facecolor('#1E1E2E')
-        ax_curve.tick_params(colors='white')
+        ax_curve.set_facecolor(TOKENS["bg"])
+        ax_curve.tick_params(colors=TOKENS["text"])
         for spine in ax_curve.spines.values():
-            spine.set_color('white')
-            
+            spine.set_color(TOKENS["text"])
+
         curve_data = resilience_curve.set_index("n_removed")
         if "targeted_resilience_index" in curve_data.columns and "random_resilience_index" in curve_data.columns:
-            ax_curve.plot(curve_data.index, curve_data["targeted_resilience_index"], color='#D55E00', label='Targeted')
-            ax_curve.plot(curve_data.index, curve_data["random_resilience_index"], color='#56B4E9', label='Random')
-            ax_curve.legend(facecolor='#2D2D3D', edgecolor='white', labelcolor='white')
-        
-        ax_curve.set_xlabel("Nodes Removed", color='white')
-        ax_curve.set_ylabel("Resilience Index", color='white')
-        ax_curve.set_title("Resilience Degradation Curve", color='white')
+            ax_curve.plot(curve_data.index, curve_data["targeted_resilience_index"], color=TOKENS["disabled"], label='Targeted')
+            ax_curve.plot(curve_data.index, curve_data["random_resilience_index"], color=TOKENS["selected"], label='Random')
+            ax_curve.legend(facecolor=TOKENS["surface"], edgecolor=TOKENS["text"], labelcolor=TOKENS["text"])
+
+        ax_curve.set_xlabel("Nodes Removed", color=TOKENS["text"])
+        ax_curve.set_ylabel("Resilience Index", color=TOKENS["text"])
+        ax_curve.set_title("Resilience Degradation Curve", color=TOKENS["text"])
 
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, facecolor=fig.get_facecolor(), bbox_inches='tight')
     return buf.getvalue()
 
+
+def _on_failure_mode_change() -> None:
+    """Clear flood-area ablations when the failure mode moves away from flood."""
+    if (
+        st.session_state.get("failure_mode") != FLOOD_MODE
+        and st.session_state.get("ablation_source") == "flood"
+    ):
+        st.session_state["disabled_nodes"] = ()
+        st.session_state["ablation_source"] = None
+
+
+def _clear_last_map_click() -> None:
+    """Forget the last map click so re-clicking the same spot works after a manual pick."""
+    st.session_state["last_map_click"] = None
 
 
 def render_panel(
@@ -587,26 +641,19 @@ def render_panel(
     scores = criticality.set_index("node_id")["betweenness"].to_dict()
     ranks = criticality.set_index("node_id")["rank"].to_dict()
 
-    st.markdown(
-        """
-        <div class="rr-header">
-          <div class="rr-logo">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F8FAFC"
-                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img"
-                 aria-label="Road network glyph">
-              <circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/>
-              <path d="M6.7 7.6 10.6 16M17.3 7.6 13.4 16M7.2 6h9.6"/>
-            </svg>
-          </div>
-          <div>
-            <h1>Route Resilience</h1>
-            <p class="rr-sub">Panaji network &middot; live junction-failure simulation</p>
-          </div>
-          <span class="rr-chip"><span class="rr-dot"></span>LIVE</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    st.caption(
+        "Route Resilience maps a city's road network from satellite imagery and "
+        "shows which junctions the network can least afford to lose."
     )
+    if st.button(
+        "Run demo: disable the #1 chokepoint",
+        type="primary",
+        use_container_width=True,
+        help="One click: knock out the top-ranked junction and watch the network react.",
+    ):
+        st.session_state["disabled_nodes"] = (int(critical_nodes.iloc[0]["node_id"]),)
+        st.session_state["ablation_source"] = "single"
+        st.rerun()
 
     ri = simulation.resilience_index if simulation else 1.0
     route = simulation.route if simulation else None
@@ -616,48 +663,116 @@ def render_panel(
         "Resilience Index",
         f"{ri:.3f}",
         delta=f"{(ri - 1.0) * 100:.1f}%" if simulation else None,
-        delta_color="inverse",
+        delta_color="normal",
         help="Global efficiency after failure divided by baseline global efficiency.",
     )
     if simulation and len(simulation.disabled_nodes) > 1:
         travel_value = "N/A"
     else:
         travel_value = "Route cut" if simulation and not isfinite(travel_delta) else f"+{travel_delta:.1f}%"
-    
+
     travel_column.metric(
         "Travel-time impact",
         travel_value,
         help="Exact route-length change at constant speed; no speed data is assumed.",
     )
+    st.progress(
+        min(max(ri, 0.0), 1.0),
+        text=f"Network efficiency retained: {ri:.0%}",
+    )
+    if simulation:
+        n_removed = len(simulation.disabled_nodes)
+        ri_context = "Resilience Index scale: 1.00 = intact network."
+        if (
+            resilience_curve is not None
+            and {"n_removed", "random_resilience_index"}.issubset(resilience_curve.columns)
+        ):
+            match = resilience_curve.loc[resilience_curve["n_removed"] == n_removed]
+            if not match.empty:
+                random_ri = float(match.iloc[0]["random_resilience_index"])
+                ri_context = (
+                    f"Removing {n_removed} junction(s) at random typically retains "
+                    f"{random_ri:.0%} efficiency — this scenario retains {ri:.0%}."
+                )
+        st.caption(ri_context)
 
     st.subheader("Scenario controls")
     view_mode = st.radio("View Mode", ["Interactive Map", "Side-by-Side Comparison"], horizontal=True, key="view_mode")
-    st.selectbox("Region", ["Panaji demo"], disabled=True)
-    scenario = st.selectbox("Scenario", ["Road closure", "Accident", "Flood"], key="scenario")
-    # TODO: wire scenario-specific behavior into routing logic
+    failure_mode = st.radio(
+        "Failure mode",
+        [SINGLE_MODE, FLOOD_MODE],
+        key="failure_mode",
+        on_change=_on_failure_mode_change,
+        horizontal=True,
+    )
     selected = st.selectbox(
         "Junction to disable",
         critical_ids,
         key="selected_node",
+        on_change=_clear_last_map_click,
         format_func=lambda node: (
             f"#{int(ranks[node])} · Junction {node} · score {scores[node]:.3f}"
         ),
     )
     st.caption("Click a critical junction on the map or choose one above.")
+    # Selected-junction details as text, so the info doesn't live only in
+    # hover tooltips (screen readers / touch devices).
+    selected_row = criticality.loc[criticality["node_id"] == selected]
+    if not selected_row.empty:
+        is_art = (
+            _truthy(selected_row.iloc[0].get("is_articulation"))
+            if "is_articulation" in criticality.columns
+            else False
+        )
+        degree = int(((edges["u"] == selected) | (edges["v"] == selected)).sum())
+        st.caption(
+            f"Junction {selected} · rank #{int(ranks[selected])} · "
+            f"score {scores[selected]:.3f} · degree {degree} · "
+            + (
+                "articulation point (single point of failure)"
+                if is_art
+                else "not an articulation point"
+            )
+        )
+
+    current_closures = st.session_state.get("disabled_nodes", ())
+    single_active = current_closures and st.session_state.get("ablation_source") == "single"
+    add_more = bool(single_active)  # once one junction is down, the button accumulates
 
     simulate_column, reset_column = st.columns(2)
     if simulate_column.button(
-        "Simulate closure",
+        "Add closure" if add_more else "Simulate closure",
         type="primary",
         use_container_width=True,
-        help="Disable the selected junction and recompute routes and resilience.",
+        help=("Add the selected junction to the active closures (compound disaster)."
+              if add_more else
+              "Disable the selected junction and recompute routes and resilience."),
     ):
-        st.session_state["disabled_nodes"] = (int(selected),)
+        # Accumulate closures so users can model a compound disaster (§2D).
+        base = set(current_closures) if add_more else set()
+        st.session_state["disabled_nodes"] = tuple(sorted(base | {int(selected)}))
+        st.session_state["ablation_source"] = "single"
+        log_event("simulate_closure", n_closed=len(base) + 1, compound=add_more)
         st.rerun()
     if reset_column.button("Reset", use_container_width=True):
         st.session_state["disabled_nodes"] = ()
+        st.session_state["ablation_source"] = None
         st.session_state["reset_counter"] = st.session_state.get("reset_counter", 0) + 1
+        st.session_state.pop("map_center", None)  # reframe to the whole network
+        st.session_state.pop("map_zoom", None)
         st.rerun()
+
+    # Active-closure chips: each removable so a compound scenario can be pared back.
+    if single_active and len(current_closures) >= 1:
+        st.caption("Active closures — click to remove:")
+        chip_cols = st.columns(min(len(current_closures), 4))
+        for i, node in enumerate(current_closures):
+            if chip_cols[i % len(chip_cols)].button(f"✕ {node}", key=f"rm_closure_{node}"):
+                remaining = tuple(n for n in current_closures if n != node)
+                st.session_state["disabled_nodes"] = remaining
+                if not remaining:
+                    st.session_state["ablation_source"] = None
+                st.rerun()
 
     layer_one, layer_two, layer_three = st.columns(3)
     layer_one.checkbox("Critical nodes", value=True, key="show_critical")
@@ -666,7 +781,13 @@ def render_panel(
 
     if simulation:
         nodes_str = ", ".join(map(str, simulation.disabled_nodes))
-        st.success(f"Junction(s) {nodes_str} disabled.")
+        if simulation.largest_cc_fraction < 0.99:
+            st.error(
+                f"Network split: {1 - simulation.largest_cc_fraction:.0%} of "
+                "junctions isolated from the main network."
+            )
+        else:
+            st.warning(f"Junction(s) {nodes_str} disabled.")
         st.caption(
             f"Largest connected network: {simulation.largest_cc_fraction:.1%} of "
             "remaining junctions."
@@ -692,22 +813,51 @@ def render_panel(
             chart_data = curve_data
         st.line_chart(
             chart_data,
-            color=["#D55E00", "#56B4E9"] if len(chart_data.columns) == 2 else None,
+            color=[TOKENS["disabled"], TOKENS["selected"]] if len(chart_data.columns) == 2 else None,
             height=200,
         )
 
     st.subheader("Top critical junctions")
-    top_nodes = critical_nodes[["rank", "node_id", "betweenness"]].head(5).copy()
-    top_nodes["betweenness"] = top_nodes["betweenness"].map(lambda value: f"{value:.3f}")
-    st.dataframe(top_nodes, hide_index=True, use_container_width=True)
+    # Numeric scores (not stringified) so sorting is true-numeric and the score
+    # bar renders; clicking a row selects that junction and recentres the map (§2D).
+    ranked = critical_nodes[["rank", "node_id", "betweenness"]].copy()
+    max_bw = max(float(ranked["betweenness"].max()), 1e-9)
+    table_event = st.dataframe(
+        ranked,
+        hide_index=True,
+        use_container_width=True,
+        height=240,
+        on_select="rerun",
+        selection_mode="single-row",
+        key="rank_table",
+        column_config={
+            "betweenness": st.column_config.ProgressColumn(
+                "Score", min_value=0.0, max_value=max_bw, format="%.3f",
+            ),
+        },
+    )
+    selected_rows = table_event.selection.rows if table_event and table_event.selection else []
+    if selected_rows:
+        picked = int(ranked.iloc[selected_rows[0]]["node_id"])
+        if picked != int(st.session_state.get("selected_node", -1)):
+            st.session_state["selected_node"] = picked
+            # Recentre on the picked junction (the viewport round-trip keeps zoom).
+            match = nodes[nodes["node_id"].astype(int) == picked]
+            if not match.empty:
+                st.session_state["map_center"] = [
+                    float(match.geometry.y.iloc[0]), float(match.geometry.x.iloc[0]),
+                ]
+            st.rerun()
     st.caption(f"Network: {len(nodes):,} junctions · {len(edges):,} road links")
 
     st.divider()
     st.subheader("Export & Reports")
     export_col1, export_col2 = st.columns(2)
-    
+
     with export_col1:
-        geojson_data = generate_geojson_export(features, simulation.disabled_nodes if simulation else ())
+        geojson_data = generate_geojson_export(
+            DATA_FINGERPRINT, features, simulation.disabled_nodes if simulation else ()
+        )
         st.download_button(
             label="Download GeoJSON",
             data=geojson_data,
@@ -716,7 +866,7 @@ def render_panel(
             use_container_width=True,
             help="Download the current map state including disabled nodes and rerouted edges."
         )
-        
+
     with export_col2:
         png_data = generate_summary_png(simulation, critical_nodes, resilience_curve)
         st.download_button(
@@ -733,26 +883,14 @@ def apply_design_theme() -> None:
     """Apply the A30 design system: dark ops-dashboard, Fira Sans/Code, amber accent.
 
     Works WITH `.streamlit/config.toml` (native-widget dark tokens); this layer
-    adds the typography, card system, and interaction polish on top.
+    adds the typography, card system, and interaction polish on top. All colour
+    values are generated from TOKENS as CSS custom properties.
     """
-    st.markdown(
-        """
-        <style>
-          @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@300;400;500;600;700&display=swap');
-
-          :root {
-            --rr-bg: #0B1220;
-            --rr-surface: #121C30;
-            --rr-surface-2: #16233B;
-            --rr-border: #24334E;
-            --rr-border-strong: #33456A;
-            --rr-text: #E2E8F0;
-            --rr-muted: #8FA3BF;
-            --rr-amber: #F59E0B;
-            --rr-amber-deep: #D97706;
-            --rr-blue: #38BDF8;
-          }
-
+    token_vars = "".join(
+        f"            --rr-{name.replace('_', '-')}: {value};\n"
+        for name, value in TOKENS.items()
+    )
+    css_body = """
           html, body, [data-testid="stAppViewContainer"] *:not(code):not(pre) {
             font-family: 'Fira Sans', -apple-system, 'Segoe UI', sans-serif;
           }
@@ -768,7 +906,7 @@ def apply_design_theme() -> None:
 
           /* Section headers become uppercase micro-labels with an amber tick */
           [data-testid="stAppViewContainer"] h3 {
-            font-size: .82rem !important;
+            font-size: .9rem !important;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: .12em;
@@ -787,13 +925,16 @@ def apply_design_theme() -> None:
             box-shadow: 0 6px 18px rgba(14,165,233,.28);
           }
           .rr-header h1 { font-size: 1.42rem; font-weight: 700; letter-spacing: -.015em; margin: 0; line-height: 1.15; color: var(--rr-text); }
-          .rr-header .rr-sub { margin: 2px 0 0; color: var(--rr-muted); font-size: .8rem; }
+          .rr-header .rr-sub { margin: 2px 0 0; color: var(--rr-muted); font-size: .85rem; }
           .rr-chip {
             margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
             padding: 4px 11px; border-radius: 999px; font-size: .7rem; font-weight: 600; letter-spacing: .1em;
-            border: 1px solid rgba(52,211,153,.35); background: rgba(16,185,129,.12); color: #6EE7B7;
+            border: 1px solid var(--rr-border-strong); background: var(--rr-surface); color: var(--rr-muted);
           }
-          .rr-dot { width: 7px; height: 7px; border-radius: 50%; background: #34D399; box-shadow: 0 0 8px #34D399; animation: rr-pulse 2.2s ease-in-out infinite; }
+          .rr-chip-active {
+            border-color: rgba(245,158,11,.45); background: rgba(245,158,11,.14); color: #FDE68A;
+          }
+          .rr-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--rr-amber); box-shadow: 0 0 8px var(--rr-amber); animation: rr-pulse 2.2s ease-in-out infinite; }
           @keyframes rr-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
 
           /* Metric cards: elevated surface, amber signal edge, tabular numerals */
@@ -878,74 +1019,238 @@ def apply_design_theme() -> None:
           @media (prefers-reduced-motion: reduce) {
             * { transition: none !important; animation: none !important; }
           }
-        </style>
-        """,
+    """
+    st.markdown(
+        "<style>\n"
+        "          @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@300;400;500;600;700&display=swap');\n"
+        + f"          :root {{\n{token_vars}          }}\n"
+        + css_body
+        + "\n        </style>",
         unsafe_allow_html=True,
     )
 
 
+# Minimal-viable observability (bugs.md §5F): structured logs to stderr (picked up
+# by journald on the deployed box) + a lightweight usage counter, so "how many
+# people used it / how many uploads failed" is answerable without extra infra.
+log = logging.getLogger("trace.app")
+if not log.handlers:
+    _h = logging.StreamHandler()
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [trace.app] %(message)s"))
+    log.addHandler(_h)
+    log.setLevel(logging.INFO)
+
+
+def log_event(event: str, **fields: object) -> None:
+    """Emit one structured usage/telemetry line (event + key=value fields)."""
+    extra = " ".join(f"{k}={v}" for k, v in fields.items())
+    log.info("%s %s", event, extra)
+
+
 MODAL_SEG_URL = os.environ.get("MODAL_SEG_URL")
+MAX_UPLOAD_MB = 20  # keep in sync with [server] maxUploadSize in .streamlit/config.toml
+UPLOAD_GUIDANCE = (
+    "Runs the deployed SegFormer model on a serverless T4 (Modal). The first "
+    "call after idle takes ~30 s to warm up; subsequent calls are near-instant. "
+    "**Best results at ~0.5 m/pixel** (Google-Earth neighbourhood zoom, roads "
+    "4–10 px wide) — heavily zoomed-in or zoomed-out captures degrade extraction."
+)
 
 
-def _call_modal_seg(image_bytes: bytes) -> tuple[bytes, float | None]:
-    """POST an image to the Modal GPU endpoint; return (mask PNG bytes, threshold)."""
-    import base64
-    import json
-    import urllib.request
+# Bound concurrent GPU calls so a burst of uploads can't pin every Streamlit
+# worker thread on a 120 s blocking request (bugs.md §5C). A cache hit never
+# reaches here, so only genuine inference calls consume a slot.
+_MODAL_MAX_INFLIGHT = 2
+_modal_semaphore = threading.BoundedSemaphore(_MODAL_MAX_INFLIGHT)
 
+
+class EndpointBusyError(RuntimeError):
+    """Raised when all in-flight GPU slots are taken (surface a 'retry' message)."""
+
+
+def _post_modal_once(body: bytes) -> dict:
+    """One POST to the Modal endpoint → parsed JSON (raises on transport/HTTP errors)."""
+    req = urllib.request.Request(
+        MODAL_SEG_URL, data=body, headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        status = getattr(resp, "status", 200)
+        if status != 200:
+            raise RuntimeError(f"endpoint returned HTTP {status}")
+        raw = resp.read()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("endpoint returned a non-JSON response") from error
+
+
+def _is_retryable(error: Exception) -> bool:
+    """Cold-start / transient failures are worth a retry; 4xx client errors are not."""
+    if isinstance(error, urllib.error.HTTPError):
+        return error.code >= 500  # 5xx transient; 401/413/etc. won't fix themselves
+    if isinstance(error, urllib.error.URLError):  # incl. socket timeout
+        return True
+    return False
+
+
+def _call_modal_seg(image_bytes: bytes, retries: int = 2) -> tuple[bytes, float | None]:
+    """POST an image to the Modal GPU endpoint; return (mask PNG bytes, threshold).
+
+    Retries transient/cold-start failures with a short backoff (a scaled-to-zero
+    container may 5xx or time out on the first hit), but never retries a 4xx —
+    those are deterministic (bad key, oversized image). Concurrency-bounded so
+    simultaneous uploads queue rather than starve the app (bugs.md §5C/§6).
+    """
     body = json.dumps(
         {
             "image_b64": base64.b64encode(image_bytes).decode(),
             "key": os.environ.get("MODAL_SEG_KEY", ""),
         }
     ).encode()
-    req = urllib.request.Request(
-        MODAL_SEG_URL, data=body, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=240) as resp:
-        out = json.load(resp)
+
+    if not _modal_semaphore.acquire(blocking=False):
+        raise EndpointBusyError(
+            "The GPU endpoint is busy with other requests — please retry in a moment."
+        )
+    try:
+        last: Exception | None = None
+        for attempt in range(retries + 1):
+            try:
+                out = _post_modal_once(body)
+                break
+            except Exception as error:  # noqa: BLE001 — classify, then retry or raise
+                last = error
+                if attempt < retries and _is_retryable(error):
+                    time.sleep(1.5 * (attempt + 1))  # linear backoff for a warming GPU
+                    continue
+                raise
+        else:  # pragma: no cover - loop always breaks or raises
+            raise last  # type: ignore[misc]
+    finally:
+        _modal_semaphore.release()
+
     if "mask_png_b64" not in out:
         raise RuntimeError(out.get("error", "unexpected response from endpoint"))
-    return base64.b64decode(out["mask_png_b64"]), out.get("threshold")
+    try:
+        mask_png = base64.b64decode(out["mask_png_b64"], validate=True)
+    except ValueError as error:  # binascii.Error subclasses ValueError
+        raise RuntimeError("endpoint returned an undecodable mask") from error
+    if not mask_png:
+        raise RuntimeError("endpoint returned an empty mask")
+    return mask_png, out.get("threshold")
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def _call_modal_seg_cached(image_bytes: bytes) -> tuple[bytes, float | None]:
+    """Cache GPU results for an hour so Streamlit reruns never re-POST an image."""
+    return _call_modal_seg(image_bytes)
+
+
+def _seg_error_message(error: Exception) -> str:
+    """Map an endpoint failure to a human-readable message (never a raw repr)."""
+    if isinstance(error, EndpointBusyError):
+        return str(error)
+    if isinstance(error, urllib.error.HTTPError):
+        if error.code in (401, 403):
+            return (
+                "The GPU endpoint rejected the request — its access key may be "
+                "misconfigured on this deployment."
+            )
+        if error.code == 413:
+            return "Image too large for the GPU endpoint — crop or downscale it and retry."
+        return f"The GPU endpoint returned an error (HTTP {error.code}) — try again in a minute."
+    if isinstance(error, TimeoutError) or (
+        isinstance(error, urllib.error.URLError)
+        and isinstance(getattr(error, "reason", None), TimeoutError)
+    ):
+        return (
+            "The request timed out — the first call after idle takes ~30 s while "
+            "the GPU wakes up. Please try again."
+        )
+    if isinstance(error, urllib.error.URLError):
+        return "GPU endpoint unreachable — it may be redeploying; try again in a minute."
+    return (
+        "Road extraction failed — the endpoint sent an unexpected response; "
+        "try again in a minute."
+    )
 
 
 def render_live_detection() -> None:
     """Upload a satellite image → segment roads on the serverless GPU (Modal).
 
-    Hidden unless MODAL_SEG_URL is set, so local dev without the endpoint is
-    unaffected. The heavy model runs off-box on a T4 that scales to zero.
+    The heavy model runs off-box on a T4 that scales to zero. Without
+    MODAL_SEG_URL the section still renders (disabled) and points at the
+    hosted demo instead of hiding entirely.
     """
+    st.subheader("Analyze your own imagery")
     if not MODAL_SEG_URL:
+        st.info(
+            "GPU inference is not configured on this instance — try the hosted "
+            "demo at trace.tiwaribabu.in to analyze your own imagery."
+        )
+        st.file_uploader(
+            "Upload a satellite / aerial image to extract its road network",
+            type=["png", "jpg", "jpeg"],
+            key="live_detection_upload",
+            disabled=True,
+        )
+        st.caption(UPLOAD_GUIDANCE)
         return
-    st.subheader("Live road detection — serverless GPU")
     upload = st.file_uploader(
         "Upload a satellite / aerial image to extract its road network",
         type=["png", "jpg", "jpeg"],
         key="live_detection_upload",
     )
+    st.caption(UPLOAD_GUIDANCE)
     if upload is None:
-        st.caption(
-            "Runs the deployed SegFormer model on a serverless T4 (Modal). The first "
-            "call after idle takes ~30 s to warm up; subsequent calls are near-instant. "
-            "**Best results at ~0.5 m/pixel** (Google-Earth neighbourhood zoom, roads "
-            "4–10 px wide) — heavily zoomed-in or zoomed-out captures degrade extraction."
+        return
+
+    image_bytes = upload.getvalue()
+    if len(image_bytes) > MAX_UPLOAD_MB * 1024 * 1024:
+        st.error(
+            f"Image is larger than {MAX_UPLOAD_MB} MB — crop or downscale it "
+            "and try again."
         )
         return
-    image_bytes = upload.getvalue()
-    with st.spinner("Segmenting roads on GPU…"):
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as probe:
+            width, height = probe.size
+    except Image.DecompressionBombError:
+        st.error(
+            "Image has too many pixels (limit 4096×4096) — crop or downscale "
+            "it and try again."
+        )
+        return
+    except Exception:  # noqa: BLE001 — any unreadable file gets the same friendly hint
+        st.error("Could not read that file as an image — please upload a PNG or JPEG.")
+        return
+    if min(width, height) < 256:
+        st.warning(
+            "That image is quite small (under 256 px) — extraction may miss roads. "
+            "Best results at ~0.5 m/pixel neighbourhood crops."
+        )
+    elif max(width, height) > 3000:
+        st.warning(
+            "That image is very large — extraction works best on neighbourhood-scale "
+            "crops at ~0.5 m/pixel."
+        )
+
+    with st.status("Extracting road network…", expanded=True) as status:
+        st.write(f"Image received: {width}×{height} px, {len(image_bytes) / 1_048_576:.1f} MB.")
+        st.write("Waking the GPU (first call after idle takes ~30 s)…")
         try:
-            mask_png, threshold = _call_modal_seg(image_bytes)
-        except Exception as error:  # noqa: BLE001 — surface any endpoint failure to the user
-            st.error(f"Inference failed: {error}")
+            mask_png, threshold = _call_modal_seg_cached(image_bytes)
+            orig = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            mask = Image.open(io.BytesIO(mask_png)).convert("L")
+        except Exception as error:  # noqa: BLE001 — every failure maps to a human message
+            status.update(label="Road extraction failed", state="error", expanded=True)
+            st.error(_seg_error_message(error))
+            log_event("upload_failed", kind=type(error).__name__, px=f"{width}x{height}")
             return
+        st.write("Road mask received.")
+        status.update(label="Road network extracted", state="complete", expanded=False)
+        log_event("upload_ok", px=f"{width}x{height}", mb=round(len(image_bytes) / 1_048_576, 2))
 
-    import io
-
-    import numpy as np
-    from PIL import Image
-
-    orig = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    mask = Image.open(io.BytesIO(mask_png)).convert("L")
     overlay = np.asarray(orig).copy()
     overlay[np.asarray(mask) > 0] = [255, 0, 0]
 
@@ -957,14 +1262,76 @@ def render_live_detection() -> None:
     col2.image(mask, caption=f"Road mask ({thr})", use_column_width=True)
     col3.image(overlay, caption="Overlay", use_column_width=True)
 
+    _render_upload_analysis(np.asarray(orig), np.asarray(mask))
+
+
+def _render_upload_analysis(orig_rgb: np.ndarray, mask_gray: np.ndarray) -> None:
+    """Close the loop (bugs.md §2B): mask → graph → resilience, shown in-app.
+
+    Runs the CPU P2→P3 pipeline on the extracted mask so an uploaded image gets a
+    *real* resilience analysis — not just a mask preview. Image-space (the upload
+    isn't georeferenced), so the network is drawn over the user's own image.
+    """
+    from src.app.upload_analysis import analyze_mask, render_graph_overlay
+
+    st.markdown("#### Network resilience of your imagery")
+    gsd = st.slider(
+        "Approx. ground resolution (m/pixel)", 0.1, 2.0, 0.5, 0.05,
+        help="Uploads aren't georeferenced — this scales road lengths. ~0.5 m/px "
+             "matches neighbourhood-zoom satellite captures.",
+    )
+    binary = (mask_gray > 0).astype(np.uint8)
+    try:
+        with st.spinner("Building the routable graph and scoring resilience…"):
+            result = analyze_mask(binary, resolution_m=gsd)
+    except ValueError as exc:
+        st.info(str(exc))
+        log_event("upload_analysis_empty")
+        return
+
+    retained = result.resilience_index
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Junctions", f"{result.n_nodes:,}")
+    m2.metric("Road links", f"{result.n_edges:,}")
+    m3.metric(
+        "Efficiency if #1 junction fails", f"{retained:.0%}",
+        delta=f"-{1 - retained:.0%}", delta_color="normal",
+        help="Global efficiency retained after the single most critical junction is lost.",
+    )
+    st.progress(retained, text=f"Network efficiency retained under worst single failure: {retained:.0%}")
+
+    fig = render_graph_overlay(orig_rgb, result)
+    st.pyplot(fig, use_container_width=True)
+    st.caption(
+        f"{result.summary['critical_junctions']} critical junctions · "
+        f"{result.summary['articulation_points']} single-points-of-failure · "
+        "the ringed junction is the worst chokepoint. Lengths assume "
+        f"~{gsd:g} m/pixel (no georeference on uploads)."
+    )
+    st.dataframe(
+        result.criticality[["rank", "node_id", "betweenness", "is_critical", "is_articulation"]].head(10),
+        hide_index=True, use_container_width=True,
+    )
+    log_event("upload_analysis_ok", nodes=result.n_nodes, edges=result.n_edges,
+              ri=round(retained, 3))
+
 
 def main() -> None:
     """Render the interactive F2 dashboard."""
-    st.set_page_config(page_title="Route Resilience", page_icon="🛰️", layout="wide")
+    st.set_page_config(
+        page_title="Route Resilience",
+        page_icon="🛰️",
+        layout="wide",
+        menu_items={
+            "About": "Route Resilience — road-network resilience from satellite imagery. Demo AOI: Panaji.",
+            "Get help": None,
+            "Report a bug": None,
+        },
+    )
     apply_design_theme()
     try:
         features, criticality = load_sample_data()
-        graph = graph_from_features(features)
+        graph = graph_from_features(DATA_FINGERPRINT, features)
         resilience_curve = load_resilience_curve()
     except FileNotFoundError as error:
         st.error(
@@ -984,18 +1351,123 @@ def main() -> None:
             criticality.sort_values("rank").iloc[0]["node_id"]
         )
     disabled_nodes = st.session_state.get("disabled_nodes", ())
-    with st.spinner("Simulating failure…") if disabled_nodes else st.empty():
-        simulation = (
-            simulate_ablation("panaji_demo_v1", graph, disabled_nodes)
-            if disabled_nodes
-            else None
-        )
+
+    # Full-width brand header with an honest state chip: the pulsing accent
+    # chip only appears while a simulation is actually active.
+    chip = (
+        '<span class="rr-chip rr-chip-active"><span class="rr-dot"></span>SIM ACTIVE</span>'
+        if disabled_nodes
+        else '<span class="rr-chip">DEMO · PANAJI</span>'
+    )
+    st.markdown(
+        f"""
+        <div class="rr-header">
+          <div class="rr-logo">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F8FAFC"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img"
+                 aria-label="Road network glyph">
+              <circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/>
+              <path d="M6.7 7.6 10.6 16M17.3 7.6 13.4 16M7.2 6h9.6"/>
+            </svg>
+          </div>
+          <div>
+            <h1>Route Resilience</h1>
+            <p class="rr-sub">Panaji network &middot; live junction-failure simulation</p>
+          </div>
+          {chip}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    tab_map, tab_method = st.tabs(["Map", "Methodology"])
+    with tab_method:
+        render_methodology()
+    with tab_map:
+        render_dashboard_view(features, criticality, graph, resilience_curve, critical_ids)
+
+
+def render_methodology() -> None:
+    """Credibility tab (bugs.md §2A): what the metrics mean + shipped eval numbers.
+
+    Surfaces the eval artifacts already committed under ``data/sample/`` (IoU,
+    APLS, graph quality) that otherwise live only in docs a judge never opens.
+    """
+    import json
+
+    st.subheader("How Route Resilience works")
+    st.markdown(
+        "1. **Extract** — a fine-tuned SegFormer road segmenter turns satellite "
+        "imagery into a road mask.\n"
+        "2. **Vectorise** — the mask is skeletonised, gap-healed, and simplified "
+        "into a routable graph (junctions + road links).\n"
+        "3. **Analyse** — betweenness centrality flags chokepoint junctions; the "
+        "**Resilience Index** is the network's *global efficiency* after a failure "
+        "relative to intact (1.00 = no degradation, lower = worse)."
+    )
+    st.caption(
+        "Resilience uses global efficiency (mean inverse shortest-path length), which "
+        "stays finite even when a failure disconnects the network — unlike raw "
+        "average path length."
+    )
+
+    st.subheader("Model & network quality (held-out evaluation)")
+    sample_dir = SAMPLE_GEOJSON.parent
+    reports = {
+        "Segmentation (SpaceNet-Mumbai held-out)": "segmentation_eval.json",
+        "Routing similarity — APLS": "panaji_demo_apls.json",
+        "Graph quality": "panaji_demo_graph_eval.json",
+    }
+    shown = False
+    for label, fname in reports.items():
+        path = sample_dir / fname
+        if not path.exists():
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        shown = True
+        with st.expander(label, expanded=False):
+            st.json(data, expanded=False)
+    if not shown:
+        st.info("Evaluation artifacts are generated by the pipeline into `data/sample/`.")
+
+    prov_path = sample_dir / "panaji_demo_provenance.json"
+    if prov_path.exists():
+        try:
+            st.caption(f"Model provenance: {json.loads(prov_path.read_text())}")
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    st.caption(
+        "Accessibility: the map is mouse-driven, but every junction is also "
+        "reachable via the junction picker and the ranked table in the Map tab, "
+        "and all colour states carry text labels."
+    )
+
+
+def render_dashboard_view(
+    features, criticality, graph, resilience_curve, critical_ids
+) -> None:
+    """The interactive Map tab: network map + control panel."""
+    disabled_nodes = st.session_state.get("disabled_nodes", ())
+    if disabled_nodes:
+        with st.spinner("Simulating failure…"):
+            simulation = simulate_ablation(DATA_FINGERPRINT, graph, disabled_nodes)
+    else:
+        simulation = None
 
     show_critical = st.session_state.get("show_critical", True)
     show_healed = st.session_state.get("show_healed", True)
     show_spof = st.session_state.get("show_spof", True)
-    scenario = st.session_state.get("scenario", "Road closure")
-    
+    failure_mode = st.session_state.get("failure_mode", SINGLE_MODE)
+
+    # Remembered viewport (bugs.md §2C): fed into every map so pan/zoom survives
+    # reruns. Reset clears it (via reset_counter) so the map reframes deliberately.
+    map_center = st.session_state.get("map_center")
+    map_zoom = st.session_state.get("map_zoom")
+
     sim_map = build_map(
         features,
         criticality,
@@ -1005,12 +1477,17 @@ def main() -> None:
         show_critical,
         show_healed,
         show_spof,
-        scenario,
+        failure_mode,
+        center=map_center,
+        zoom=map_zoom,
     )
 
     view_mode = st.session_state.get("view_mode", "Interactive Map")
     map_column, panel_column = st.columns([6.5, 3.5], gap="medium")
 
+    # Stable keys (only the reset counter) so the iframe is NOT remounted on every
+    # selection/toggle — the round-tripped center/zoom keeps the view in place.
+    reset_n = st.session_state.get("reset_counter", 0)
     with map_column:
         if view_mode == "Side-by-Side Comparison":
             baseline_map = build_map(
@@ -1022,7 +1499,9 @@ def main() -> None:
                 show_critical,
                 show_healed,
                 show_spof,
-                scenario,
+                failure_mode,
+                center=map_center,
+                zoom=map_zoom,
             )
             col1, col2 = st.columns(2)
             with col1:
@@ -1031,8 +1510,8 @@ def main() -> None:
                     baseline_map,
                     height=640,
                     use_container_width=True,
-                    returned_objects=["last_object_clicked"],
-                    key=f"baseline_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{scenario}",
+                    returned_objects=["last_object_clicked", "center", "zoom"],
+                    key=f"baseline_map_{reset_n}",
                 )
             with col2:
                 st.markdown("**Post-Failure Network**")
@@ -1040,8 +1519,8 @@ def main() -> None:
                     sim_map,
                     height=640,
                     use_container_width=True,
-                    returned_objects=["last_object_clicked", "all_drawings"],
-                    key=f"network_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{scenario}",
+                    returned_objects=["last_object_clicked", "all_drawings", "center", "zoom"],
+                    key=f"network_map_{reset_n}",
                 )
         else:
             baseline_map_state = None
@@ -1049,33 +1528,52 @@ def main() -> None:
                 sim_map,
                 height=640,
                 use_container_width=True,
-                returned_objects=["last_object_clicked", "all_drawings"],
-                key=f"network_map_{st.session_state.get('reset_counter', 0)}_{st.session_state['selected_node']}_{show_critical}_{show_healed}_{show_spof}_{scenario}",
+                returned_objects=["last_object_clicked", "all_drawings", "center", "zoom"],
+                key=f"network_map_{reset_n}",
             )
 
         st.caption(
-            "Brighter roads connect more critical junctions · dashed = healed · "
-            "orange = reroute · red = disabled"
+            "Brighter roads connect more critical junctions · dashed = inferred/healed · "
+            "orange = reroute · red = disabled. The network overlay renders even if "
+            "basemap tiles fail to load."
         )
         render_live_detection()
+
+    # Persist the viewport the component reports so the next rerun rebuilds the map
+    # where the user left it (guarded against the None first render).
+    if map_state:
+        _center = map_state.get("center")
+        if isinstance(_center, dict) and "lat" in _center and "lng" in _center:
+            st.session_state["map_center"] = [_center["lat"], _center["lng"]]
+        if map_state.get("zoom") is not None:
+            st.session_state["map_zoom"] = map_state["zoom"]
 
     clicked = map_state.get("last_object_clicked") if map_state else None
     drawings = map_state.get("all_drawings") if map_state else None
 
-    if scenario == "Flood" and drawings is not None:
+    if failure_mode == FLOOD_MODE and drawings is not None:
         from shapely.geometry import shape
         flooded_nodes = set()
+        polygons_drawn = False
         nodes_gdf, _ = split_features(features)
         for drawing in drawings:
             geom_type = drawing.get("geometry", {}).get("type")
             if geom_type in ("Polygon", "MultiPolygon"):
+                polygons_drawn = True
                 geom = shape(drawing["geometry"])
                 inside = nodes_gdf[nodes_gdf.geometry.within(geom)]["node_id"].astype(int).tolist()
                 flooded_nodes.update(inside)
-        
+
+        if polygons_drawn and not flooded_nodes:
+            with map_column:
+                st.warning(
+                    "No junctions found inside the drawn area — try a larger or "
+                    "more precise polygon."
+                )
         new_disabled = tuple(sorted(flooded_nodes))
         if new_disabled != st.session_state.get("disabled_nodes", ()):
             st.session_state["disabled_nodes"] = new_disabled
+            st.session_state["ablation_source"] = "flood" if new_disabled else None
             st.rerun()
     if not clicked and baseline_map_state:
         clicked = baseline_map_state.get("last_object_clicked")
@@ -1091,9 +1589,22 @@ def main() -> None:
         if selected is not None:
             st.session_state["selected_node"] = selected
             st.rerun()
+        else:
+            st.toast(
+                "No critical junction near that click — the highlighted dots are selectable.",
+                icon="🎯",
+            )
 
     with panel_column:
-        render_panel(features, criticality, simulation, resilience_curve)
+        # Fixed-height scroll region so the panel scrolls independently beside
+        # the 640-px map instead of stretching the whole page.
+        with st.container(height=640):
+            render_panel(features, criticality, simulation, resilience_curve)
+
+    st.caption(
+        "Route Resilience v1 · demo data: Panaji sample network (precomputed) · "
+        "inferred segments shown dashed"
+    )
 
 
 if __name__ == "__main__":

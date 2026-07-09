@@ -34,6 +34,7 @@ def convert_massachusetts(img_dir: str | Path, label_dir: str | Path, out_dir: s
     img_dir, label_dir, out = Path(img_dir), Path(label_dir), Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     kept = 0
+    unreadable = 0  # distinct from the intentional "near-empty tile" skips below
     for img_p in sorted(img_dir.glob("*.tif*")):
         label = next(iter(label_dir.glob(img_p.stem + ".tif*")), None)
         if label is None:
@@ -41,6 +42,7 @@ def convert_massachusetts(img_dir: str | Path, label_dir: str | Path, out_dir: s
         img = cv2.imread(str(img_p), cv2.IMREAD_COLOR)
         mask = cv2.imread(str(label), cv2.IMREAD_GRAYSCALE)
         if img is None or mask is None:
+            unreadable += 1
             continue
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         if upsample != 1.0:
@@ -59,6 +61,9 @@ def convert_massachusetts(img_dir: str | Path, label_dir: str | Path, out_dir: s
             if max_tiles and kept >= max_tiles:
                 print(f"[massachusetts] reached max_tiles={max_tiles} -> {out}")
                 return kept
+    if unreadable:
+        print(f"[massachusetts] WARNING: {unreadable} image/mask pair(s) unreadable "
+              "(corrupt or partial download) — skipped")
     print(f"[massachusetts] {kept} road-bearing pairs -> {out}")
     return kept
 

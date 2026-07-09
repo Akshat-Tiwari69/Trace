@@ -16,7 +16,7 @@
 
 ## 2. Visual Identity
 
-- **Colour scheme:** dark base (background `#121212`, panels `#1E1E2E`). **Criticality ramp:** low → high as blue → teal → yellow (Viridis/cividis — colourblind-safe). **Semantic palette:** normal road = grey, selected = cyan, rerouted path = orange, disabled junction = red (always paired with an icon). Every colour-coded element carries a label or icon.
+- **Colour scheme:** dark base (background `#121212`, panels `#1E1E2E`). **Criticality ramp:** cividis clipped to its upper range (0.3–1.0; 4 hardcoded stops `#4F576C → #848279 → #C0B16A → #FEE838`) — colourblind-safe, chosen for dark-tile legibility; supersedes the earlier Viridis note, whose near-black low end was invisible on dark basemap tiles. **Semantic palette:** normal road = grey, selected = cyan, rerouted path = orange, disabled junction = red (always paired with an icon). Every colour-coded element carries a label or icon.
 - **Typography:** a neutral sans-serif (Inter or system font). Hierarchy: titles 26–28 px bold, section headers 18–20 px semibold, body 14–16 px, captions 12 px. Metric numbers use **tabular figures** so they align. No more than **3 sizes per screen**.
 - **Iconography:** simple glyphs from a standard set (Material/Font Awesome style) that reinforce meaning — e.g. a "!" on critical nodes. No decorative imagery.
 

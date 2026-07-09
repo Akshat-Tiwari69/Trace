@@ -61,11 +61,14 @@ def tile_apls(pred01: np.ndarray, gt01: np.ndarray, n_samples: int = 200, tol_m:
 
 
 def apls_on_heldout(checkpoint: Path, n_tiles: int | None = 80, threshold: float | None = None,
-                    device: str = "cpu", seed: int = 7) -> dict:
+                    device: str = "cpu", seed: int = 7, per_tile: bool = False) -> dict:
     """Mean per-tile APLS of a checkpoint on the held-out SpaceNet-Mumbai tiles.
 
     ``threshold=None`` (default) uses the checkpoint's own deployed ``meta``
     threshold (falling back to 0.44); pass a float to force a shared threshold.
+    ``per_tile=True`` also returns ``per_tile`` — an ordered ``{tile_name: score}``
+    map (NaN-tiles omitted) so two checkpoints can be paired tile-by-tile for a
+    bootstrap CI (see :func:`compare_checkpoints_apls`).
     """
     from src.pipeline.p1_segment.model import load_checkpoint, predict_mask
     from src.pipeline.p1_segment.raster_io import imread_gray, imread_rgb
@@ -80,6 +83,7 @@ def apls_on_heldout(checkpoint: Path, n_tiles: int | None = 80, threshold: float
     model.to(device).eval()
     thr = threshold if threshold is not None else float(meta.get("threshold", 0.44))
     scores = []
+    per_tile_scores: dict[str, float] = {}
     for sat, mask_path in pairs:
         image = imread_rgb(sat)
         gt = (imread_gray(mask_path) > 127).astype(np.uint8)
@@ -87,8 +91,44 @@ def apls_on_heldout(checkpoint: Path, n_tiles: int | None = 80, threshold: float
         s = tile_apls(pred, gt)
         if not np.isnan(s):
             scores.append(s)
-    return {"checkpoint": Path(checkpoint).name, "n_scored": len(scores),
-            "apls_mean": float(np.mean(scores)) if scores else 0.0, "threshold": thr}
+            per_tile_scores[sat.name] = float(s)
+    out = {"checkpoint": Path(checkpoint).name, "n_scored": len(scores),
+           "apls_mean": float(np.mean(scores)) if scores else 0.0, "threshold": thr}
+    if per_tile:
+        out["per_tile"] = per_tile_scores
+    return out
+
+
+def compare_checkpoints_apls(
+    checkpoint_a: Path, checkpoint_b: Path, n_tiles: int | None = 80,
+    threshold: float | None = None, device: str = "cpu", seed: int = 7,
+) -> dict:
+    """Paired-bootstrap comparison of two checkpoints' APLS (bugs.md §3).
+
+    Scores both checkpoints on the **same** held-out tiles, pairs them by tile,
+    and returns a 95% CI on the APLS delta (b − a). A promotion is only justified
+    when the CI excludes zero — a headline gain that straddles zero is within
+    sampling noise (the trap that made the A12 OSM-agreement metric misleading).
+    """
+    from src.pipeline.p1_segment.stats import paired_bootstrap_ci
+
+    a = apls_on_heldout(checkpoint_a, n_tiles=n_tiles, threshold=threshold,
+                        device=device, seed=seed, per_tile=True)
+    b = apls_on_heldout(checkpoint_b, n_tiles=n_tiles, threshold=threshold,
+                        device=device, seed=seed, per_tile=True)
+    # Pair only on tiles both checkpoints scored (a NaN tile for either drops out).
+    common = [t for t in a["per_tile"] if t in b["per_tile"]]
+    scores_a = [a["per_tile"][t] for t in common]
+    scores_b = [b["per_tile"][t] for t in common]
+    ci = paired_bootstrap_ci(scores_a, scores_b)
+    print(f"  {a['checkpoint']} → {b['checkpoint']}: {ci.summary()}", flush=True)
+    return {
+        "checkpoint_a": a["checkpoint"], "checkpoint_b": b["checkpoint"],
+        "apls_a": a["apls_mean"], "apls_b": b["apls_mean"], "n_paired": len(common),
+        "delta": ci.delta, "ci_low": ci.ci_low, "ci_high": ci.ci_high,
+        "p_two_sided": ci.p_two_sided, "excludes_zero": ci.excludes_zero,
+        "verdict": ci.verdict,
+    }
 
 
 def main() -> None:
@@ -98,8 +138,17 @@ def main() -> None:
     p.add_argument("--threshold", type=float, default=None,
                    help="shared override; default = each checkpoint's deployed meta threshold")
     p.add_argument("--device", default="cpu")
+    p.add_argument("--compare", action="store_true",
+                   help="bugs.md §3: paired-bootstrap CI on the APLS delta between the first two checkpoints")
     p.add_argument("--out", default="data/sample/spacenet_mumbai_apls.json")
     args = p.parse_args()
+
+    if args.compare:
+        if len(args.checkpoints) < 2:
+            raise SystemExit("--compare needs at least two --checkpoints (a then b)")
+        rep = compare_checkpoints_apls(Path(args.checkpoints[0]), Path(args.checkpoints[1]),
+                                       n_tiles=args.n_tiles, threshold=args.threshold, device=args.device)
+        Path(args.out).write_text(json.dumps(rep, indent=2)); print(f"-> {args.out}"); return
 
     results = []
     for ckpt in args.checkpoints:

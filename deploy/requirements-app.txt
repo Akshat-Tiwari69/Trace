@@ -19,3 +19,5 @@ networkx==3.3
 pandas==2.2.2
 numpy==1.26.4
 matplotlib==3.8.2
+# decodes untrusted uploads — keep pinned & patched (matches the Modal image pin)
+Pillow==10.4.0

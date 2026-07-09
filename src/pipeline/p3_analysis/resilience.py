@@ -34,6 +34,7 @@ def global_efficiency(
     weight: str = "length_m",
     k: int | None = None,
     seed: int = 42,
+    sources: list | None = None,
 ) -> float:
     """Weighted global efficiency of ``graph`` (finite even when disconnected).
 
@@ -46,8 +47,16 @@ def global_efficiency(
     ``k`` randomly sampled sources instead of all N (the same k-sample trick used
     for approximate betweenness); ``k=None`` (default) stays exact so committed
     artifacts don't drift.
+
+    ``sources`` (optional) supplies an **explicit source-node list** and takes
+    precedence over ``k`` — used by :func:`ablation_curve` so every step of a
+    k-sampled curve is estimated from the *same* fixed source set (comparable
+    numbers, no per-step resampling noise). An empty ``sources`` list returns
+    0.0 (no usable estimate).
     """
     import networkx as nx
+
+    from src.pipeline.p3_analysis.criticality import auto_k
 
     if k is not None and k <= 0:
         raise ValueError("k must be a positive sample size (or None for exact)")
@@ -56,8 +65,18 @@ def global_efficiency(
     if n < 2:
         return 0.0
 
+    # Auto-sample above the node threshold when the caller didn't fix sources/k,
+    # so a city-scale ablation click stays responsive (bugs.md §4). Small graphs
+    # (the committed demo) stay exact, so their numbers never drift.
+    if sources is None:
+        k = auto_k(graph, k)
+
     nodes = list(graph.nodes)
-    if k is not None and k < n:
+    if sources is not None:
+        if not sources:
+            return 0.0
+        norm = len(sources) * (n - 1)
+    elif k is not None and k < n:
         sources = random.Random(seed).sample(nodes, k)
         norm = k * (n - 1)  # unbiased estimate: mean per-source efficiency
     else:
@@ -98,11 +117,17 @@ def resilience_index(
         else baseline_efficiency
     )
 
+    if base <= 0:
+        raise ValueError(
+            "baseline global efficiency is 0 — graph is degenerate/disconnected; "
+            "upstream data invalid"
+        )
+
     perturbed = graph.copy()
     perturbed.remove_nodes_from(removed_nodes)
     eff = global_efficiency(perturbed, weight, k=k)
 
-    ri = (eff / base) if base > 0 else 0.0
+    ri = eff / base
     return {
         "removed": list(removed_nodes),
         "n_removed": len(removed_nodes),
@@ -166,11 +191,36 @@ def ablation_curve(
     ``order`` is then ignored). The targeted-vs-random pair is the sanity check in
     ``docs/Evaluation.md``. ``k`` forwards to :func:`global_efficiency` for
     k-sample estimation, so the per-step recompute stays cheap on large graphs.
+
+    When ``k`` is set, the source nodes are sampled **once** from the original
+    node set and reused at every removal step (dropping removed nodes), so the
+    per-step estimates are directly comparable rather than resampling noise.
+    Raises ``ValueError`` when the baseline efficiency is 0 (degenerate graph) —
+    a silent 0.0 would be indistinguishable from "network destroyed".
     """
     import networkx as nx
 
-    base = global_efficiency(graph, weight, k=k)
     nodes = list(graph.nodes)
+
+    # Fixed source set for k-sampling: drawn once, reused (minus removed nodes)
+    # at every step so successive efficiencies are comparable estimates.
+    fixed_sources: list | None = None
+    if k is not None and 0 < k < len(nodes):
+        fixed_sources = random.Random(seed).sample(nodes, k)
+
+    def _efficiency(g: "nx.Graph") -> float:
+        if fixed_sources is None:
+            return global_efficiency(g, weight, k=k)
+        return global_efficiency(
+            g, weight, sources=[s for s in fixed_sources if g.has_node(s)]
+        )
+
+    base = _efficiency(graph)
+    if base <= 0:
+        raise ValueError(
+            "baseline global efficiency is 0 — graph is degenerate/disconnected; "
+            "upstream data invalid"
+        )
 
     if sequence is not None:
         sequence = list(sequence)

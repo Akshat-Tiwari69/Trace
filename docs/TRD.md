@@ -91,9 +91,9 @@ Module contracts (illustrative):
 | Phase II | `build_graph(mask) -> nx.Graph` | mask → raw graph |
 | Phase II | `heal(graph) -> nx.Graph` | broken graph → routable graph |
 | Phase III | `criticality(graph) -> dict` | graph → centrality scores |
-| Phase III | `simulate_ablation(graph, node) -> metrics` | graph + node → resilience metrics |
+| Phase III | `simulate_ablation(graph, nodes) -> metrics` | graph + tuple of nodes → resilience metrics |
 
-**Dashboard ↔ pipeline contract:** the dashboard reads `graph.graphml` + `criticality.csv` at startup; when the user clicks a node it calls the in-process `simulate_ablation(graph, node)` and renders the result. This call is cheap (one shortest-path/efficiency recompute on a copy of the graph), so it needs no server.
+**Dashboard ↔ pipeline contract:** the dashboard reads `graph.graphml` + `criticality.csv` at startup; when the user clicks a node it calls the in-process `simulate_ablation(graph, nodes)` (a **tuple** of disabled nodes — multi-node flood ablation is supported) and renders the result. This call is cheap (one shortest-path/efficiency recompute on a copy of the graph), so it needs no server.
 
 *Future:* a **FastAPI** service could expose `simulate_ablation` and graph queries over HTTP if the app is hosted for many users. Out of scope now.
 
@@ -126,10 +126,27 @@ Even without user accounts, basic security hygiene applies:
 | Mode | How | Notes |
 |---|---|---|
 | **Local (primary)** | `streamlit run app.py` | The default for development and demos |
-| **Public demo (optional)** | Streamlit Community Cloud or Hugging Face Spaces (free CPU tier) | CPU-only / limited RAM — so host the **dashboard with precomputed artifacts**; do model inference offline beforehand. Confirm current free-tier limits before relying on them. |
+| **Public demo** ~~(optional)~~ | ~~Streamlit Community Cloud or Hugging Face Spaces (free CPU tier)~~ | **Superseded** — v1 shipped on a self-hosted Oracle box instead; see "Deployed architecture (v1 actual)" below. (Kept for history.) |
 | **Reproducible build (optional)** | `Dockerfile` + pinned `requirements.txt` | For judges/contributors to run identically |
 
-Because the dashboard consumes precomputed outputs, the free CPU hosting tiers are a natural fit — no GPU is needed at serve time.
+Because the dashboard consumes precomputed outputs, CPU hosting is sufficient — no GPU is needed at serve time.
+
+### Deployed architecture (v1 actual)
+
+What actually runs in production (supersedes the "Streamlit Community Cloud / HF
+Spaces" row above; full runbook in `deploy/README.md`):
+
+- **Host:** Oracle Always-Free ARM box (Ubuntu 24.04 aarch64), dashboard as a
+  user systemd service (`deploy/roadresilience.service`), Streamlit bound to
+  loopback only.
+- **Public entrypoint:** **Caddy** on 80/443 with auto-provisioned TLS
+  (`trace.tiwaribabu.in`), reverse-proxying to 127.0.0.1:8501. Port 8501 is
+  never exposed.
+- **Auto-update:** a 2-minute systemd timer runs `deploy/update.sh` (fetch →
+  hard-sync → dep refresh → restart, with health-check + rollback).
+- **GPU inference:** a **Modal serverless T4 endpoint** (`deploy/modal_app.py`)
+  guarded by a shared secret (`ROADSEG_KEY` Modal Secret); the dashboard calls
+  it for upload→segment and everything else stays CPU-side.
 
 ## Performance Requirements
 
