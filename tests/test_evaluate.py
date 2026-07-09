@@ -33,8 +33,10 @@ def test_geojson_roundtrip_preserves_graph(tmp_path):
 
     assert back.number_of_nodes() == g.number_of_nodes()
     assert back.number_of_edges() == g.number_of_edges()
-    assert back.edges[2, 3]["is_bridged"] is True
-    assert back.edges[0, 1]["length_m"] == 1.0
+    # back is a MultiGraph (graph_io returns MultiGraph so parallel edges
+    # survive round-trips) — index by (u, v, key), key 0 for a single edge.
+    assert back.edges[2, 3, 0]["is_bridged"] is True
+    assert back.edges[0, 1, 0]["length_m"] == 1.0
 
 
 def test_healing_metrics_reconstructs_connectivity():

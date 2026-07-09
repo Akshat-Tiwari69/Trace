@@ -123,13 +123,19 @@ state dict). Re-verify a new checkpoint loads under the Modal pin before release
 
 ## Python & dependency matrix
 
-- App tested on **Python 3.11** (dev machines) and **3.12** (the box). Do **not**
-  add a `.python-version` pin — it would break one of the two today.
+- App tested on **Python 3.11** (dev machines) and **3.12** (the box). A
+  `.python-version` at repo root now pins **3.11** for dev/CI tooling
+  (pyenv, `actions/setup-python`-style version detection) — this does **not**
+  touch the box: `roadresilience.service` and `update.sh` both invoke
+  `.venv/bin/...` directly, so neither one ever consults `.python-version`,
+  and the box keeps running its own **Python 3.12**.
 - Known divergence: root `requirements.txt` pins **geopandas 0.14.4** (conda-forge
-  path) while `deploy/requirements-app.txt` pins **1.0.1** (pyogrio default
-  reader, no system GDAL on aarch64). The app only uses `gpd.read_file()`, which
-  behaves identically — but align the two in a follow-up rather than letting them
-  drift further.
+  path, dev) while `deploy/requirements-app.txt` pins **1.0.1** (pyogrio default
+  reader, no system GDAL on aarch64, prod). The app only uses `gpd.read_file()`,
+  which behaves identically today — but flipping either pin to close this gap
+  is an **operator step**: it needs a joint dev+prod test (full suite dev-side
+  **and** a `gpd.read_file()` smoke test on `data/sample/*.geojson` on the
+  deploy box) before rollout, not a drive-by version bump.
 
 ## Useful ops
 

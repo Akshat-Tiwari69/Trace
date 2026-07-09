@@ -76,7 +76,7 @@ def skeleton_to_graph(
     transform: "Affine | None" = None,
     resolution_m: float = 1.0,
     distance: np.ndarray | None = None,
-) -> "nx.Graph":
+) -> "nx.MultiGraph":
     """Build a clean, **metric** NetworkX graph from a skeleton image.
 
     Parameters
@@ -97,21 +97,25 @@ def skeleton_to_graph(
 
     Returns
     -------
-    nx.Graph
-        Nodes carry ``x, y`` (metric), ``degree, type``; edges carry
-        ``length_m`` (metres), ``geometry`` (a metric ``[[x, y], ...]`` polyline),
-        ``is_bridged=False`` and (if ``distance`` given) ``width_m``. Reproject to
-        lon/lat with :func:`reproject_graph_to_wgs84` before writing for the map.
+    nx.MultiGraph
+        Parallel skeleton branches (loops, dual carriageways) are kept as
+        **distinct keyed edges** rather than collapsed to one — redundant
+        alternate routes are exactly what the resilience metric rewards, so
+        dropping them silently biased ``global_efficiency``. Each edge key is an
+        ``int`` assigned in build order. Nodes carry ``x, y`` (metric),
+        ``degree, type``; edges carry ``length_m`` (metres), ``geometry`` (a
+        metric ``[[x, y], ...]`` polyline), ``is_bridged=False`` and (if
+        ``distance`` given) ``width_m``. Reproject to lon/lat with
+        :func:`reproject_graph_to_wgs84` before writing for the map.
     """
     import networkx as nx
     import sknw
 
     skel = np.asarray(skeleton).astype(np.uint16)
-    # multi=True so parallel skeleton branches (loops, dual carriageways) are
-    # visible here instead of silently dropped inside sknw. The simple nx.Graph
-    # we return still holds one edge per node pair, but the choice is now
-    # deterministic (shortest branch wins) and the loss is counted + reported.
-    # Full MultiGraph support end-to-end is tracked in bugs.md §4 (L effort).
+    # multi=True so parallel skeleton branches (loops, dual carriageways) survive
+    # as keyed edges instead of being silently dropped inside sknw. The returned
+    # MultiGraph preserves all of them (bugs.md §4 — the headline resilience
+    # metric was biased by the old keep-shortest collapse).
     raw = sknw.build_sknw(skel, multi=True)
 
     # Pixel size (metres) for width: square-pixel UTM grid, else the GSD.
@@ -134,14 +138,26 @@ def skeleton_to_graph(
         half_width_px = float(dist[rows, cols].mean())  # distance-to-edge = half width
         return round(2.0 * half_width_px * pixel_size_m, 3)
 
-    graph = nx.Graph()
+    graph = nx.MultiGraph()
     for node_id, data in raw.nodes(data=True):
         row, col = float(data["o"][0]), float(data["o"][1])  # sknw 'o' = (y, x)
         mx, my = pixel_to_metric(row, col)
         graph.add_node(int(node_id), x=mx, y=my)
 
-    parallel_dropped = 0
+    # Count parallel branches (same junction pair, ≥2 keyed edges) for a build
+    # report — kept (not collapsed) in the MultiGraph, but surfaced so the
+    # heal/simplify reports stay honest about how many survived.
+    from collections import defaultdict
+    pair_counts: dict[tuple[int, int], int] = defaultdict(int)
+    self_loop_dropped = 0
     for u, v, data in raw.edges(data=True):
+        ui, vi = int(u), int(v)
+        if ui == vi:
+            # Self-loop artifacts (multi=True surfaces them at ring corners):
+            # zero routing information, and zero-length ones would violate the
+            # length_m > 0 artifact contract. Skip outright.
+            self_loop_dropped += 1
+            continue
         pts = np.asarray(data["pts"], dtype=float)  # (row, col) polyline
         metric = [list(pixel_to_metric(r, c)) for r, c in pts]
         if len(metric) >= 2:
@@ -150,28 +166,19 @@ def skeleton_to_graph(
             length_m = float(np.hypot(seg[:, 0], seg[:, 1]).sum())
         else:
             length_m = 0.0
-        ui, vi = int(u), int(v)
-        if ui == vi:
-            # Self-loop artifacts (multi=True surfaces them at ring corners):
-            # zero routing information, and zero-length ones would violate the
-            # length_m > 0 artifact contract. Skip outright.
-            continue
-        if graph.has_edge(ui, vi):
-            # Parallel branch between the same junction pair: a simple graph
-            # holds one edge, so keep the shorter (more direct) branch.
-            parallel_dropped += 1
-            if length_m >= float(graph.edges[ui, vi].get("length_m", 0.0)):
-                continue
         attrs = {"length_m": length_m, "geometry": metric, "is_bridged": False}
         width = edge_width_m(pts)
         if width is not None:
             attrs["width_m"] = width
         graph.add_edge(ui, vi, **attrs)
+        pair_counts[(min(ui, vi), max(ui, vi))] += 1
 
-    if parallel_dropped:
-        print(f"[skeleton_graph] WARNING: {parallel_dropped} parallel skeleton branch(es) "
-              "collapsed to the shorter edge — loops/dual carriageways lose redundancy "
-              "in the simple graph (bugs.md §4)")
+    parallel_kept = sum(c - 1 for c in pair_counts.values() if c > 1)
+    if parallel_kept or self_loop_dropped:
+        msg = f"[skeleton_graph] built MultiGraph: {parallel_kept} parallel branch(es) kept"
+        if self_loop_dropped:
+            msg += f", {self_loop_dropped} self-loop artifact(s) dropped"
+        print(msg)
 
     _annotate_degree_and_type(graph)
     return graph
@@ -212,11 +219,22 @@ def prune_degenerate_edges(graph: "nx.Graph", min_edge_len_m: float) -> int:
     weighted shortest-path metrics (betweenness, global efficiency). Returns the
     number of edges removed. Run before healing, then re-annotate degree/type.
     """
-    to_remove = [
-        (u, v)
-        for u, v, data in graph.edges(data=True)
-        if u == v or float(data.get("length_m", 0.0)) < min_edge_len_m
-    ]
+    # Drop self-loops and sub-threshold branches. MultiGraph edges are addressed
+    # by (u, v, key); a plain Graph by (u, v). ``keys=True`` is only valid on a
+    # MultiGraph, so branch on the graph type.
+    multi = graph.is_multigraph()
+    if multi:
+        to_remove = [
+            (u, v, k)
+            for u, v, k, data in graph.edges(data=True, keys=True)
+            if u == v or float(data.get("length_m", 0.0)) < min_edge_len_m
+        ]
+    else:
+        to_remove = [
+            (u, v)
+            for u, v, data in graph.edges(data=True)
+            if u == v or float(data.get("length_m", 0.0)) < min_edge_len_m
+        ]
     graph.remove_edges_from(to_remove)
     graph.remove_nodes_from([n for n in list(graph.nodes) if graph.degree(n) == 0])
     _annotate_degree_and_type(graph)

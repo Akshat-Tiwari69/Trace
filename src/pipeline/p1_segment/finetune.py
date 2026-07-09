@@ -160,7 +160,9 @@ def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False)
         inter = np.logical_and(pred, gt).sum()
         union = np.logical_or(pred, gt).sum()
         total += inter / max(union, 1)
-    return total / len(pairs)
+    # Plain float, not numpy float64 — this value is stored in the .last.pt
+    # train_state, which must stay weights_only=True-loadable (see model.py).
+    return float(total / len(pairs))
 
 
 def _last_path(out_path: str | Path) -> Path:

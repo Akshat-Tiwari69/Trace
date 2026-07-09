@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 
 from src.pipeline.p1_segment.model import load_checkpoint
-from src.pipeline.p1_segment.train_combined import ModelEMA, TrainConfig, gather, train_combined
+from src.pipeline.p1_segment.experiments.train_combined import ModelEMA, TrainConfig, gather, train_combined
 from src.pipeline.p1_segment.model import build_model
 
 

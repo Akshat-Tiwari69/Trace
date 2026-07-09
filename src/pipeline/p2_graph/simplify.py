@@ -31,9 +31,18 @@ if TYPE_CHECKING:
     import networkx as nx
 
 
-def _oriented_geometry(graph: "nx.Graph", u: int, v: int) -> list:
-    """Return edge ``(u, v)``'s polyline oriented to run from ``u`` to ``v``."""
-    geom = [list(p) for p in graph.edges[u, v].get("geometry", [])]
+def _oriented_geometry(graph: "nx.Graph", u: int, v: int, key: int = 0) -> list:
+    """Return edge ``(u, v, key)``'s polyline oriented to run from ``u`` to ``v``.
+
+    On a MultiGraph each ``(u, v)`` pair may hold several keyed edges; ``key``
+    selects which (default 0, the first). The polyline is flipped if its stored
+    orientation runs v→u.
+    """
+    # MultiGraph: graph.edges[u, v] is a dict of {key: attrs}; [key] picks one.
+    # The same expression also works for a plain Graph (its edges[u,v] is the
+    # attr dict directly and ignores the extra index), so this helper serves both.
+    attrs = graph.edges[u, v, key] if graph.is_multigraph() else graph.edges[u, v]
+    geom = [list(p) for p in attrs.get("geometry", [])]
     if not geom:
         return [[graph.nodes[u]["x"], graph.nodes[u]["y"]],
                 [graph.nodes[v]["x"], graph.nodes[v]["y"]]]
@@ -44,31 +53,51 @@ def _oriented_geometry(graph: "nx.Graph", u: int, v: int) -> list:
     return geom
 
 
+def _sole_edge_key(graph: "nx.Graph", u: int, v: int) -> int:
+    """The single edge key for a degree-2 node's ``(u, v)`` neighbour pair.
+
+    A degree-2 node has exactly one edge to each of its two neighbours; on a
+    MultiGraph that edge still has a key, so return it. Raises if there is
+    somehow more than one (would mean the node isn't actually degree-2 in the
+    multi sense — guarded by the caller's ``graph.degree(node) != 2`` check).
+    """
+    if not graph.is_multigraph():
+        return 0
+    keys = list(graph[u][v].keys())
+    return keys[0]
+
+
 def collapse_degree2_nodes(graph: "nx.Graph") -> int:
     """Merge every degree-2 pass-through node into a single edge. Returns count.
 
-    Skips a node when collapsing it would create a self-loop (its two neighbours
-    are the same node) or duplicate an existing edge (a parallel edge the simple
-    graph can't hold) — those nodes are left in place rather than lose geometry.
-    Note this skip is deliberately **lossless**: keeping the degree-2 node keeps
-    both parallel routes alive (the one real parallel-edge loss site is the
-    sknw build — see ``skeleton_graph.py``).
+    Skips a node only when collapsing it would create a self-loop (its two
+    neighbours are the same node). On a MultiGraph the merged edge is added as a
+    **new keyed edge** between the neighbours — so a real parallel route (a loop
+    / dual carriageway) is preserved rather than lost. Pre-existing parallel
+    edges between the two neighbours are left untouched.
     """
     collapsed = 0
     for node in list(graph.nodes):
         if node not in graph or graph.degree(node) != 2:
             continue
-        a, c = list(graph.neighbors(node))
-        if a == c or graph.has_edge(a, c):
-            continue  # would self-loop or clash with an existing edge
+        neigh = list(graph.neighbors(node))
+        if len(neigh) != 2:
+            # degree-2 via two parallel edges to the SAME neighbour (a MultiGraph
+            # only): nothing to merge — collapsing would just shuffle keys. Skip.
+            continue
+        a, c = neigh
+        if a == c:
+            continue  # would self-loop (defensive — covered by the len check)
 
-        geom_a = _oriented_geometry(graph, a, node)
-        geom_c = _oriented_geometry(graph, node, c)
+        ka = _sole_edge_key(graph, a, node)
+        kc = _sole_edge_key(graph, node, c)
+        geom_a = _oriented_geometry(graph, a, node, ka)
+        geom_c = _oriented_geometry(graph, node, c, kc)
         merged_geom = geom_a + geom_c[1:]  # stitch, dropping the duplicated middle
-        merged_len = float(graph.edges[a, node].get("length_m", 0.0)
-                           + graph.edges[node, c].get("length_m", 0.0))
-        bridged = bool(graph.edges[a, node].get("is_bridged", False)
-                       or graph.edges[node, c].get("is_bridged", False))
+        ea = graph.edges[a, node, ka] if graph.is_multigraph() else graph.edges[a, node]
+        ec = graph.edges[node, c, kc] if graph.is_multigraph() else graph.edges[node, c]
+        merged_len = float(ea.get("length_m", 0.0) + ec.get("length_m", 0.0))
+        bridged = bool(ea.get("is_bridged", False) or ec.get("is_bridged", False))
 
         graph.remove_node(node)  # drops both incident edges
         graph.add_edge(a, c, length_m=merged_len, geometry=merged_geom, is_bridged=bridged)
@@ -85,12 +114,19 @@ def prune_short_stubs(graph: "nx.Graph", min_stub_len_m: float, max_iter: int = 
     """
     removed = 0
     truncated = True
+    multi = graph.is_multigraph()
     for _ in range(max_iter):
-        stubs = [
-            n for n in graph.nodes
-            if graph.degree(n) == 1
-            and float(next(iter(graph.edges(n, data=True)))[2].get("length_m", 0.0)) < min_stub_len_m
-        ]
+        stubs: list[int] = []
+        for n in graph.nodes:
+            if graph.degree(n) != 1:
+                continue
+            # A degree-1 node has exactly one incident edge; read its length.
+            # keys=True only valid on a MultiGraph; plain Graph yields (u, v, data).
+            it = graph.edges(n, data=True, keys=True) if multi else graph.edges(n, data=True)
+            edge = next(iter(it))
+            data = edge[3] if multi else edge[2]
+            if float(data.get("length_m", 0.0)) < min_stub_len_m:
+                stubs.append(n)
         if not stubs:
             truncated = False
             break
@@ -174,7 +210,7 @@ def consolidate_nearby_nodes(graph: "nx.Graph", tol_m: float) -> int:
     required.
     """
     uf = UnionFind(list(graph.nodes))
-    for u, v, data in graph.edges(data=True):
+    for u, v, data in graph.edges(data=True):  # keys ignored for unioning
         if u != v and float(data.get("length_m", np.inf)) < tol_m:
             uf.union(u, v)
 
@@ -194,15 +230,25 @@ def consolidate_nearby_nodes(graph: "nx.Graph", tol_m: float) -> int:
         for n in members:
             if n == keeper:
                 continue
+            # Rewire every edge from n to an OUTSIDE node onto keeper. On a
+            # MultiGraph there may be several keyed edges to the same outside
+            # node (a real parallel route); each is moved as its own keyed edge
+            # so redundancy survives consolidation. Internal cluster edges are
+            # dropped (they would self-loop on keeper).
             for m in list(graph.neighbors(n)):
                 if m in member_set:
                     continue  # edge internal to the cluster → drop (would self-loop)
-                data = dict(graph.edges[n, m])
-                # keep the shorter of any parallel connection to the same outside node
-                if (not graph.has_edge(keeper, m)
-                        or data.get("length_m", np.inf)
-                        < graph.edges[keeper, m].get("length_m", np.inf)):
-                    graph.add_edge(keeper, m, **data)
+                if graph.is_multigraph():
+                    for k in list(graph[n][m].keys()):
+                        data = dict(graph.edges[n, m, k])
+                        graph.add_edge(keeper, m, **data)
+                else:
+                    data = dict(graph.edges[n, m])
+                    # keep the shorter of any parallel connection to the same outside node
+                    if (not graph.has_edge(keeper, m)
+                            or data.get("length_m", np.inf)
+                            < graph.edges[keeper, m].get("length_m", np.inf)):
+                        graph.add_edge(keeper, m, **data)
             graph.remove_node(n)
 
         graph.nodes[keeper]["x"], graph.nodes[keeper]["y"] = cx, cy

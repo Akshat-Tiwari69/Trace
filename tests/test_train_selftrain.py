@@ -20,7 +20,7 @@ def _write_pairs(folder, n, size=64):
 def test_unlabeled_dataset_yields_two_perturbed_views(tmp_path):
     import random
 
-    from src.pipeline.p1_segment.train_selftrain import UnlabeledTileDataset, list_images
+    from src.pipeline.p1_segment.experiments.train_selftrain import UnlabeledTileDataset, list_images
 
     # Seed so the probabilistic 'strong' photometric augmentation reliably fires —
     # the perturbation has p<1, so an unlucky global RNG state (test ordering) could
@@ -40,7 +40,7 @@ def test_unlabeled_dataset_yields_two_perturbed_views(tmp_path):
 
 
 def test_refine_pseudo_drops_small_blobs():
-    from src.pipeline.p1_segment.train_selftrain import refine_pseudo
+    from src.pipeline.p1_segment.experiments.train_selftrain import refine_pseudo
 
     p = torch.zeros(1, 1, 32, 32)
     p[0, 0, 5:25, 12:15] = 1.0                         # a ~60-px road strip → keep
@@ -51,7 +51,7 @@ def test_refine_pseudo_drops_small_blobs():
 
 
 def test_consistency_loss_ignores_unconfident_pixels():
-    from src.pipeline.p1_segment.train_selftrain import consistency_loss
+    from src.pipeline.p1_segment.experiments.train_selftrain import consistency_loss
 
     logits = torch.zeros(1, 1, 4, 4)                   # sigmoid 0.5 everywhere
     pseudo = torch.ones(1, 1, 4, 4)
@@ -61,7 +61,7 @@ def test_consistency_loss_ignores_unconfident_pixels():
 
 def test_train_selftrain_runs_and_saves(tmp_path):
     from src.pipeline.p1_segment.model import load_checkpoint
-    from src.pipeline.p1_segment.train_selftrain import SelfTrainConfig, train_selftrain
+    from src.pipeline.p1_segment.experiments.train_selftrain import SelfTrainConfig, train_selftrain
 
     lab, unl, val = tmp_path / "lab", tmp_path / "unl", tmp_path / "val"
     _write_pairs(lab, 4); _write_pairs(unl, 4); _write_pairs(val, 2)

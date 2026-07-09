@@ -15,6 +15,8 @@ P2 then skeletonises.
 
 from __future__ import annotations
 
+import pickle
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -97,15 +99,37 @@ def save_checkpoint(
     torch.save(blob, path)
 
 
+def load_checkpoint_blob(path: str | Path, map_location: str = "cpu") -> dict[str, Any]:
+    """Read a checkpoint dict, preferring torch's safe ``weights_only=True`` path.
+
+    Checkpoints written by :func:`save_checkpoint` hold only tensors and
+    JSON-safe primitives (``str``/``int``/``float``/``bool``/``list``/``dict``),
+    so they load under the restricted unpickler with no loss of function.
+    Older/hand-rolled checkpoints (e.g. pre-A19 files with raw optimizer/
+    scheduler objects at the top level) can't be safely unpickled that way;
+    those fall back to a full pickle load with a one-time warning, since
+    re-serialising the already-deployed checkpoint is out of scope here.
+    ``map_location`` (default "cpu") keeps GPU-trained checkpoints CPU-safe.
+    """
+    try:
+        return torch.load(path, map_location=map_location, weights_only=True)
+    except pickle.UnpicklingError:
+        warnings.warn(
+            f"{path}: legacy pickled checkpoint (weights_only=True load failed) — "
+            "falling back to a full pickle load. Re-save with save_checkpoint() to "
+            "enable safe loading.",
+            stacklevel=2,
+        )
+        return torch.load(path, map_location=map_location, weights_only=False)
+
+
 def load_train_state(path: str | Path, map_location: str = "cpu") -> dict[str, Any] | None:
     """Return the A19 training state saved next to a checkpoint, or ``None``.
 
     Companion to :func:`load_checkpoint` (which rebuilds the model): this pulls the
     optimizer/scaler/epoch/best/history blob so a run can resume mid-training.
     """
-    # weights_only=False: train_state/meta hold non-tensor objects; map_location
-    # (default "cpu") keeps GPU-trained checkpoints CPU-safe.
-    ckpt = torch.load(path, map_location=map_location, weights_only=False)
+    ckpt = load_checkpoint_blob(path, map_location=map_location)
     return ckpt.get("train_state")
 
 
@@ -122,10 +146,7 @@ def load_checkpoint(
     silently rebuilt as mit_b0/unet — unless ``encoder`` explicitly asserts the
     architecture.
     """
-    # weights_only=False: our own checkpoints' ``meta`` holds non-tensor
-    # config/metric objects torch 2.6+ would otherwise refuse to unpickle.
-    # map_location (default "cpu") keeps GPU-trained checkpoints CPU-safe.
-    ckpt = torch.load(path, map_location=map_location, weights_only=False)
+    ckpt = load_checkpoint_blob(path, map_location=map_location)
     meta = ckpt.get("meta") or {}
     if not meta and encoder is None:
         raise ValueError(f"{path} has no 'meta' — cannot verify architecture; refusing to guess")

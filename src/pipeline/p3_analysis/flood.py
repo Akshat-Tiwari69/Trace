@@ -28,12 +28,22 @@ from src.pipeline.p3_analysis.resilience import ablation_curve
 
 
 def nodes_in_polygon(graph, polygon: list) -> list[int]:
-    """Nodes whose ``(x, y)`` falls inside ``polygon`` (a list of ``[lon, lat]``)."""
+    """Nodes whose ``(x, y)`` falls inside ``polygon`` (a list of ``[lon, lat]``).
+
+    Uses an STRtree to bbox-filter candidate nodes before the exact ``covers``
+    test (same pattern as ``healing.py``'s edge-crossing rejection) — avoids an
+    O(V) ``contains``/``covers`` call per node at city scale (bugs.md §4)."""
     from shapely.geometry import Point, Polygon
+    from shapely.strtree import STRtree
 
     poly = Polygon(polygon)
-    return [n for n, d in graph.nodes(data=True)
-            if poly.covers(Point(d["x"], d["y"]))]
+    nodes = list(graph.nodes)
+    if not nodes:
+        return []
+    points = [Point(graph.nodes[n]["x"], graph.nodes[n]["y"]) for n in nodes]
+    tree = STRtree(points)
+    candidate_idx = sorted(int(i) for i in tree.query(poly))  # bbox-filtered candidates
+    return [nodes[i] for i in candidate_idx if poly.covers(points[i])]
 
 
 def nodes_below_elevation(graph, threshold: float, attr: str = "elevation") -> list[int]:

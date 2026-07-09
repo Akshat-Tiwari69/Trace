@@ -23,7 +23,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.pipeline.p1_segment.model import DEPLOYED_CHECKPOINT, DEPLOYED_RELEASE
+from src.pipeline.p1_segment.model import (
+    DEPLOYED_CHECKPOINT,
+    DEPLOYED_RELEASE,
+    load_checkpoint_blob,
+)
 
 DEFAULT_CKPT = DEPLOYED_CHECKPOINT
 DEFAULT_OUT = "data/sample/segmentation_eval.json"
@@ -60,14 +64,12 @@ def seg_report(meta: dict[str, Any]) -> dict[str, Any]:
 
 def _load_meta(checkpoint: Path) -> dict[str, Any]:
     """Read just the ``meta`` block (no model build needed for the report)."""
-    import torch
-
     if not checkpoint.exists():
         raise SystemExit(
             f"checkpoint not found: {checkpoint}\n"
             f"  Download it from the GitHub Release {DEPLOYED_RELEASE} into models/."
         )
-    return torch.load(checkpoint, map_location="cpu", weights_only=False).get("meta", {})
+    return load_checkpoint_blob(checkpoint, map_location="cpu").get("meta", {})
 
 
 def _live_demo(checkpoint: Path, image_path: Path, aoi: str, out_dir: Path) -> dict[str, Any]:
@@ -113,6 +115,18 @@ def main() -> None:
 
     checkpoint = Path(args.checkpoint)
     report = seg_report(_load_meta(checkpoint))
+    # Fail loud instead of overwriting the committed report with nulls: a
+    # checkpoint whose meta lacks the validation metrics (e.g. a fine-tuned
+    # deploy checkpoint that was never run through the A4 eval) would produce
+    # a report of Nones — silently clobbering data/sample/segmentation_eval.json.
+    metric_keys = ("iou_flip_multiscale_tta", "iou_best_single_view",
+                   "clean_iou_at_deploy_threshold", "occlusion_recall")
+    if all(report["validation"][k] is None for k in metric_keys):
+        raise SystemExit(
+            f"{checkpoint}: meta carries no validation metrics — refusing to write "
+            f"a null report to {args.out}. Point --checkpoint at an evaluated "
+            "checkpoint, or pass --out elsewhere if you really want this."
+        )
     if args.image:
         report["live_demo"] = _live_demo(checkpoint, Path(args.image), args.aoi, Path(args.interim_dir))
 

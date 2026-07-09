@@ -114,29 +114,33 @@ def test_rank_table_requires_annotation_first():
 
 
 # --------------------------------------------------------------------------- #
-# Deterministic parallel-branch collapse (bugs.md §4)
+# Parallel-branch preservation under MultiGraph (bugs.md §4 — A37 migration)
 # --------------------------------------------------------------------------- #
-def test_skeleton_parallel_branches_keep_shortest(capsys):
+def test_skeleton_parallel_branches_preserved(capsys):
     from src.pipeline.p2_graph.skeleton_graph import skeleton_to_graph
 
     # Two junctions A(6,2) and B(6,10) joined by TWO branches — a straight
     # 8-px chord and a longer diagonal detour over the apex (2,6). Stubs on
     # both sides make A and B true 3-way junctions (diagonal bends are not
-    # junction pixels, so the detour stays one branch). The simple graph must
-    # keep exactly one A–B edge, and it must be the shorter branch.
+    # junction pixels, so the detour stays one branch).
+    #
+    # Pre-A37 the simple graph collapsed these to one (keep-shortest) — silently
+    # destroying a redundant alternate route that the resilience metric rewards.
+    # The MultiGraph now keeps BOTH branches as keyed edges between A and B.
     skel = np.zeros((13, 13), np.uint8)
     skel[6, 0:13] = 1  # stub — A — chord — B — stub
-    for i, (r, c) in enumerate([(5, 3), (4, 4), (3, 5), (2, 6), (3, 7), (4, 8), (5, 9)]):
+    for r, c in [(5, 3), (4, 4), (3, 5), (2, 6), (3, 7), (4, 8), (5, 9)]:
         skel[r, c] = 1  # the diagonal detour (length ~11.3)
 
     graph = skeleton_to_graph(skel, transform=None, resolution_m=1.0)
 
-    # 3 edges survive: the two stubs and ONE A–B branch (the detour is gone,
-    # so A/B drop to degree 2 — assert on edge structure, not degree).
-    assert graph.number_of_edges() == 3
+    # 4 edges: two stubs + BOTH A–B branches (chord ~8 px + detour ~11.3 px).
+    assert graph.number_of_edges() == 4
     lengths = sorted(d["length_m"] for _, _, d in graph.edges(data=True))
-    assert lengths[-1] < 9.0, "the ~11.3 px detour survived instead of the 8 px chord"
-    assert "1 parallel skeleton branch(es)" in capsys.readouterr().out
+    # the two longest are the two A–B branches; the chord AND the detour survive
+    assert any(l < 9.0 for l in lengths[-2:]), "chord branch lost"
+    assert any(l > 9.0 for l in lengths[-2:]), "detour branch lost"
+    assert "1 parallel branch(es) kept" in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------- #

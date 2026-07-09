@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 from PIL import Image
 
-from src.pipeline.p1_segment.build_massachusetts_data import convert_massachusetts
+from src.pipeline.p1_segment.experiments.build_massachusetts_data import convert_massachusetts
 
 
 def test_convert_produces_deepglobe_pairs(tmp_path):

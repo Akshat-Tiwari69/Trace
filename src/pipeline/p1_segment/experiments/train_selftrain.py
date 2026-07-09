@@ -48,7 +48,7 @@ from src.pipeline.p1_segment.dataset import (
 from src.pipeline.p1_segment.losses import ComboLoss
 from src.pipeline.p1_segment.model import IMAGENET_MEAN, IMAGENET_STD, build_model, load_checkpoint, save_checkpoint
 from src.pipeline.p1_segment.train import evaluate
-from src.pipeline.p1_segment.train_combined import ModelEMA
+from src.pipeline.p1_segment.experiments.train_combined import ModelEMA
 
 
 # --------------------------------------------------------------------------- #

@@ -97,7 +97,15 @@ def _endpoint_direction(graph: "nx.Graph", node: int) -> np.ndarray | None:
     neighbors = list(graph.neighbors(node))
     if not neighbors:
         return None
-    edge = graph.edges[node, neighbors[0]]
+    nbr = neighbors[0]
+    # A degree-1 node has exactly one incident edge. On a MultiGraph that edge
+    # still has a key — graph.edges[node, nbr] is a {key: attrs} dict, so peel
+    # off the single key. A plain Graph's edges[node, nbr] is the attrs directly.
+    if graph.is_multigraph():
+        keys = list(graph[node][nbr].keys())
+        edge = graph.edges[node, nbr, keys[0]]
+    else:
+        edge = graph.edges[node, nbr]
     geom = np.asarray(edge["geometry"], dtype=float)
     node_xy = np.array([graph.nodes[node]["x"], graph.nodes[node]["y"]])
     # Orient the polyline so its last point is the endpoint node.
