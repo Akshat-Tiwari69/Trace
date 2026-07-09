@@ -226,6 +226,42 @@ def test_compute_edge_styles_matches_original_precedence():
     assert disabled.opacity == 0.45
 
 
+def test_compute_edge_styles_maps_confidence_to_opacity():
+    """A ``confidence`` column (bugs.md §9.3) fades low-confidence edges, clipped
+    to [0.35, 1.0] so nothing goes fully invisible; disabled/spof keep their own
+    fixed opacity regardless of confidence."""
+    import geopandas as gpd
+
+    from src.app.app import compute_edge_styles
+
+    edges = _tiny_edge_gdf()
+    edges["confidence"] = [0.0, 0.9, 0.5, 0.2]  # edge (7,8) is the disabled one
+    scores = {1: 0.0, 2: 1.0, 3: 0.5, 4: 0.5, 5: 0.2, 6: 0.2, 7: 0.9, 8: 0.9}
+    styled = compute_edge_styles(
+        "test-fp-conf", edges, scores, _tiny_colour_scale(),
+        disabled_nodes=(7, 8), show_healed=True, show_spof=True,
+    )
+    by_pair = {(int(r.u), int(r.v)): r for r in styled.itertuples()}
+
+    # confidence=0.0 clipped up to the 0.35 floor, never invisible.
+    assert by_pair[(1, 2)].opacity == 0.35
+    assert by_pair[(3, 4)].opacity == 0.9
+    # (5, 6) is the spof edge — fixed 0.95 regardless of its confidence=0.5.
+    assert by_pair[(5, 6)].opacity == 0.95
+    # (7, 8) is disabled — fixed 0.45 regardless of its confidence=0.2.
+    assert by_pair[(7, 8)].opacity == 0.45
+
+    # No confidence column -> unchanged fixed opacity (existing behaviour).
+    plain = _tiny_edge_gdf()
+    assert isinstance(plain, gpd.GeoDataFrame)
+    styled_plain = compute_edge_styles(
+        "test-fp-conf-none", plain, scores, _tiny_colour_scale(),
+        disabled_nodes=(), show_healed=True, show_spof=False,
+    )
+    by_pair_plain = {(int(r.u), int(r.v)): r for r in styled_plain.itertuples()}
+    assert by_pair_plain[(1, 2)].opacity == 0.85
+
+
 def test_compute_edge_styles_show_healed_false_drops_bridged_edges():
     from src.app.app import compute_edge_styles
 

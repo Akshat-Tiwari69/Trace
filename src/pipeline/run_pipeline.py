@@ -266,6 +266,9 @@ def main() -> None:
     p.add_argument("--pp-close-radius", type=int, default=0)
     p.add_argument("--fill-holes", type=int, default=0,
                    help="A10 postprocess: fill holes up to this area (px); 0 = off")
+    p.add_argument("--min-corridor-support", type=float, default=0.3,
+                   help="reject a healing bridge if mean P1 prob-map support along it is below "
+                        "this (0 disables; needs prob.png from the blended P1 path, bugs.md §4)")
     p.add_argument("--force", action="store_true", help="rerun every stage even if outputs are fresh")
     p.add_argument("--from-stage", choices=_STAGES, default=None,
                    help="force a rerun starting at this stage (earlier stages skip if fresh)")
@@ -289,6 +292,7 @@ def main() -> None:
             device=args.device, tta=args.tta, blend=not args.no_blend, postprocess=args.postprocess,
             min_component_size=args.min_component_size, pp_open_radius=args.pp_open_radius,
             pp_close_radius=args.pp_close_radius, fill_holes=args.fill_holes, curve_steps=args.curve_steps,
+            min_corridor_support=args.min_corridor_support,
         )
 
     run(config.image, config.checkpoint, config.aoi, config=config,

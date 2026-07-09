@@ -162,11 +162,15 @@ def read_image_any(path: str | Path) -> tuple[np.ndarray, object, str | None]:
     return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), None, None
 
 
-def write_manifest(aoi: str, interim_dir: str | Path, transform, crs) -> Path | None:
+def write_manifest(aoi: str, interim_dir: str | Path, transform, crs, *, prob_png: bool = False) -> Path | None:
     """Write P2's alignment manifest if the source is georeferenced; else no-op.
 
     ``transform`` is a rasterio/affine ``Affine`` (its first 6 params are stored,
-    which P2 rebuilds via ``Affine(*meta["transform"])``).
+    which P2 rebuilds via ``Affine(*meta["transform"])``). ``prob_png=True`` adds
+    a ``"prob_png": true`` marker (bugs.md §4) recording that the blended
+    inference's probability map was persisted alongside this AOI's mask, for
+    corridor-aware healing. P2 doesn't actually need this flag to find the file —
+    it checks ``prob.png`` directly — this is provenance, not a load-bearing path.
     """
     if transform is None or crs is None:
         return None
@@ -177,6 +181,7 @@ def write_manifest(aoi: str, interim_dir: str | Path, transform, crs) -> Path | 
         "crs": str(crs),
         "transform": list(transform)[:6],
         "resolution_m": abs(float(transform[0])),
+        **({"prob_png": True} if prob_png else {}),
     }, indent=2)
     # Atomic (A36): temp + os.replace, so a crash mid-write can't leave a
     # truncated manifest that silently drops P2 into pixel space.

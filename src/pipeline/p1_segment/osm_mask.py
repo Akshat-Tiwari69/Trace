@@ -242,6 +242,27 @@ def save_binary_png(mask01: np.ndarray, path: Path) -> None:
     os.replace(tmp, path)
 
 
+def save_prob_png(prob: np.ndarray, path: Path) -> None:
+    """Save a float [0,1] probability map as an 8-bit PNG (``round(prob*255)``).
+
+    The blended inference path computes this per-pixel road probability then
+    used to discard it after thresholding — corridor-aware healing (bugs.md §4)
+    needs it to tell a sub-threshold-but-present occluded road from terrain with
+    no road signal at all. 1/255 quantisation is fine for a mean-over-samples
+    corridor check. Atomic (A36 pattern): temp + ``os.replace``.
+    """
+    import os
+
+    from PIL import Image
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    quantized = np.clip(np.round(np.asarray(prob, dtype=np.float64) * 255.0), 0, 255).astype(np.uint8)
+    Image.fromarray(quantized, mode="L").save(tmp, format="PNG")
+    os.replace(tmp, path)
+
+
 def save_qc_overlay(mask01: np.ndarray, path: Path) -> None:
     """Save a human-viewable version of a {0,1} mask (roads = white 255)."""
     from PIL import Image

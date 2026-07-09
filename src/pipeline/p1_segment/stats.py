@@ -41,9 +41,12 @@ class BootstrapCI:
         return "b wins" if self.delta > 0 else "a wins"
 
     def summary(self) -> str:
-        return (f"Δ={self.delta:+.4f}  {int(self.ci_level * 100)}% CI "
+        # ascii only ("delta"/"->", not Δ/→): this string is printed by the eval
+        # CLIs, and redirected stdout on Windows is cp1252 — non-ascii here
+        # crashed the A38 APLS stage twice (2026-07-09).
+        return (f"delta={self.delta:+.4f}  {int(self.ci_level * 100)}% CI "
                 f"[{self.ci_low:+.4f}, {self.ci_high:+.4f}]  n={self.n}  "
-                f"p={self.p_two_sided:.3f}  → {self.verdict}")
+                f"p={self.p_two_sided:.3f}  -> {self.verdict}")
 
 
 def paired_bootstrap_ci(

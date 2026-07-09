@@ -14,11 +14,8 @@
 - [ ] §3 topology-loss retest — **GPU-blocked** (from-scratch retrain experiment)
 - [ ] §3 A18 graph-first spike (SAM-Road++ vs v3.2 APLS) — **GPU-blocked**; corpus + harness ready
 - [ ] §3 real-PAN validation of the grayscale proxy — **data-blocked** (needs Cartosat chips)
-- [ ] §4 probability-map-aware healing (corridor check) — **deferred**: P1↔P2 contract change, sequenced next
 - [ ] §5E geopandas major alignment — **operator** (joint dev+prod test)
-- [ ] §5H full filesystem job queue — **deferred** until multi-user pilot scale (semaphore covers today)
 - [ ] §6 Caddy rate limiting — **operator** (third-party module install)
-- [ ] §9.1 four-tab app restructure — **deferred** (product decision; Methodology tab exists)
 
 ### Operator checklist (Akshat, on the boxes)
 
@@ -30,7 +27,7 @@
 - [ ] Install the third-party caddy-ratelimit module
 - [ ] Run the joint dev+prod geopandas-alignment test before flipping either pin
 
-**96 of 101 checkbox-marked findings fixed; 5 open** (one §6 P3 note is left unmarked — it explicitly says "no action today").
+**98 of 101 checkbox-marked findings fixed; 3 open** (one §6 P3 note is left unmarked — it explicitly says "no action today").
 
 ## 0. Executive summary
 
@@ -353,12 +350,12 @@ Single-file Streamlit + Folium app: demo AOIs from `data/sample/`, image upload 
 - **What:** `medial_axis(mask, return_distance=True)` yields the skeleton *and* per-pixel half-width at essentially the same cost. Without it, `min_stub_len_m`/`consolidate_tol_m` are fixed constants that can't be road-class-aware, and width-aware routing/capacity work is blocked.
 - **Fix:** Swap to `medial_axis`, sample the distance array along each edge polyline → new `width_m` edge attribute. Purely additive. **Effort:** M
 
-#### [ ] [P1] Gap healing has no obstacle/probability awareness — real false-bridge risk between parallel roads
+#### [x] [P1] Gap healing has no obstacle/probability awareness — real false-bridge risk between parallel roads
 - **Where:** `healing.py:129–185` (`find_candidate_bridges`); `build_graph.py:71` (`_load_mask` reads only the binary PNG — the model's probability map is discarded at the P1→P2 boundary)
 - **What:** Healing's only signals are endpoint distance (`gap_max_m=40`) and turn angle (`angle_max_deg=60`). A frontage road parallel to a highway, both broken by the same tree canopy, can bridge the *wrong* component pair. No check that the bridge corridor passes through road-probable terrain, or that it doesn't cross an existing edge.
 - **Why:** A false bridge fabricates an alternate route, directly inflating measured resilience.
 - **Fix:** (1) Sample the mask (ideally the probability map) along the candidate corridor, require minimum coverage; (2) reject candidates whose segment crosses another component's edge geometry. Plumbing the probability map through the contract is the bigger fix (see §9). **Effort:** M / L
-- **Status:** PARTIAL — edge-crossing rejection shipped (A36-M); probability-map corridor check is **deferred** to the P1↔P2 contract change, next pass.
+- **Status:** Fixed — edge-crossing rejection (A36-M) + probability corridor check (A39): P1 persists its Hann-blend prob map (`interim/{aoi}/prob.png`), healing rejects candidate bridges whose corridor lacks mean prob support (`min_corridor_support`, default 0.3), and every final edge carries a `confidence` attribute the dashboard renders as opacity (§9.3). Mask-only inputs unchanged (proven by test).
 
 #### [x] [P1] K-sampled efficiency resamples independent source sets at every ablation step — avoidable variance in the resilience curve
 - **Where:** `resilience.py:59–65`, `ablation_curve` at `resilience.py:151–204` (fresh sample per removal step; the docstring at 89–93 flags the comparability issue)
@@ -528,7 +525,7 @@ Single-file Streamlit + Folium app: demo AOIs from `data/sample/`, image upload 
 2. **Exact betweenness + exact global efficiency** are O(V·E)/all-pairs — 10k+-node city graphs make P3 untenable. The `k`/`efficiency_k` sampling params exist but default to exact and aren't plumbed through `run_pipeline` (fix: threshold-triggered sampling defaults, **S–M**).
 3. **10 concurrent users** → blocking Modal calls + per-session reruns (fixes above; `st.cache_resource` sharing looks correct today).
 4. **Concurrency back-pressure without breaking the no-API/no-DB locks:** a filesystem job queue — uploads drop a request file in `data/queue/`, one worker processes serially, the app polls for the result artifact. **Effort:** M–L
-- **Status:** 1 [x] (windowed inference, A36-L) · 2 [x] (auto-k, A36-M) · 3 [x] (semaphores) · 4 PARTIAL — semaphore back-pressure shipped (A37); full filesystem queue **deferred** until multi-user pilot scale.
+- **Status:** 1 [x] (windowed inference, A36-L) · 2 [x] (auto-k, A36-M) · 3 [x] (semaphores) · 4 [x] — semaphore (A37), then the full filesystem FIFO queue (A39): JSON job-state files under `data/outputs/upload_jobs/`, one worker thread, stale-running recovery on restart, queue-position UX.
 
 ## 6. Security findings
 
@@ -555,11 +552,11 @@ Single-file Streamlit + Folium app: demo AOIs from `data/sample/`, image upload 
 - **What:** Bytes go straight to `Image.open` on both the ARM box and the Modal container; neither sets `Image.MAX_IMAGE_PIXELS` or checks dimensions. A 200 MB decompression-bomb PNG is a legal upload: gigabytes of RAM on the Always-Free box (single-request OOM of the only app process), and an enormous tile grid on the GPU.
 - **Fix:** Set `PIL.Image.MAX_IMAGE_PIXELS` (e.g. 4096²) and catch `DecompressionBombError` on both sides; reject oversized images before the Modal round-trip; `maxUploadSize = 15–20` in config.toml. **Effort:** S
 
-#### [ ] [P1] No concurrency/queueing guard on the ARM box — a few simultaneous uploads starve the single dashboard process
+#### [x] [P1] No concurrency/queueing guard on the ARM box — a few simultaneous uploads starve the single dashboard process
 - **Where:** `deploy/roadresilience.service` (one `streamlit run`, no limits); `app.py:934–958` (blocking `urlopen(..., timeout=240)` per session); `deploy/Caddyfile` (no `request_body max_size` or rate limit)
 - **What:** Each concurrent visitor's upload blocks a Streamlit thread for up to 240 s and holds a decoded image in RAM — a handful of tabs makes the dashboard unresponsive for everyone.
 - **Fix:** Caddy `request_body { max_size 15MB }` + basic rate limiting; drop the client timeout to ~60–120 s. **Effort:** S–M
-- **Status:** PARTIAL — Caddy body cap + client timeout shipped; the rate-limit module needs a third-party Caddy plugin install (**operator**).
+- **Status:** Fixed app-side — Caddy body cap + client timeout (A36), Modal-client semaphore (A36-M), and the A39 filesystem job queue (uploads process serially with queue-position UX, surviving restarts). The network-edge rate-limit module remains the **operator** checklist item.
 
 #### [x] [P2] `torch.load(..., weights_only=False)` for all checkpoint loading, including the Modal-baked model
 - **Where:** `src/pipeline/p1_segment/model.py:98,114`; `evaluate.py:68`; `deploy/modal_app.py:23–28` (`urlretrieve` from GitHub Releases at image build)
@@ -640,7 +637,7 @@ Single-file Streamlit + Folium app: demo AOIs from `data/sample/`, image upload 
 
 ## 8. Prioritized roadmap (impact × effort)
 
-> Waves 1–2 are fully shipped (A36). Wave 3: items 1 (upload loop), 4a (pre-tiling) shipped in A36-L; item 2's MultiGraph half shipped in A37; the probability-map contract half, the A18 spike (3), the job queue (4b), and the four-tab restructure (5) remain — see the Status section.
+> Waves 1–2 are fully shipped (A36). Wave 3: items 1 (upload loop) + 4a (pre-tiling) shipped in A36-L; item 2 shipped across A37 (MultiGraph) + A39 (probability-map contract, per-edge confidence); 4b (filesystem job queue) and 5 (four-tab restructure) shipped in A39. Only item 3 — the A18 SAM-Road++ spike — remains (GPU + external-repo authorization).
 
 ### Wave 1 — this week, mostly S-effort, kills every P0
 1. **Dashboard correctness trio:** cache the Modal call on image bytes (§2B); stable map key + viewport round-trip (§2C, the one M here); `delta_color="normal"` (§2D).
