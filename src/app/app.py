@@ -2,6 +2,7 @@
 
 import base64
 from dataclasses import dataclass
+import hashlib
 import io
 from itertools import combinations
 import json
@@ -1399,14 +1400,31 @@ def render_live_detection() -> None:
     _render_upload_analysis(np.asarray(orig), np.asarray(mask))
 
 
-def _render_upload_analysis(orig_rgb: np.ndarray, mask_gray: np.ndarray) -> None:
-    """Close the loop (bugs.md §2B): mask → graph → resilience, shown in-app.
+@st.cache_resource
+def _ensure_upload_worker() -> None:
+    """Start the filesystem job-queue worker once per process (bugs.md §5H).
 
-    Runs the CPU P2→P3 pipeline on the extracted mask so an uploaded image gets a
-    *real* resilience analysis — not just a mask preview. Image-space (the upload
-    isn't georeferenced), so the network is drawn over the user's own image.
+    `ensure_worker()` is already idempotent on its own (module flag + lock,
+    src/app/job_queue.py) — this cache_resource wrapper is a second belt so a
+    Streamlit rerun doesn't even re-enter the function to find that out.
     """
-    from src.app.upload_analysis import AnalysisBusyError, analyze_mask, render_graph_overlay
+    from src.app import job_queue
+
+    job_queue.ensure_worker()
+
+
+def _render_upload_analysis(orig_rgb: np.ndarray, mask_gray: np.ndarray) -> None:
+    """Close the loop (bugs.md §2B/§5H/§9.4): mask → queued analysis → resilience.
+
+    Submits the mask to the filesystem job queue rather than calling
+    analyze_mask() synchronously in the request thread: a queued job survives
+    a Streamlit worker restart, and concurrent uploads wait in line instead of
+    bouncing off the A37 semaphore's outright "busy, retry" warning. Image-space
+    (the upload isn't georeferenced), so the network is drawn over the user's
+    own image.
+    """
+    from src.app import job_queue
+    from src.app.upload_analysis import render_graph_overlay
 
     st.markdown("#### Network resilience of your imagery")
     gsd = st.slider(
@@ -1414,19 +1432,43 @@ def _render_upload_analysis(orig_rgb: np.ndarray, mask_gray: np.ndarray) -> None
         help="Uploads aren't georeferenced — this scales road lengths. ~0.5 m/px "
              "matches neighbourhood-zoom satellite captures.",
     )
-    binary = (mask_gray > 0).astype(np.uint8)
-    try:
-        with st.spinner("Building the routable graph and scoring resilience…"):
-            result = analyze_mask(binary, resolution_m=gsd)
-    except AnalysisBusyError as exc:
-        st.warning(str(exc))
-        log_event("upload_analysis_busy")
-        return
-    except ValueError as exc:
-        st.info(str(exc))
-        log_event("upload_analysis_empty")
-        return
 
+    _ensure_upload_worker()
+
+    # A new upload or a changed resolution slider both mean "this is a
+    # different analysis" — resubmit instead of showing a stale job's result.
+    job_key = (hashlib.md5(mask_gray.tobytes()).hexdigest(), round(gsd, 3))
+    if st.session_state.get("upload_job_key") != job_key:
+        job_queue.cleanup()  # opportunistic housekeeping on every new submit
+        binary = (mask_gray > 0).astype(np.uint8)
+        st.session_state["upload_job_id"] = job_queue.submit(binary, resolution_m=gsd)
+        st.session_state["upload_job_key"] = job_key
+        st.session_state.pop("upload_job_result", None)
+
+    job_id = st.session_state["upload_job_id"]
+
+    if "upload_job_result" not in st.session_state:
+        state = job_queue.status(job_id)
+        if state["status"] == "queued":
+            pos = job_queue.position(job_id)
+            st.info(f"Queued for analysis — position {pos} in line…")
+            time.sleep(2)
+            st.rerun()
+        elif state["status"] == "running":
+            with st.spinner("Building the routable graph and scoring resilience…"):
+                time.sleep(2)
+            st.rerun()
+        elif state["status"] == "failed":
+            st.error(f"Analysis failed: {state['error']}")
+            log_event("upload_analysis_failed", error=state["error"])
+            if st.button("Retry analysis", key="retry_upload_analysis"):
+                st.session_state.pop("upload_job_key", None)  # forces a resubmit above
+                st.rerun()
+            return
+        else:  # done
+            st.session_state["upload_job_result"] = job_queue.result(job_id)
+
+    result = st.session_state["upload_job_result"]
     retained = result.resilience_index
     m1, m2, m3 = st.columns(3)
     m1.metric("Junctions", f"{result.n_nodes:,}")
