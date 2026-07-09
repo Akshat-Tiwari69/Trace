@@ -184,6 +184,24 @@ def skeleton_to_graph(
     return graph
 
 
+def build_metric_to_pixel(transform: "Affine | None" = None, resolution_m: float = 1.0):
+    """Return the exact inverse of :func:`skeleton_to_graph`'s ``pixel_to_metric``.
+
+    Healing's probability-map corridor check (bugs.md §4) needs to look up the
+    P1 prob raster at points sampled along a candidate bridge's metric geometry —
+    this maps a bridge point ``(x, y)`` back to the ``(row, col)`` pixel it came
+    from, using the same ``transform``/``resolution_m`` the graph was built with.
+    """
+    if transform is not None:
+        def metric_to_pixel(x: float, y: float) -> tuple[float, float]:
+            col_half, row_half = ~transform * (x, y)  # inverse of transform * (col+.5, row+.5)
+            return row_half - 0.5, col_half - 0.5
+    else:
+        def metric_to_pixel(x: float, y: float) -> tuple[float, float]:
+            return y / resolution_m, x / resolution_m
+    return metric_to_pixel
+
+
 def reproject_graph_to_wgs84(graph: "nx.Graph", crs: object) -> None:
     """Reproject node ``x, y`` and edge ``geometry`` from ``crs`` to WGS84, in place.
 

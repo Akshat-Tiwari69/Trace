@@ -20,6 +20,7 @@ from src.pipeline.p2_graph.healing import (
 from src.pipeline.p2_graph.skeleton_graph import (
     TYPE_BRIDGED,
     _annotate_degree_and_type,
+    build_metric_to_pixel,
     prune_degenerate_edges,
 )
 from src.pipeline.p2_graph.spike_osm import simulate_occlusion
@@ -225,3 +226,77 @@ def test_heal_prefers_straight_over_kinked():
     # node 1 should bridge to the collinear fragment (node 2), not the kinked one
     assert g.has_edge(1, 2)
     assert g.edges[1, 2]["is_bridged"] is True
+
+
+# --------------------------------------------------------------------------- #
+# A39 — probability-map corridor check (bugs.md §4)
+# --------------------------------------------------------------------------- #
+# The collinear-gap fixture's bridge (nodes 1->2) is a straight line at y=0,
+# x in [10, 20] (see _collinear_gap). ``metric_to_pixel`` here is the identity
+# map (resolution_m=1.0, no transform), so a prob array's (row, col) lines up
+# with the graph's (y, x) directly.
+_M2P = build_metric_to_pixel(transform=None, resolution_m=1.0)
+
+
+def test_heal_corridor_kept_when_prob_supports_it():
+    """A high-probability corridor along the bridge keeps it (mask+prob agree)."""
+    g = _collinear_gap(gap=10.0)
+    prob = np.zeros((5, 30), dtype=np.float32)
+    prob[0, 8:23] = 0.9  # covers the x in [10, 20] corridor with margin
+
+    g, report = heal_graph(
+        g, gap_max_m=40.0, angle_max_deg=60.0,
+        prob=prob, metric_to_pixel=_M2P, min_corridor_support=0.3,
+    )
+    assert report.bridges_added == 1
+    assert report.bridges_rejected_corridor == 0
+    assert g.edges[1, 2]["is_bridged"] is True
+
+
+def test_heal_corridor_rejects_unsupported_bridge():
+    """A frontage-road-style bridge with no P1 probability support is rejected."""
+    g = _collinear_gap(gap=10.0)
+    prob = np.zeros((5, 30), dtype=np.float32)  # no road signal anywhere
+
+    g, report = heal_graph(
+        g, gap_max_m=40.0, angle_max_deg=60.0,
+        prob=prob, metric_to_pixel=_M2P, min_corridor_support=0.3,
+    )
+    assert report.bridges_added == 0
+    assert report.bridges_rejected_corridor == 1
+    assert nx.number_connected_components(g) == 2  # left disconnected, correctly
+
+
+def test_heal_corridor_disabled_when_prob_none_matches_baseline():
+    """``prob=None`` must heal identically regardless of the corridor knobs.
+
+    Mask-only input (an upload or an old artifact with no persisted prob.png)
+    has to behave exactly as it did before this feature existed — even an
+    impossible-to-satisfy ``min_corridor_support`` must not reject anything.
+    """
+    baseline = _collinear_gap(gap=10.0)
+    _, baseline_report = heal_graph(baseline, gap_max_m=40.0, angle_max_deg=60.0)
+
+    g = _collinear_gap(gap=10.0)
+    _, report = heal_graph(
+        g, gap_max_m=40.0, angle_max_deg=60.0,
+        prob=None, metric_to_pixel=_M2P, min_corridor_support=0.9, corridor_samples=16,
+    )
+    assert report.bridges_added == baseline_report.bridges_added == 1
+    assert report.bridges_rejected_corridor == 0
+    assert g.edges[1, 2]["is_bridged"] is True
+
+
+def test_heal_corridor_out_of_bounds_samples_count_as_zero():
+    """Bridge points outside the prob raster count as 0, not an IndexError."""
+    g = _collinear_gap(gap=10.0)
+    # Raster only covers cols 0..10 — most of the x in [10, 20] corridor falls
+    # outside it, so out-of-bounds-as-0 must drag the mean below the threshold.
+    prob = np.ones((5, 11), dtype=np.float32)
+
+    g, report = heal_graph(
+        g, gap_max_m=40.0, angle_max_deg=60.0,
+        prob=prob, metric_to_pixel=_M2P, min_corridor_support=0.3,
+    )
+    assert report.bridges_added == 0
+    assert report.bridges_rejected_corridor == 1

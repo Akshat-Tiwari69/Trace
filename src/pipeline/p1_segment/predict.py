@@ -30,7 +30,7 @@ from src.pipeline.p1_segment.model import (
     predict_large_prob,
     predict_large_raster,
 )
-from src.pipeline.p1_segment.osm_mask import save_binary_png
+from src.pipeline.p1_segment.osm_mask import save_binary_png, save_prob_png
 from src.pipeline.p1_segment.postprocess import add_postprocess_args, postprocess_mask
 
 _AOI_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
@@ -100,8 +100,11 @@ def run_inference(
     if windowed is None:
         windowed = max(height, width) > WINDOWED_THRESHOLD_PX
 
+    prob = None  # only the whole-image blended path below ever fills this in
     if windowed:
-        # Stream windows off disk — never materialise the full RGB image.
+        # Stream windows off disk — never materialise the full RGB image. Each
+        # window's prob map is thresholded and discarded immediately (§5H's
+        # memory bound), so there is no full-size prob array to persist here.
         transform, crs = raster_georef(image_path)
         mask = predict_large_raster(model, image_path, tile_size=tile_size, threshold=threshold,
                                     device=device, tta=tta, window_px=window_px)
@@ -126,7 +129,16 @@ def run_inference(
 
     out = Path(interim_dir) / f"{aoi}_mask.png"
     save_binary_png(mask, out)
-    manifest = write_manifest(aoi, interim_dir, transform, crs)  # A26: georef for P2
+
+    # Persist the P1 probability map (bugs.md §4): the blended path computes it
+    # then used to discard it after thresholding. P2's healing needs it to tell
+    # a sub-threshold occluded road from terrain with no road signal at all.
+    prob_path = None
+    if prob is not None:
+        prob_path = Path(interim_dir) / aoi / "prob.png"
+        save_prob_png(prob, prob_path)
+
+    manifest = write_manifest(aoi, interim_dir, transform, crs, prob_png=prob_path is not None)  # A26: georef for P2
 
     # Provenance (bugs.md §5A): record which checkpoint/threshold/commit made this
     # mask, alongside it, so P2/P3 can carry the lineage into every artifact.
@@ -135,8 +147,9 @@ def run_inference(
     write_provenance(Path(interim_dir) / aoi / "provenance.json", prov)
 
     geo = f" · georeferenced ({crs}) -> {manifest}" if manifest else " · pixel-space (no CRS)"
+    prob_note = f" · prob map -> {prob_path}" if prob_path else ""
     print(f"[{aoi}] {width}x{height}px "
-          f"(encoder {meta.get('encoder', '?')}) -> roads {mask.mean():.2%} of pixels -> {out}{geo}")
+          f"(encoder {meta.get('encoder', '?')}) -> roads {mask.mean():.2%} of pixels -> {out}{geo}{prob_note}")
     return out, float(mask.mean())
 
 

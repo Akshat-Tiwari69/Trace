@@ -57,6 +57,8 @@ class PipelineConfig:
     consolidate_tol_m: float = 10.0
     simplify_geom: bool = True
     geom_tol_m: float = 1.5
+    min_corridor_support: float = 0.3  # P1 prob-map corridor check (bugs.md §4); 0 disables
+    corridor_samples: int = 16
 
     # --- P3: analysis ---------------------------------------------------------
     curve_steps: int = 25
@@ -82,6 +84,8 @@ class PipelineConfig:
             consolidate_tol_m=self.consolidate_tol_m,
             simplify_geom=self.simplify_geom,
             geom_tol_m=self.geom_tol_m,
+            min_corridor_support=self.min_corridor_support,
+            corridor_samples=self.corridor_samples,
         )
 
     def to_dict(self) -> dict:

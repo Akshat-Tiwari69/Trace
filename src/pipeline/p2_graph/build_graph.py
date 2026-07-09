@@ -30,6 +30,7 @@ from src.pipeline.p2_graph.simplify import (
     simplify_polylines,
 )
 from src.pipeline.p2_graph.skeleton_graph import (
+    build_metric_to_pixel,
     mask_to_skeleton_with_distance,
     prune_degenerate_edges,
     reproject_graph_to_wgs84,
@@ -48,6 +49,20 @@ def _load_mask(path: Path) -> np.ndarray:
         )
     arr = np.asarray(Image.open(path).convert("L"))
     return (arr > 0).astype(np.uint8)
+
+
+def _load_prob(path: Path) -> np.ndarray | None:
+    """Load P1's probability map (bugs.md §4) as a float [0,1] array, or ``None``.
+
+    Present only when P1 ran the blended inference path; a mask-only input
+    (upload, OSM spike, old artifact) has no such file — healing then falls back
+    to distance/angle/crossing only, exactly as before this feature existed.
+    """
+    if not path.exists():
+        return None
+    from PIL import Image
+
+    return np.asarray(Image.open(path).convert("L"), dtype=np.float32) / 255.0
 
 
 def _load_alignment(manifest_path: Path):
@@ -81,11 +96,30 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
                               distance=distance)
     prune_degenerate_edges(graph, cfg.min_edge_len_m)  # drop sub-pixel/self-loop edges
 
+    # Probability-map corridor check (bugs.md §4): loaded only when P1's blended
+    # path persisted one; mask-only input (upload/OSM spike/old artifact) heals
+    # exactly as before. Loudly log which mode is active — silent behaviour
+    # change here would be a nasty surprise for a resilience number.
+    prob = _load_prob(cfg.prob_path)
+    corridor_on = prob is not None and cfg.min_corridor_support > 0
+    if corridor_on:
+        print(f"[{cfg.aoi}] healing: probability-map corridor check ON "
+              f"(min_corridor_support={cfg.min_corridor_support}, prob map {cfg.prob_path})")
+    else:
+        why = "no prob.png found" if prob is None else "min_corridor_support=0"
+        print(f"[{cfg.aoi}] healing: probability-map corridor check OFF ({why}) "
+              "— distance/angle/crossing only")
+    metric_to_pixel = build_metric_to_pixel(transform, cfg.resolution_m) if prob is not None else None
+
     graph, report = heal_graph(
         graph,
         gap_max_m=cfg.gap_max_m,
         angle_max_deg=cfg.angle_max_deg,
         angle_penalty_factor=cfg.angle_penalty_factor,
+        prob=prob,
+        metric_to_pixel=metric_to_pixel,
+        min_corridor_support=cfg.min_corridor_support,
+        corridor_samples=cfg.corridor_samples,
     )
 
     # Stash the authoritative healing stats (measured now, pre-simplification) so
@@ -96,6 +130,7 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
         "components_after": report.components_after,
         "bridges_added": report.bridges_added,
         "bridges_rejected_crossing": report.bridges_rejected_crossing,
+        "bridges_rejected_corridor": report.bridges_rejected_corridor,
     }
 
     # Carry the P1 provenance (checkpoint/threshold/commit) into the graph so the
@@ -180,6 +215,9 @@ def main() -> None:
     p.add_argument("--gap-max-m", type=float, default=40.0, help="max bridge length (m)")
     p.add_argument("--angle-max-deg", type=float, default=60.0, help="max road turn (deg)")
     p.add_argument("--resolution-m", type=float, default=1.0, help="m/px (no-manifest fallback)")
+    p.add_argument("--min-corridor-support", type=float, default=0.3,
+                   help="reject a bridge if mean P1 prob-map support along it is below this "
+                        "(0 disables; needs prob.png, bugs.md §4)")
     args = p.parse_args()
 
     cfg = GraphConfig(
@@ -187,6 +225,7 @@ def main() -> None:
         gap_max_m=args.gap_max_m,
         angle_max_deg=args.angle_max_deg,
         resolution_m=args.resolution_m,
+        min_corridor_support=args.min_corridor_support,
     )
     build_graph(cfg)
 

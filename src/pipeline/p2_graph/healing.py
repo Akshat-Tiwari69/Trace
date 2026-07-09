@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
@@ -239,6 +239,30 @@ def _bridge_geometry(
     return [[float(x), float(y)] for x, y in curve]
 
 
+def _corridor_support(
+    points: list[list[float]],
+    prob: np.ndarray,
+    metric_to_pixel: Callable[[float, float], tuple[float, float]],
+) -> float:
+    """Mean P1 road probability sampled along a candidate bridge's curve (§4).
+
+    A frontage road and the highway it parallels can both be broken by the same
+    occlusion, and distance/angle/crossing alone can't tell which pair is the
+    *real* gap. The model's probability map knows better: an occluded real road
+    still carries sub-threshold-but-nonzero probability, while cutting across
+    open ground the model never thought was road-like scores near zero. Samples
+    that fall outside the raster count as 0 (no support from off-map terrain).
+    """
+    h, w = prob.shape
+    total = 0.0
+    for x, y in points:
+        row, col = metric_to_pixel(x, y)
+        r, c = int(round(row)), int(round(col))
+        if 0 <= r < h and 0 <= c < w:
+            total += float(prob[r, c])
+    return total / len(points)
+
+
 def _polyline_length(points: list[list[float]]) -> float:
     """Total metric length of a polyline."""
     arr = np.asarray(points, dtype=float)
@@ -313,6 +337,7 @@ class HealReport:
     largest_cc_after: int
     bridges_added: int
     bridges_rejected_crossing: int = 0  # candidates dropped for crossing a real road (§4)
+    bridges_rejected_corridor: int = 0  # candidates dropped for low P1 prob-map support (§4)
 
     @property
     def connectivity_ratio(self) -> float:
@@ -327,6 +352,10 @@ def heal_graph(
     gap_max_m: float = 40.0,
     angle_max_deg: float = 60.0,
     angle_penalty_factor: float = 2.0,
+    prob: np.ndarray | None = None,
+    metric_to_pixel: Callable[[float, float], tuple[float, float]] | None = None,
+    min_corridor_support: float = 0.0,
+    corridor_samples: int = 16,
 ) -> tuple["nx.Graph", HealReport]:
     """Bridge fragmented components into one routable graph (in place + report).
 
@@ -337,6 +366,15 @@ def heal_graph(
     endpoints are retyped ``bridged``. Bridge *selection* is unchanged — only the
     drawn geometry is smoothed — so connectivity is identical to a straight-bridge
     heal.
+
+    ``prob`` (P1's probability raster, bugs.md §4) + ``metric_to_pixel`` enable a
+    **corridor check**: a candidate bridge is rejected if the mean P1 probability
+    sampled at ``corridor_samples`` points along its curve is below
+    ``min_corridor_support``, catching the frontage-road-vs-highway false bridge
+    the distance/angle/crossing guards can't. ``prob is None`` (the default —
+    mask-only input, e.g. an upload or an old artifact) runs **exactly** the
+    pre-§4 behaviour: no corridor check at all, regardless of
+    ``min_corridor_support``.
     """
     import networkx as nx
 
@@ -357,23 +395,34 @@ def heal_graph(
         for other in members:
             uf.union(first, other)
 
+    corridor_check_on = prob is not None and metric_to_pixel is not None and min_corridor_support > 0
+
     added = 0
+    rejected_corridor = 0
     for b in bridges:
-        if uf.union(b.u, b.v):  # only if it actually merges two components
-            p_u = np.array([graph.nodes[b.u]["x"], graph.nodes[b.u]["y"]])
-            p_v = np.array([graph.nodes[b.v]["x"], graph.nodes[b.v]["y"]])
-            geometry = _bridge_geometry(p_u, p_v, b.dir_u, b.dir_v)
-            graph.add_edge(
-                b.u,
-                b.v,
-                # weight = the (curved) bridge length, floored > 0 (Schema)
-                length_m=max(_polyline_length(geometry), 1e-6),
-                geometry=geometry,
-                is_bridged=True,
-            )
-            graph.nodes[b.u]["type"] = TYPE_BRIDGED
-            graph.nodes[b.v]["type"] = TYPE_BRIDGED
-            added += 1
+        if uf.find(b.u) == uf.find(b.v):
+            continue  # already joined by a cheaper earlier bridge — skip, don't union again
+        p_u = np.array([graph.nodes[b.u]["x"], graph.nodes[b.u]["y"]])
+        p_v = np.array([graph.nodes[b.v]["x"], graph.nodes[b.v]["y"]])
+        geometry = _bridge_geometry(p_u, p_v, b.dir_u, b.dir_v)
+        if corridor_check_on:
+            curve = _bridge_geometry(p_u, p_v, b.dir_u, b.dir_v, n_points=corridor_samples)
+            support = _corridor_support(curve, prob, metric_to_pixel)
+            if support < min_corridor_support:
+                rejected_corridor += 1
+                continue  # low prob-map support — likely the wrong pair (§4)
+        uf.union(b.u, b.v)
+        graph.add_edge(
+            b.u,
+            b.v,
+            # weight = the (curved) bridge length, floored > 0 (Schema)
+            length_m=max(_polyline_length(geometry), 1e-6),
+            geometry=geometry,
+            is_bridged=True,
+        )
+        graph.nodes[b.u]["type"] = TYPE_BRIDGED
+        graph.nodes[b.v]["type"] = TYPE_BRIDGED
+        added += 1
 
     _annotate_degree_and_type_preserving_bridged(graph)
 
@@ -386,6 +435,7 @@ def heal_graph(
         largest_cc_after=largest_after,
         bridges_added=added,
         bridges_rejected_crossing=rejected_crossing,
+        bridges_rejected_corridor=rejected_corridor,
     )
     return graph, report
 

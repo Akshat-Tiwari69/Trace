@@ -49,6 +49,16 @@ class GraphConfig:
     angle_penalty_factor: float = 2.0  # how hard a turn is penalised vs. a straight run
     min_edge_len_m: float = 1.0        # drop degenerate sub-pixel edges below this
 
+    # --- healing: probability-map corridor check (bugs.md §4) -----------------
+    # Distance/angle alone can't distinguish a real gap from a frontage road
+    # running parallel to a highway broken by the same occlusion. When P1's
+    # prob.png is present, a candidate bridge is also rejected if the mean P1
+    # probability along its curve is too low — the model's own belief that
+    # *something* road-like is there, even sub-threshold. 0 disables the check
+    # even if prob.png exists (mask-only behaviour).
+    min_corridor_support: float = 0.3
+    corridor_samples: int = 16         # points sampled along a bridge's curve
+
     # --- simplification (S3): lighter graph, same connectivity ----------------
     simplify: bool = True              # prune short stubs + collapse degree-2 chains
     min_stub_len_m: float = 15.0       # trim degree-1 spurs shorter than this
@@ -71,6 +81,12 @@ class GraphConfig:
     def __post_init__(self) -> None:
         """Guard every path-interpolating consumer: reject unsafe AOI ids."""
         sanitize_aoi(self.aoi)
+        if not 0.0 <= self.min_corridor_support <= 1.0:
+            raise ValueError(
+                f"min_corridor_support must be in [0, 1], got {self.min_corridor_support!r}"
+            )
+        if self.corridor_samples < 1:
+            raise ValueError(f"corridor_samples must be >= 1, got {self.corridor_samples!r}")
 
     @property
     def mask_path(self) -> Path:
@@ -81,6 +97,16 @@ class GraphConfig:
     def manifest_path(self) -> Path:
         """Optional grid alignment (CRS + transform) written alongside the mask."""
         return self.interim_dir / self.aoi / "manifest.json"
+
+    @property
+    def prob_path(self) -> Path:
+        """Optional P1 probability map (bugs.md §4), co-located with the manifest.
+
+        Present only when P1 ran the blended (Hann-window) inference path; a
+        mask-only input (upload, OSM spike, old artifact) has no such file, and
+        healing falls back to distance/angle/crossing only.
+        """
+        return self.interim_dir / self.aoi / "prob.png"
 
     @property
     def provenance_path(self) -> Path:
