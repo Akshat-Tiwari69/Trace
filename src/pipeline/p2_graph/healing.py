@@ -239,19 +239,23 @@ def _bridge_geometry(
     return [[float(x), float(y)] for x, y in curve]
 
 
-def _corridor_support(
+def sample_prob_along_polyline(
     points: list[list[float]],
     prob: np.ndarray,
     metric_to_pixel: Callable[[float, float], tuple[float, float]],
 ) -> float:
-    """Mean P1 road probability sampled along a candidate bridge's curve (§4).
+    """Mean P1 road probability sampled at each point of a metric polyline (§4/§9.3).
 
-    A frontage road and the highway it parallels can both be broken by the same
-    occlusion, and distance/angle/crossing alone can't tell which pair is the
-    *real* gap. The model's probability map knows better: an occluded real road
-    still carries sub-threshold-but-nonzero probability, while cutting across
-    open ground the model never thought was road-like scores near zero. Samples
-    that fall outside the raster count as 0 (no support from off-map terrain).
+    Shared by two callers that both want "how much does the model believe a
+    road is here": the healing corridor check (candidate bridge curves, §4) and
+    the per-edge ``confidence`` attribute build_graph computes for every final
+    edge's own geometry (§9.3, including bridged edges — their corridor support
+    *is* their confidence). A frontage road and the highway it parallels can
+    both be broken by the same occlusion, and distance/angle/crossing alone
+    can't tell which pair is the *real* gap; an occluded real road still
+    carries sub-threshold-but-nonzero probability, while open ground the model
+    never thought was road-like scores near zero. Samples that fall outside the
+    raster count as 0 (no support from off-map terrain).
     """
     h, w = prob.shape
     total = 0.0
@@ -407,7 +411,7 @@ def heal_graph(
         geometry = _bridge_geometry(p_u, p_v, b.dir_u, b.dir_v)
         if corridor_check_on:
             curve = _bridge_geometry(p_u, p_v, b.dir_u, b.dir_v, n_points=corridor_samples)
-            support = _corridor_support(curve, prob, metric_to_pixel)
+            support = sample_prob_along_polyline(curve, prob, metric_to_pixel)
             if support < min_corridor_support:
                 rejected_corridor += 1
                 continue  # low prob-map support — likely the wrong pair (§4)

@@ -121,7 +121,9 @@ def compare_checkpoints_apls(
     scores_a = [a["per_tile"][t] for t in common]
     scores_b = [b["per_tile"][t] for t in common]
     ci = paired_bootstrap_ci(scores_a, scores_b)
-    print(f"  {a['checkpoint']} → {b['checkpoint']}: {ci.summary()}", flush=True)
+    # ascii only: redirected stdout on Windows is cp1252 and dies on "→" —
+    # this print crashed the A38 run AFTER the CI was computed (log 2026-07-09)
+    print(f"  {a['checkpoint']} -> {b['checkpoint']}: {ci.summary()}", flush=True)
     return {
         "checkpoint_a": a["checkpoint"], "checkpoint_b": b["checkpoint"],
         "apls_a": a["apls_mean"], "apls_b": b["apls_mean"], "n_paired": len(common),

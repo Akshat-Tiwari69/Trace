@@ -23,7 +23,7 @@ import numpy as np
 
 from src.pipeline.p2_graph.config import GraphConfig
 from src.pipeline.p2_graph.graph_io import save_geojson, save_graphml
-from src.pipeline.p2_graph.healing import HealReport, heal_graph
+from src.pipeline.p2_graph.healing import HealReport, heal_graph, sample_prob_along_polyline
 from src.pipeline.p2_graph.simplify import (
     consolidate_graph,
     simplify_graph,
@@ -168,6 +168,21 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
             "vertices_after": polyline_report.vertices_after,
             "vertex_reduction_pct": round(polyline_report.vertex_reduction_pct, 1),
         }
+
+    # Per-edge confidence (bugs.md §9.3): mean P1 probability sampled along each
+    # *final* edge's own geometry — the same corridor-support sampling healing
+    # uses for candidate bridges, applied here to every surviving edge (bridged
+    # edges too: their corridor support already stood in for confidence, so
+    # sampling their drawn geometry like any other edge is exactly right). Runs
+    # after simplify/consolidate/polyline-simplification settle the final
+    # geometry, and before reprojection (metric_to_pixel expects the source
+    # metric CRS, not lon/lat). No prob map -> no attribute at all (mask-only
+    # input keeps producing the pre-§9.3 artifact, byte-for-byte).
+    if prob is not None:
+        for _, _, data in graph.edges(data=True):
+            data["confidence"] = round(
+                sample_prob_along_polyline(data["geometry"], prob, metric_to_pixel), 3
+            )
 
     if crs is not None:
         reproject_graph_to_wgs84(graph, crs)

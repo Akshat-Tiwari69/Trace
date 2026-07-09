@@ -432,10 +432,25 @@ def compute_edge_styles(
         [5, 4],
         default=3,
     )
+    # Per-edge confidence (bugs.md §9.3, only present when P1 persisted a prob
+    # map): a low-confidence edge is drawn fainter so an occluded/uncertain
+    # road doesn't read as equally "observed" as a clean detection. Clipped to
+    # [0.35, 1.0] — never fully invisible, since a faint road is still real
+    # information the user shouldn't lose entirely. Missing confidence values
+    # (e.g. an edge added after the column existed) default to full trust (1.0)
+    # rather than fading an edge we have no reason to doubt. Disabled/spof
+    # states keep their own fixed opacity — that channel already carries a
+    # different meaning (simulation state / bridge criticality) and shouldn't
+    # be diluted by detection confidence.
+    if "confidence" in edges.columns:
+        confidence = edges["confidence"].astype(float).fillna(1.0).to_numpy()
+        default_opacity = np.clip(confidence, 0.35, 1.0)
+    else:
+        default_opacity = 0.85
     opacity = np.select(
         [is_disabled, is_spof],
         [0.45, 0.95],
-        default=0.85,
+        default=default_opacity,
     )
     dash_array = np.where(is_bridged_arr | is_disabled, "8 6", None)
 
