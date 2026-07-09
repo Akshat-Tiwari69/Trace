@@ -37,6 +37,28 @@ def test_seg_report_tolerates_missing_keys():
     assert r["validation"]["occlusion_recall"] is None
 
 
+def test_main_refuses_null_report(tmp_path, monkeypatch):
+    """A checkpoint whose meta has no validation metrics (e.g. the deployed
+    fine-tune) must NOT overwrite the committed report with nulls — main()
+    exits loudly instead (the guard added after exactly that clobber)."""
+    import pytest
+
+    from src.pipeline.p1_segment import evaluate as ev
+
+    model = build_model(encoder_weights=None, decoder_attention_type="scse")
+    ckpt = tmp_path / "no_metrics.pt"
+    # threshold present (like road_pan.pt) but zero eval metrics
+    save_checkpoint(model, ckpt, meta={"encoder": "mit_b3", "arch": "unet",
+                                       "decoder_attention_type": "scse",
+                                       "image_size": 512, "threshold": 0.52})
+    out = tmp_path / "report.json"
+    monkeypatch.setattr("sys.argv", ["evaluate", "--checkpoint", str(ckpt),
+                                     "--out", str(out)])
+    with pytest.raises(SystemExit, match="no validation metrics"):
+        ev.main()
+    assert not out.exists()
+
+
 def test_load_meta_roundtrips_from_a_checkpoint(tmp_path):
     # write a real (tiny, random) checkpoint with our meta, read meta back
     model = build_model(encoder_weights=None, decoder_attention_type="scse")

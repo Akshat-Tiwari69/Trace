@@ -5,6 +5,9 @@ Built with ``encoder_weights=None`` so tests never hit the network.
 
 from __future__ import annotations
 
+import warnings
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
@@ -12,6 +15,7 @@ import torch
 from src.pipeline.p1_segment.model import (
     build_model,
     load_checkpoint,
+    load_checkpoint_blob,
     predict_large,
     predict_mask,
     save_checkpoint,
@@ -194,3 +198,52 @@ def test_save_checkpoint_persists_and_omits_train_state(tmp_path):
     assert ts is not None and ts["epoch"] == 3 and "optimizer" in ts
     save_checkpoint(model, ck, meta={"encoder": "mit_b0"})   # no train_state
     assert load_train_state(ck) is None                      # weights-only reload still fine
+
+
+def test_load_checkpoint_blob_takes_safe_path_for_own_checkpoints(tmp_path):
+    # A37 bugs.md §6 P2: checkpoints written by save_checkpoint() hold only
+    # tensors + JSON-safe primitives, so they must load under weights_only=True
+    # with no fallback warning.
+    model = build_model(encoder_weights=None)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    ck = tmp_path / "safe.pt"
+    save_checkpoint(
+        model, ck, meta={"encoder": "mit_b0", "iou": 0.5},
+        train_state={"optimizer": opt.state_dict(), "epoch": 1},
+    )
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        blob = load_checkpoint_blob(ck)
+    fallback_warnings = [w for w in caught if "legacy pickled checkpoint" in str(w.message)]
+    assert not fallback_warnings
+    assert blob["meta"]["encoder"] == "mit_b0"
+    assert blob["train_state"]["epoch"] == 1
+
+
+def test_load_checkpoint_blob_falls_back_for_legacy_checkpoint(tmp_path):
+    # A legacy/hand-rolled checkpoint can hold a non-primitive object (here a
+    # Path, standing in for anything torch's restricted unpickler refuses).
+    # The loader must fall back to weights_only=False, warn once, and still
+    # return the full blob rather than raising.
+    ck = tmp_path / "legacy.pt"
+    blob_in = {
+        "state_dict": {"w": torch.zeros(2)},
+        "meta": {"encoder": "mit_b0", "finetuned_from": Path("some/other.pt")},
+    }
+    torch.save(blob_in, ck)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        blob = load_checkpoint_blob(ck)
+    fallback_warnings = [w for w in caught if "legacy pickled checkpoint" in str(w.message)]
+    assert len(fallback_warnings) == 1
+    assert blob["meta"]["encoder"] == "mit_b0"
+    assert blob["meta"]["finetuned_from"] == Path("some/other.pt")
+
+
+def test_load_checkpoint_still_refuses_to_guess_architecture(tmp_path):
+    # Preserve the S-pass guard: a checkpoint with no meta must still raise
+    # rather than silently rebuild as mit_b0/unet, even via the new loader path.
+    ck = tmp_path / "no_meta.pt"
+    torch.save({"state_dict": {}, "meta": {}}, ck)
+    with pytest.raises(ValueError):
+        load_checkpoint(ck)
