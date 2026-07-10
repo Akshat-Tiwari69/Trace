@@ -80,3 +80,44 @@ def test_combo_loss_rejects_negative_weight():
     from src.pipeline.p1_segment.losses import ComboLoss
     with pytest.raises(ValueError):
         ComboLoss(lovasz_weight=-0.1)
+
+
+def test_sdt_weight_map_max_at_road_and_decays_with_distance():
+    from src.pipeline.p1_segment.losses import sdt_weight_map
+    target = torch.zeros(1, 1, 64, 64)
+    target[..., 32, :] = 1.0                       # a horizontal road through the middle
+    weight = sdt_weight_map(target, w0=4.0, sigma_px=6.0)
+    assert weight.shape == target.shape
+    assert weight.device == target.device
+    on_road = weight[..., 32, 0]
+    near_road = weight[..., 34, 0]                 # 2 px away
+    far_road = weight[..., 0, 0]                   # 32 px away
+    assert torch.isclose(on_road, torch.tensor(5.0), atol=1e-5)   # 1 + w0*exp(0) == 1+w0
+    assert on_road > near_road > far_road
+    assert torch.isclose(far_road, torch.tensor(1.0), atol=1e-2)  # decays to ~1 far away
+
+
+def test_combo_loss_sdt_bce_weight_runs_and_differs_from_unweighted():
+    from src.pipeline.p1_segment.losses import ComboLoss
+    torch.manual_seed(0)
+    logits = torch.randn(2, 1, 32, 32, requires_grad=True)
+    target = (torch.rand(2, 1, 32, 32) > 0.5).float()
+
+    plain = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=0.0)
+    weighted = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=0.0,
+                         sdt_bce_weight=2.0)
+
+    loss_plain = plain(logits, target)
+    loss_weighted = weighted(logits, target)
+    assert torch.isfinite(loss_weighted)
+    assert not torch.isclose(loss_plain, loss_weighted)
+
+    loss_weighted.backward()
+    assert logits.grad is not None
+    assert torch.isfinite(logits.grad).all()
+
+
+def test_combo_loss_rejects_negative_sdt_bce_weight():
+    from src.pipeline.p1_segment.losses import ComboLoss
+    with pytest.raises(ValueError):
+        ComboLoss(sdt_bce_weight=-1.0)

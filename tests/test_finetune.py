@@ -102,6 +102,24 @@ def test_finetune_resume_continues_from_next_epoch(tmp_path):
     assert [r["epoch"] for r in resumed["history"]] == [1, 2, 3]  # epoch-1 row carried over
 
 
+def test_finetune_sdt_bce_weight_runs_end_to_end(tmp_path):
+    """bugs.md §3: --sdt-bce forwards to ComboLoss and the run completes on CPU."""
+    ft, dg = tmp_path / "ft", tmp_path / "dg"
+    for i in range(5):
+        _write_pair(ft, f"c{i}")
+    for i in range(6):
+        _write_pair(dg, f"d{i}")
+    init = tmp_path / "v1.pt"
+    _tiny_v1_checkpoint(init)
+    out = tmp_path / "v_sdt.pt"
+    cfg = FineTuneConfig(init_checkpoint=init, finetune_dir=ft, deepglobe_dir=dg,
+                         deepglobe_subset=3, deepglobe_val=2, out_path=out, image_size=64,
+                         batch_size=2, epochs=1, finetune_oversample=2,
+                         sdt_bce_weight=1.0, deepglobe_iou_tolerance=1.0, device="cpu")
+    summary = finetune(cfg)
+    assert out.exists() and summary["best"] is not None
+
+
 def test_finetune_grayscale_tracks_pan_proxy(tmp_path):
     """A24: grayscale_p>0 records the Cartosat-PAN (grayscale) IoU each epoch + in meta."""
     ft, dg = tmp_path / "ft", tmp_path / "dg"

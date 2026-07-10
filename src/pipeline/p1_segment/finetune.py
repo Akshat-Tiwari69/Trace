@@ -71,6 +71,7 @@ class FineTuneConfig:
     foreground_bias: float = 0.0         # bugs.md §3: P(road-containing crop); 0 = uniform
     occlusion: bool | str = True         # "heavy" = stronger occlusion aug (A8)
     cldice_weight: float = 0.1           # soft-clDice weight; 0 avoids its 8 GB skeletonize OOM (A12)
+    sdt_bce_weight: float = 0.0          # bugs.md §3: SDT-weighted BCE topology proxy; 0 = off
     num_workers: int = 0                 # DataLoader workers (0 = safe on low RAM, per A12)
     val_fraction: float = 0.15
     deepglobe_iou_tolerance: float = 0.005   # max allowed DeepGlobe drop vs v1
@@ -206,7 +207,8 @@ def finetune(cfg: FineTuneConfig) -> dict:
                                foreground_bias=cfg.foreground_bias)
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True,
                               num_workers=cfg.num_workers)
-    loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=cfg.cldice_weight)
+    loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=cfg.cldice_weight,
+                       sdt_bce_weight=cfg.sdt_bce_weight)
     optimizer = _build_optimizer(model, cfg)
     scaler = torch.amp.GradScaler("cuda", enabled=(cfg.device != "cpu"))
 
@@ -295,6 +297,8 @@ def main() -> None:
     p.add_argument("--deepglobe-tol", type=float, default=0.005, help="max allowed DeepGlobe IoU drop vs v1")
     p.add_argument("--grayscale-p", type=float, default=0.0, help="A24: random desaturation for Cartosat-PAN robustness")
     p.add_argument("--cldice-weight", type=float, default=0.1, help="0 avoids the 8 GB clDice OOM (A12)")
+    p.add_argument("--sdt-bce", type=float, default=0.0,
+                   help="bugs.md §3: SDT-weighted BCE topology proxy strength (w0); 0 = off")
     p.add_argument("--num-workers", type=int, default=0)
     p.add_argument("--spacenet-corpus", default=None,
                    help="A23: SpaceNet dg_format dir — train on the NON-held-out chips (frozen A17 split)")
@@ -322,7 +326,7 @@ def main() -> None:
         encoder_lr_scale=args.encoder_lr_scale, epochs=args.epochs, finetune_oversample=args.oversample,
         crops_per_image=args.crops_per_image, foreground_bias=args.foreground_bias,
         occlusion=occlusion, grayscale_p=args.grayscale_p,
-        cldice_weight=args.cldice_weight, num_workers=args.num_workers,
+        cldice_weight=args.cldice_weight, sdt_bce_weight=args.sdt_bce, num_workers=args.num_workers,
         deepglobe_iou_tolerance=args.deepglobe_tol, device=args.device, resume=args.resume,
     ))
 
