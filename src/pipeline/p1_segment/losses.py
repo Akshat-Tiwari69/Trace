@@ -10,9 +10,11 @@ roads **connected**, which is what matters for routing/APLS downstream
 
 from __future__ import annotations
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from scipy.ndimage import distance_transform_edt
 
 
 # --------------------------------------------------------------------------- #
@@ -137,19 +139,47 @@ def lovasz_hinge(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     return torch.stack(losses).mean()
 
 
+def sdt_weight_map(target: torch.Tensor, w0: float = 4.0, sigma_px: float = 6.0) -> torch.Tensor:
+    """Per-pixel BCE weight from the signed distance to the nearest road pixel.
+
+    bugs.md §3: a cheap topology-loss proxy — pushes the BCE gradient to focus
+    near road boundaries/thin structures instead of clDice's expensive
+    differentiable skeletonization. ``weight = 1 + w0 * exp(-d^2 / 2*sigma^2)``
+    where ``d`` is the Euclidean distance (in pixels) from each background pixel
+    to the nearest road pixel; road pixels themselves get ``d = 0`` (max weight).
+
+    Computed on CPU/numpy per batch from the (binary) target mask — cheap at
+    512 px — and detached from autograd (it's a constant weighting, not a
+    differentiable term); no caching, matching the "keep it simple" brief.
+    """
+    mask_np = (target.detach().cpu().numpy() > 0.5)
+    dist = np.empty(mask_np.shape, dtype=np.float32)
+    for idx in np.ndindex(mask_np.shape[:-2]):
+        # distance_transform_edt gives distance to the nearest *zero* pixel,
+        # so run it on the inverted mask: background pixels get distance to
+        # the nearest road pixel, road pixels get d=0.
+        dist[idx] = distance_transform_edt(~mask_np[idx]).astype(np.float32)
+    weight = 1.0 + w0 * np.exp(-(dist ** 2) / (2.0 * sigma_px ** 2))
+    return torch.from_numpy(weight).to(device=target.device, dtype=torch.float32)
+
+
 class ComboLoss(nn.Module):
-    """Weighted BCE + soft-Dice + Lovász-hinge (+ optional soft-clDice).
+    """Weighted BCE + soft-Dice + Lovász-hinge (+ optional soft-clDice / SDT-BCE).
 
     Lovász directly optimises IoU, Dice handles class imbalance, BCE stabilises
     early training, and clDice rewards connectivity. ``cldice_weight`` is a plain
-    attribute so a training loop can ramp it on in the final epochs.
+    attribute so a training loop can ramp it on in the final epochs. ``sdt_bce_weight``
+    (bugs.md §3) is a cheaper topology proxy: when > 0 it is used directly as ``w0``
+    in ``sdt_weight_map`` and the BCE term becomes an SDT-weighted BCE; all other
+    terms are left exactly as configured — it does NOT zero Lovász/clDice (A9's
+    postmortem confound).
     """
 
     def __init__(self, bce_weight: float = 0.4, dice_weight: float = 0.4,
                  lovasz_weight: float = 0.2, cldice_weight: float = 0.0,
-                 cldice_iters: int = 3, eps: float = 1e-7) -> None:
+                 cldice_iters: int = 3, sdt_bce_weight: float = 0.0, eps: float = 1e-7) -> None:
         super().__init__()
-        for w in (bce_weight, dice_weight, lovasz_weight, cldice_weight):
+        for w in (bce_weight, dice_weight, lovasz_weight, cldice_weight, sdt_bce_weight):
             if w < 0.0:
                 raise ValueError("loss weights must be non-negative")
         self.bce_weight = bce_weight
@@ -157,14 +187,21 @@ class ComboLoss(nn.Module):
         self.lovasz_weight = lovasz_weight
         self.cldice_weight = cldice_weight
         self.cldice_iters = cldice_iters
+        self.sdt_bce_weight = sdt_bce_weight
         self.eps = eps
         self.bce = nn.BCEWithLogitsLoss()
+        self.bce_none = nn.BCEWithLogitsLoss(reduction="none")
 
     def forward(self, logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         target = target.float()
         total = logits.sum() * 0.0  # zero with the right device/dtype/graph
         if self.bce_weight:
-            total = total + self.bce_weight * self.bce(logits, target)
+            if self.sdt_bce_weight > 0.0:
+                weight = sdt_weight_map(target, w0=self.sdt_bce_weight)
+                bce = (self.bce_none(logits, target) * weight).mean()
+            else:
+                bce = self.bce(logits, target)
+            total = total + self.bce_weight * bce
         probs = torch.sigmoid(logits)
         if self.dice_weight:
             inter = (probs * target).sum(dim=(1, 2, 3))
