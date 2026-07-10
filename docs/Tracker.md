@@ -257,6 +257,9 @@ flowchart TD
 
 > Copy the block each working day. Newest on top.
 
+**2026-07-10 (Akshat — A38b RESULT: milder foreground-bias (0.5) ALSO REJECTED — hypothesis closed)**
+- Overnight detached run (74 min train + full eval chain, zero crashes post-cp1252-fix). **Grayscale PAN-proxy: only +0.007** (0.4098 vs 0.4028 — the 0.7 variant's +0.028 shrank, not held). **APLS (n=80 paired): v3.2 WINS +0.0512, 95% CI [0.020, 0.084], p=0.0014.** Milder bias keeps less of the sensor-robustness gain AND still significantly fragments topology. **Foreground-biased cropping is now rejected at 0.5 and 0.7 — do not try 0.3; the lever is dead.** v3.2 (`road_pan.pt`) stays deployed. Rejected checkpoints `road_fgbias{,05}.pt` remain on local disk pending Akshat's deletion call.
+
 **2026-07-09 (Akshat — A39: L-effort closeout — prob-map contract, confidence, job queue, four-tab app)**
 - Branch `akshat/a39-probmap-healing` (stacked on A37/#116). Every remaining software-only L item from bugs.md shipped, each as its own reviewed+tested commit: **probability-map-aware healing** (P1 persists its Hann-blend prob map → healing rejects candidate bridges below `min_corridor_support` along the corridor; mask-only inputs provably unchanged); **per-edge `confidence`** (mean prob along each final edge, rendered as opacity clipped to [0.35,1]); **filesystem job queue** for uploads (JSON state files + one worker thread, stale-running recovery on restart, queue-position UX — replaces the A37 semaphore as the app path, semaphore kept as second belt); **four-tab restructure** (Briefing / Analysis with Scenario·Rankings·Curves sub-tabs / Your imagery / Methodology — §9.1, personas 1:1). Plus: two Windows cp1252 eval-crash fixes (ascii-only CLI prints in `stats.py`/`apls_eval.py`). **Full suite 245 passed** + headless health 200. bugs.md ledger: 98/101 findings fixed; remaining = topology-loss retest (GPU), A18 spike (GPU + external-repo authorization), geopandas flip (operator).
 
