@@ -310,7 +310,7 @@ Single-file Streamlit + Folium app: demo AOIs from `data/sample/`, image upload 
 - **Where:** `losses.py:37–46, 140–178` — full-resolution differentiable skeletonization every step when `cldice_weight > 0` (known 8 GB OOM risk); no boundary/distance-transform loss, no deep supervision
 - **What:** A9 rejected clDice-first *via fine-tune* while also zeroing Lovász — its own postmortem says a clean test needs a from-scratch retrain. No cheaper topology proxy has been tried.
 - **Fix:** If retested: half-resolution `soft_skeletonize` (scale-tolerant for thin structures) + keep Lovász nonzero; or try an SDT-weighted BCE as a cheap boundary proxy. **Effort:** M (only if retested)
-- **Status:** RETESTED cleanly via the SDT-weighted-BCE proxy (A41, 2026-07-10; Lovász kept — A9's confound avoided): APLS tie at n=449 (CI ±0.013) — the topology-loss lever does not move APLS. Side-effect: the candidate gains RGB/PAN IoU and closes the sensor gap → promotion candidate pending the DeepGlobe forget-check.
+- **Status:** RETESTED cleanly via the SDT-weighted-BCE proxy (A41, 2026-07-10; Lovász kept — A9's confound avoided): APLS tie at n=449 (CI ±0.013) — the topology-loss lever does not move APLS. Side-effect gains (RGB/PAN IoU, sensor gap) FAILED the DeepGlobe forget-check (−0.16 — the ablation path lacked the anchor; confound noted). A41b (anchored rerun) in flight; APLS-tie conclusion for the loss lever itself stands.
 
 #### [ ] [P2] Architecture never benchmarked against a topology-first alternative, though APLS is the metric that matters
 - **Where:** `model.py:34–64` (`unet`/`manet`/`fpn` over smp encoders); Tracker A14/A15 ⏳ unstarted, A18 🔒 (now unblocked — A16 is done)

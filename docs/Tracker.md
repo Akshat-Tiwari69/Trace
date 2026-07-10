@@ -257,6 +257,11 @@ flowchart TD
 
 > Copy the block each working day. Newest on top.
 
+**2026-07-10 (Akshat — A41 RELEASE GATE FAILED: catastrophic DeepGlobe forgetting; anchor confound found; A41b queued)**
+- Standalone DeepGlobe forget-check (60 seeded pairs, each model at its meta thr): **candidate 0.5054 vs deployed v3.2 0.6671 — delta −0.16, FAIL** (rule ≥ −0.005). **No v3.3 release.**
+- **Root cause:** the `--spacenet-corpus` ablation path never wired `--deepglobe-dir`, so A38/A38b/A41 all trained **without the DeepGlobe anchor** (the in-run forget-check's `nan` was this, unnoticed). Confound honestly stated: A41's Mumbai IoU/PAN gains may partly be anchor-absence artifact, not SDT-BCE. (fgbias rejections stand *a fortiori* — same advantage, still lost APLS.)
+- **A41b queued** (runner `.tmp/a41b_anchored_run.py`): faithful v3.2 recipe **with** the 2000-tile anchor + `--sdt-bce 1.0` → `models/road_sdtbce_v2.pt`, full eval chain + forget-check gate. If SDT-BCE's gains are real they survive the anchor. The eval-gate culture just prevented releasing a model that lost 16 DeepGlobe IoU points.
+
 **2026-07-10 (Akshat — A41 RESULT: SDT-BCE — APLS tie, real IoU gains, PAN gap closed; PROMOTION CANDIDATE)**
 - Overnight ablation (v3.2 recipe + `--sdt-bce 1.0`, zero-crash chain). vs deployed v3.2: **APLS statistical TIE** — n=80: delta −0.005 (p=0.77); tightened at **n=449 (full held-out): delta −0.0002, 95% CI [−0.0136, +0.0131], p=0.97** — topology provably unharmed (contrast fgbias, which lost). **RGB IoU +0.011** (0.4322 vs 0.4213 @0.52); **grayscale PAN-proxy +0.026** (0.4291 vs 0.4028) — and the candidate's own RGB↔gray gap is ≈−0.7% vs v3.2's −9%: **A24's "sensor gap within a few %" goal achieved for the first time.**
 - **Verdict:** the topology-loss lever (bugs.md §3, retested cleanly via the SDT proxy — Lovász kept, A9's confound avoided) does NOT move APLS; but the candidate is better-or-equal on every measured axis. **`models/road_sdtbce.pt` = first promotion candidate since v3.2.** Release gate remaining: the **DeepGlobe forget-check** (vacuous/nan in-run — val pairs path; data exists at `data/raw/deepglobe`) must pass (≤0.005 drop) before any v3.3 release + threshold/meta/Modal-checksum rollout. Code merged as opt-in (#120).
