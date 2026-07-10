@@ -11,7 +11,6 @@
 
 ### Open items
 
-- [ ] §3 topology-loss retest — **GPU-blocked** (from-scratch retrain experiment)
 - [ ] §3 A18 graph-first spike (SAM-Road++ vs v3.2 APLS) — **GPU-blocked**; corpus + harness ready
 - [ ] §3 real-PAN validation of the grayscale proxy — **data-blocked** (needs Cartosat chips)
 - [ ] §6 Caddy rate limiting — **operator** (third-party module install)
@@ -25,7 +24,7 @@
 - [ ] Sanity-check blended-inference CPU latency on the ARM box
 - [ ] Install the third-party caddy-ratelimit module
 
-**99 of 101 checkbox-marked findings fixed; 2 open** (one §6 P3 note is left unmarked — it explicitly says "no action today").
+**100 of 101 checkbox-marked findings fixed; 1 open** (the A18 spike) (one §6 P3 note is left unmarked — it explicitly says "no action today").
 
 ## 0. Executive summary
 
@@ -307,11 +306,11 @@ Single-file Streamlit + Folium app: demo AOIs from `data/sample/`, image upload 
 - **Fix:** The moment any real PAN chips are available, re-run the grayscale eval logic on them (even unlabeled sanity checks: road-fraction, visual overlays) before any go/no-go; state the proxy limitation in `Evaluation.md`. **Effort:** S (docs) / M (real PAN)
 - **Status:** Docs half done (proxy limitation stated); real-PAN re-run is **data-blocked** (needs Cartosat chips).
 
-#### [ ] [P2] Topology-loss hypothesis is open-with-a-confound, and the loss suite has no cheaper alternatives
+#### [x] [P2] Topology-loss hypothesis is open-with-a-confound, and the loss suite has no cheaper alternatives
 - **Where:** `losses.py:37–46, 140–178` — full-resolution differentiable skeletonization every step when `cldice_weight > 0` (known 8 GB OOM risk); no boundary/distance-transform loss, no deep supervision
 - **What:** A9 rejected clDice-first *via fine-tune* while also zeroing Lovász — its own postmortem says a clean test needs a from-scratch retrain. No cheaper topology proxy has been tried.
 - **Fix:** If retested: half-resolution `soft_skeletonize` (scale-tolerant for thin structures) + keep Lovász nonzero; or try an SDT-weighted BCE as a cheap boundary proxy. **Effort:** M (only if retested)
-- **Status:** **GPU-blocked** — needs a from-scratch retrain experiment, not a code change.
+- **Status:** RETESTED cleanly via the SDT-weighted-BCE proxy (A41, 2026-07-10; Lovász kept — A9's confound avoided): APLS tie at n=449 (CI ±0.013) — the topology-loss lever does not move APLS. Side-effect: the candidate gains RGB/PAN IoU and closes the sensor gap → promotion candidate pending the DeepGlobe forget-check.
 
 #### [ ] [P2] Architecture never benchmarked against a topology-first alternative, though APLS is the metric that matters
 - **Where:** `model.py:34–64` (`unet`/`manet`/`fpn` over smp encoders); Tracker A14/A15 ⏳ unstarted, A18 🔒 (now unblocked — A16 is done)
