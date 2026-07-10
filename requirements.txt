@@ -11,7 +11,7 @@ streamlit-folium==0.23.1
 # Geospatial (versions here are advisory; conda-forge installs gdal/rasterio/geopandas
 # directly and pip will see them already satisfied)
 rasterio==1.3.10
-geopandas==0.14.4
+geopandas==1.0.1
 osmnx==1.9.3
 shapely==2.0.5
 
