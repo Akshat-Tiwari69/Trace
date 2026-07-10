@@ -129,13 +129,12 @@ state dict). Re-verify a new checkpoint loads under the Modal pin before release
   touch the box: `roadresilience.service` and `update.sh` both invoke
   `.venv/bin/...` directly, so neither one ever consults `.python-version`,
   and the box keeps running its own **Python 3.12**.
-- Known divergence: root `requirements.txt` pins **geopandas 0.14.4** (conda-forge
-  path, dev) while `deploy/requirements-app.txt` pins **1.0.1** (pyogrio default
-  reader, no system GDAL on aarch64, prod). The app only uses `gpd.read_file()`,
-  which behaves identically today — but flipping either pin to close this gap
-  is an **operator step**: it needs a joint dev+prod test (full suite dev-side
-  **and** a `gpd.read_file()` smoke test on `data/sample/*.geojson` on the
-  deploy box) before rollout, not a drive-by version bump.
+- geopandas is **aligned at 1.0.1** in both root `requirements.txt` (dev) and
+  `deploy/requirements-app.txt` (prod) as of A42 (2026-07-10). The joint test
+  that gated the flip: full suite (249 passed) under 1.0.1 in an isolated
+  dev-side venv, plus a `gpd.read_file()` smoke on `data/sample/*.geojson` on
+  the deploy box (which had already been serving on 1.0.1 in production).
+  Apply the same joint-test rule to any future major bump of the geo stack.
 
 ## Useful ops
 

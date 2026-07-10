@@ -14,7 +14,6 @@
 - [ ] §3 topology-loss retest — **GPU-blocked** (from-scratch retrain experiment)
 - [ ] §3 A18 graph-first spike (SAM-Road++ vs v3.2 APLS) — **GPU-blocked**; corpus + harness ready
 - [ ] §3 real-PAN validation of the grayscale proxy — **data-blocked** (needs Cartosat chips)
-- [ ] §5E geopandas major alignment — **operator** (joint dev+prod test)
 - [ ] §6 Caddy rate limiting — **operator** (third-party module install)
 
 ### Operator checklist (Akshat, on the boxes)
@@ -25,9 +24,8 @@
 - [ ] `chmod 600` the env file holding `MODAL_SEG_KEY`
 - [ ] Sanity-check blended-inference CPU latency on the ARM box
 - [ ] Install the third-party caddy-ratelimit module
-- [ ] Run the joint dev+prod geopandas-alignment test before flipping either pin
 
-**98 of 101 checkbox-marked findings fixed; 3 open** (one §6 P3 note is left unmarked — it explicitly says "no action today").
+**99 of 101 checkbox-marked findings fixed; 2 open** (one §6 P3 note is left unmarked — it explicitly says "no action today").
 
 ## 0. Executive summary
 
@@ -487,11 +485,11 @@ Single-file Streamlit + Folium app: demo AOIs from `data/sample/`, image upload 
 - **What:** A partial download or retagged release silently bakes a wrong model into the image; you can't guarantee served model == evaluated model. (Overlaps §6 supply-chain finding — same fix.)
 - **Fix:** Pin expected `sha256` next to `MODEL_URL`; fail the build on mismatch. **Effort:** S
 
-#### [ ] [P2] Three divergent dependency sets, prose-managed; geopandas a full major apart; no Python pin
+#### [x] [P2] Three divergent dependency sets, prose-managed; geopandas a full major apart; no Python pin
 - **Where:** `requirements.txt` (`geopandas==0.14.4`) vs `deploy/requirements-app.txt` (`geopandas==1.0.1`) vs `modal_app.py` pins
 - **What:** geopandas 1.0 switched fiona→pyogrio as the default reader — `gpd.read_file` on the sample GeoJSON can behave subtly differently dev vs prod, on exactly the path the dashboard depends on. No `.python-version`; TRD says 3.10+ but the box uses 3.12.
 - **Fix:** Pin exact Python; align geopandas majors (or test the sample-load under both); long-term a lockfile (`pip-compile`/`uv`). **Effort:** S–M
-- **Status:** PARTIAL — `.python-version` (3.11) + reconciled matrix docs shipped (A37); the geopandas major flip itself is **operator** (joint dev+prod test on the box).
+- **Status:** Fixed — `.python-version` + matrix docs (A37); geopandas aligned at **1.0.1** dev+prod (A42, 2026-07-10) after the joint test: 249-test suite green under 1.0.1 in an isolated venv + `gpd.read_file()` smoke on the box.
 
 ### 5F. Testing, CI & observability
 
