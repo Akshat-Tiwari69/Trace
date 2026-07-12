@@ -242,7 +242,7 @@ flowchart TD
 | Repo kept **neutral/generic** | public-safe; no hackathon/hardware identity | 🔒 locked |
 | **A41 SDT-BCE REJECTED** (2026-07-12) | anchored rerun clean (DG preserved) yet APLS −0.042, CI [−0.074,−0.011], p=.006 vs v3.2; pixel-up/topology-down. v3.2 stays deployed; seg-loss levers closed | 🔒 locked |
 | **Promotion metric = chip-level common-unit APLS** (`chip_apls_eval --strict` #124) | tile-vs-chip unit mismatch is a confound; both models same frozen chips/vector-GT/frame, exit codes encode promotion | 🔒 locked |
-| **Direction = graph-first (A18 SAM-Road++)** | seg backbone pushes pixels not topology on single-city GT (A41b proof); A18 full-corpus run **WINS the chip-level APLS gate vs v3.2** (raw +0.038 / norm +0.068, CI excludes 0) — direction validated. Absolute routing still poor (~8.6% of achievable); v3.2 stays deployed, A18 not yet a v3.x candidate | 🔒 locked |
+| **Direction = graph-first (A18 SAM-Road++)** | seg backbone pushes pixels not topology on single-city GT (A41b proof); A18 **WINS the chip-level APLS gate vs v3.2** — frozen run raw +0.038/norm +0.068, then **LoRA r=4 ~2.1x → raw +0.093/norm +0.162 (~18% of the 0.64 achievable ceiling)**, CI excludes 0 both. Direction validated + proven headroom (encoder was the cap). Still not deploy-grade; v3.2 stays deployed | 🔒 locked |
 
 ---
 
@@ -259,6 +259,12 @@ flowchart TD
 ## §10 · Daily Logs
 
 > Copy the block each working day. Newest on top.
+
+**2026-07-12 (Akshat — A18 LoRA r=4 RESULT: encoder was the bottleneck — ~2.1x gain, wins gate decisively, still not deploy-grade)**
+- **Step-1 gate (no GPU) killed the frame-change idea first:** GT-vs-self ceiling is IDENTICAL at 400/800/1300px (mean 0.708 at every size; per-chip nodes/components unchanged — `.tmp/a43_samroad/ceiling_vs_framesize.py`). The 400px is a *downscale of the whole 1300px chip*, not a crop, so resolution was never the cap — the fragmentation is genuine dead-ends + native chip-boundary clipping. Per Codex's ceiling-first gate, an 800px run would optimize the same 0.71 ceiling => skipped. Only multi-chip stitching could lift it (deferred). Codex + Akshat agreed: go straight to the model lever.
+- **A18 LoRA r=4 run** (`.tmp/a43_samroad/repo/_lora.yaml`: ENCODER_LORA r=4 — base SAM frozen, only 0.147M qkv adapters + heads = 0.70M trainable; FREEZE_ENCODER=false, else model.py:467 freezes the adapters; 400px, batch 8, 80ep max). Early-stopped at epoch 26 (best **epoch 18**, val_topo_loss 0.0835). VRAM 2.9/8 GiB (grad-checkpointing unnecessary — the repo's SAM has no use_checkpoint hook anyway). Inference on the same 127 heldout → `heldout_lora/graph/`.
+- **Strict gate (n=127, coverage complete):** RAW v3.2 **0.0121** vs A18-LoRA **0.1051** → delta **+0.0930**, CI [+0.0782, +0.1095], p<0.001, `b wins`. NORM v3.2 **0.0185** vs A18-LoRA **0.1808** → delta **+0.1622**, CI [+0.1373, +0.1879], p<0.001. Results `.tmp/a18_lora_vs_v32_chip_apls.json`.
+- **vs the frozen run (raw 0.050 / norm 0.086): LoRA ~2.1x on both axes.** So r=4 qkv adapters alone doubled A18 — the frozen SAM encoder WAS the cap, confirming the underfit read. **Verdict: graph-first now WINS v3.2 decisively on chip-level topology AND has proven, unlockable headroom** — but A18-LoRA still captures only **~18% of the achievable 0.64 ceiling**, so NOT deploy-grade. v3.2 stays deployed. Next levers if pursued: higher LoRA rank / partial unfreeze, more train chips (only 412 used of ~514 usable), or multi-chip context to lift the ceiling itself.
 
 **2026-07-12 (Akshat — A18 RESULT: SAM-Road++ run done; WINS chip-level APLS gate vs v3.2 but absolute routing is poor; eval frame corrected)**
 - **A18 (SAM-Road++) run COMPLETED** (40/40 epochs, clean exit, early-stop never fired → `val_topo_loss` still improving; final `epoch=39-step=2080.ckpt`). Inference on all **127 frozen heldout chips** → `graph/mumbai_{chip}.p` (canonical (r,c) adj-dicts) via `inferencer.py` on a fresh heldout workspace (`.tmp/a43_samroad/infer_data/`, RGB path byte-identical to the training converter; heldout never touched training). Checkpoint loaded `strict=True` clean — train/infer model classes agree.
