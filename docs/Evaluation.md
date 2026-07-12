@@ -14,7 +14,7 @@ Each metric is tied to the phase it judges. Plain-English meaning first, then th
 |---|---|---|
 | **IoU** (Intersection over Union) | How much predicted road overlaps true road, ignoring the easy "not-road" ocean | `intersection / union` of road pixels; the primary pixel metric |
 | **Dice / F1** | Similar overlap measure, more forgiving of thin shapes | `2·TP / (2·TP + FP + FN)` |
-| **Occlusion-Recall** | Of the roads *hidden* under trees/shadows, how many did we recover? | Recall computed on occluded regions — **the headline metric for this project** |
+| **Synthetic-cutout recall** | Of road pixels hidden by artificial black rectangles, how many did we recover? | Controlled augmentation ablation; not a real-canopy/shadow claim |
 | **Relaxed / Buffered IoU** | IoU with a 3–5 px tolerance so being slightly off-centre isn't punished | Standard for thin structures; prevents penalising minor alignment shifts |
 
 > Don't use plain pixel accuracy — roads are a tiny fraction of pixels (~4.5% in DeepGlobe), so a model predicting "no road" everywhere scores ~95% while finding nothing. See `Research.md`.
@@ -62,7 +62,7 @@ Reference points from the literature to contextualize our numbers (full citation
 | SpaceNet 3 baseline (U-Net + skeletonize + sknw) | APLS ≈ 0.49 |
 | SpaceNet 3 winner ("albu") | APLS ≈ 0.666 |
 | Cautionary point | a mask at F1 = 0.72 can score APLS = 0.25 — pixels ≠ topology |
-| **Our baselines** | seg: A4 IoU **0.670**, Occlusion-Recall **0.793** @thr 0.44 (DeepGlobe val) · graph: see below |
+| **Our baselines** | seg: A4 IoU **0.670**, synthetic-cutout recall **0.793** @thr 0.44 (DeepGlobe val) · graph: see below |
 
 ### Segmentation-lane numbers (A4 — DeepGlobe held-out validation)
 
@@ -74,7 +74,7 @@ Add `--image <tile>` for a live qualitative inference demo + red overlay.
 |---|---|---|
 | Model | SegFormer MiT-B3 + SCSE U-Net (EMA), 47.5M params, 30 epochs | full-res sliding-window (Hann) validation |
 | **IoU** | **0.6699** (flip + multi-scale TTA) · 0.6638 best single-view | held-out DeepGlobe val |
-| **Occlusion-Recall** | **0.793** @ deploy thr 0.44 | the headline metric — recall on hidden roads |
+| **Synthetic-cutout recall** | **0.793** @ deploy thr 0.44 | recall under artificial black rectangles; not real occlusion |
 | Deploy threshold | 0.44 → clean IoU 0.6617 | occlusion-aware: max recall within 0.01 IoU of peak |
 | Checkpoint | GitHub Release `a4-roadseg-v1` | meta-driven; `load_checkpoint` rebuilds + deploys it |
 
@@ -86,11 +86,11 @@ resilience sanity check (**targeted RI 0.503 < random 0.780**). Off-domain + hea
 occlusion ⇒ a deliberately hard, sparse case — reported honestly per the
 error-analysis policy below; on open road grids the mask is far denser.*
 
-### Real Indian GT — held-out SpaceNet-5 Mumbai (A17 benchmark, A23/A24 models)
+### Real Indian GT — frozen SpaceNet-5 Mumbai development benchmark (A17, A23/A24)
 
 The **truthful** Indian metric. DeepGlobe/OSM-agreement numbers above are in-domain
 or weak-label proxies; A12 proved OSM-agreement is *misleading* (it rewarded models
-that lose on held-out). A17 froze a chip-level held-out SpaceNet-5 Mumbai split
+that lose on the frozen split). A17 froze a chip-level SpaceNet-5 Mumbai split
 (real human vector GT, `data/sample/spacenet_mumbai_heldout_chips.json`, 127/637
 chips) and re-baselined every model on it. Reproduce with
 `python -m src.pipeline.p1_segment.eval_spacenet --checkpoints <ckpts> --device cuda [--grayscale] [--sweep]`
@@ -109,7 +109,7 @@ and `… apls_eval …`.
 
 > **PAN-proxy caveat (bugs.md §3):** every "grayscale" number here is an **RGB→gray proxy** (`A.ToGray` on RGB imagery), not a measurement on real Cartosat-3 panchromatic data. Real PAN has a different spectral response, noise profile, and MTF at 0.25 m native GSD, so the true PAN gap may be larger or differently shaped than the −9 % proxy suggests. Before any go/no-go decision on PAN imagery: re-run the grayscale eval logic on real PAN chips the moment any are available (even unlabeled sanity checks — road-pixel fraction, visual overlays — beat extrapolating from the proxy).
 
-**Findings:** (1) **v3.2 (A24) is the best model on every axis.** At deploy thresholds it beats v3 by **RGB +2%, grayscale +3%, and APLS +14%**, and v1 by far more. The A24 sensor-robustness aug (grayscale_p 0.7 + `RandomGamma`) mattered **most for routing** — training off colour yields more *connected* roads, which APLS rewards heavily (pixels ≠ topology). Deployed as [`a4-roadseg-v3.2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) (`meta["threshold"]`=0.52). (2) **v3 beat v1** — RGB +15%, APLS, grayscale — the first genuine gain on real Indian GT after A8/A9/A11/A12 all failed; the lever was *real in-domain labels + a truthful metric*, not architecture. (3) **Cartosat readiness:** the grayscale (PAN proxy) gap shrank v1 −14% → v3 −10% → **v3.2 −9%**; v3.2-grayscale 0.418 > v1-RGB 0.399. (4) **Threshold:** each fine-tune's optimum is 0.50–0.52 (not 0.44); deploy thresholds are set per-model in the checkpoint meta. v3.1 = v3 weights @0.50; v3 = original @0.44.
+**Findings:** (1) **v3.2 (A24) is the best deployed segmentation model on this development benchmark.** At deploy thresholds it beats v3 by **RGB +2%, grayscale +3%, and APLS +14%**, and v1 by more. Because Mumbai has guided repeated model decisions, this is not an untouched test set and does not establish geographic generalization. Deployed as [`a4-roadseg-v3.2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) (`meta["threshold"]`=0.52). (2) **v3 beat v1** on this benchmark; the lever was real in-domain labels. (3) The grayscale PAN-proxy gap shrank v1 −14% → v3 −10% → **v3.2 −9%**, but real Cartosat validation remains required. (4) Each fine-tune's optimum is 0.50–0.52; deploy thresholds are stored per model.
 
 ### Graph-lane first numbers (S1 sample — `panaji_demo`, OSM-derived w/ simulated occlusion)
 

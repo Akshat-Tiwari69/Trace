@@ -68,7 +68,7 @@ image = (
         "segmentation-models-pytorch==0.3.4",
         "numpy==1.26.4",
         "pillow==10.4.0",
-        "fastapi[standard]",
+        "fastapi[standard]==0.115.14",
     )
     .add_local_file("src/pipeline/p1_segment/model.py", "/root/model.py", copy=True)
     .run_function(_bake_checkpoint)

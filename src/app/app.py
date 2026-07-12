@@ -1372,6 +1372,13 @@ UPLOAD_GUIDANCE = (
     "**Best results at ~0.5 m/pixel** (Google-Earth neighbourhood zoom, roads "
     "4–10 px wide) — heavily zoomed-in or zoomed-out captures degrade extraction."
 )
+UPLOAD_DISCLOSURE = (
+    "Your original image bytes leave this server and are sent to Modal's GPU "
+    "infrastructure solely for road-mask inference. Platform/request logs may "
+    "exist; this project does not offer a contractual retention guarantee. Do "
+    "not upload classified, restricted, personal, or otherwise sensitive "
+    "imagery. For those datasets, run the local pipeline instead."
+)
 
 
 # Bound concurrent GPU calls so a burst of uploads can't pin every Streamlit
@@ -1501,6 +1508,7 @@ def render_live_detection() -> None:
     hosted demo instead of hiding entirely.
     """
     st.subheader("Analyze your own imagery")
+    st.warning(UPLOAD_DISCLOSURE)
     if not MODAL_SEG_URL:
         st.info(
             "GPU inference is not configured on this instance — try the hosted "
@@ -1514,10 +1522,15 @@ def render_live_detection() -> None:
         )
         st.caption(UPLOAD_GUIDANCE)
         return
+    consent = st.checkbox(
+        "I am authorized to send this image to Modal for processing",
+        key="modal_upload_consent",
+    )
     upload = st.file_uploader(
         "Upload a satellite / aerial image to extract its road network",
         type=["png", "jpg", "jpeg"],
         key="live_detection_upload",
+        disabled=not consent,
     )
     st.caption(UPLOAD_GUIDANCE)
     if upload is None:
