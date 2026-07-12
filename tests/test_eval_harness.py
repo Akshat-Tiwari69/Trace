@@ -9,12 +9,17 @@ synthetic inputs with hand-checked answers, no GPU/checkpoints required.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
 
-from src.pipeline.p1_segment.apls_eval import tile_apls
-from src.pipeline.p1_segment.eval_spacenet import split_heldout_chips
+from src.pipeline.p1_segment.apls_eval import compare_checkpoints_apls, tile_apls
+from src.pipeline.p1_segment.eval_spacenet import (
+    _write_report as write_spacenet_report,
+    split_heldout_chips,
+)
 from src.pipeline.p1_segment.stats import paired_bootstrap_ci
 from src.pipeline.p1_segment.train import evaluate
 
@@ -56,6 +61,25 @@ def test_bootstrap_rejects_mismatched_or_empty():
         paired_bootstrap_ci([0.1, 0.2], [0.1])
     with pytest.raises(ValueError):
         paired_bootstrap_ci([], [])
+
+
+def test_apls_compare_reports_disjoint_tiles(monkeypatch):
+    reports = iter([
+        {"checkpoint": "a.pt", "apls_mean": 0.4, "per_tile": {"tile-a": 0.4}},
+        {"checkpoint": "b.pt", "apls_mean": 0.5, "per_tile": {"tile-b": 0.5}},
+    ])
+    monkeypatch.setattr("src.pipeline.p1_segment.apls_eval.apls_on_heldout",
+                        lambda *args, **kwargs: next(reports))
+    rep = compare_checkpoints_apls(Path("a.pt"), Path("b.pt"))
+    assert rep["n_paired"] == 0
+    assert rep["verdict"] == "no paired tiles"
+    assert rep["delta"] is None and not rep["excludes_zero"]
+
+
+def test_spacenet_report_writer_creates_nested_parent(tmp_path):
+    out = tmp_path / "new" / "nested" / "report.json"
+    write_spacenet_report(out, {"ok": True})
+    assert out.is_file()
 
 
 # --------------------------------------------------------------------------- #
