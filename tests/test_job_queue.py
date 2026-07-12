@@ -120,6 +120,25 @@ def test_live_lease_is_not_recovered_or_double_claimed():
     assert job_queue._process_one() is False
 
 
+def test_live_owner_is_not_recovered_after_fixed_lease_expires():
+    job_id = job_queue.submit(_grid_mask(), resolution_m=0.5)
+    state = job_queue.status(job_id)
+    state.update({
+        "status": "running",
+        "started_utc": job_queue._now(),
+        "owner_pid": os.getpid(),
+        "lease_expires_utc": (
+            datetime.now(timezone.utc) - timedelta(minutes=5)
+        ).isoformat(timespec="seconds"),
+    })
+    job_queue._write_state(job_id, state)
+    job_queue._claim_path(job_id).touch()
+
+    assert job_queue._recover_stale_running() == 0
+    assert job_queue.status(job_id)["status"] == "running"
+    assert job_queue._process_one() is False
+
+
 def test_stale_sequence_lock_is_recovered(monkeypatch):
     job_queue.JOBS_DIR.mkdir(parents=True)
     lock = job_queue.JOBS_DIR / "sequence.lock"
@@ -132,13 +151,14 @@ def test_stale_sequence_lock_is_recovered(monkeypatch):
     assert not lock.exists()
 
 
-def test_invalid_lease_timestamp_is_treated_as_expired():
+def test_invalid_lease_timestamp_with_dead_owner_is_recovered(monkeypatch):
     job_id = job_queue.submit(_grid_mask(), resolution_m=0.5)
     state = job_queue.status(job_id)
     state.update({"status": "running", "owner_pid": os.getpid(),
                   "lease_expires_utc": "not-an-iso-date"})
     job_queue._write_state(job_id, state)
     job_queue._claim_path(job_id).touch()
+    monkeypatch.setattr(job_queue, "_pid_alive", lambda _pid: False)
     assert job_queue._recover_stale_running() == 1
     assert job_queue.status(job_id)["status"] == "queued"
 

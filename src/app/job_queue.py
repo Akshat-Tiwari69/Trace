@@ -283,20 +283,17 @@ def _pid_alive(pid: int | None) -> bool:
 def _recover_stale_running() -> int:
     """Re-queue any job stuck in 'running' (bugs.md §5H crash-safety).
 
-    Recover only an expired lease or dead owner. A live overlapping Streamlit
-    process keeps its claim, so a restart cannot duplicate work still in flight.
+    Recover only jobs whose owner process is no longer alive. Leases are useful
+    crash metadata, but this worker does not renew them during long analyses;
+    expiring a live owner's claim would allow duplicate processing and racy
+    final writes.
     """
     recovered = 0
     for job_id in _iter_job_ids():
         state = _try_read_state(job_id)
         if state is None or state["status"] != "running":
             continue
-        expiry_text = state.get("lease_expires_utc")
-        try:
-            expiry = datetime.fromisoformat(expiry_text) if expiry_text else None
-        except (TypeError, ValueError):
-            expiry = None  # legacy/corrupt lease is expired, never fatal to recovery
-        if _pid_alive(state.get("owner_pid")) and expiry and expiry > datetime.now(timezone.utc):
+        if _pid_alive(state.get("owner_pid")):
             continue
         _claim_path(job_id).unlink(missing_ok=True)
         state["status"] = "queued"
