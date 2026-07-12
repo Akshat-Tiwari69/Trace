@@ -18,7 +18,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import json
 import os
-import pickle
 import threading
 import time
 import uuid
@@ -54,9 +53,11 @@ def _mask_path(job_id: str) -> Path:
 
 
 def _result_path(job_id: str) -> Path:
-    # Pickled AnalysisResult. Internal-only: the only writer is _process_one()
-    # below, reading a mask this same module wrote moments earlier — never a
-    # user-supplied file — so unpickling it here doesn't cross a trust boundary.
+    return JOBS_DIR / f"{job_id}.result.json"
+
+
+def _legacy_result_path(job_id: str) -> Path:
+    """Pre-v1 pickle path, retained only so cleanup removes stale artifacts."""
     return JOBS_DIR / f"{job_id}.result.pkl"
 
 
@@ -112,7 +113,7 @@ def _try_read_state(job_id: str) -> dict | None:
 def _iter_job_ids() -> list[str]:
     if not JOBS_DIR.is_dir():
         return []
-    return [p.stem for p in JOBS_DIR.glob("*.json")]
+    return [p.stem for p in JOBS_DIR.glob("*.json") if not p.name.endswith(".result.json")]
 
 
 def _save_mask(path: Path, mask: np.ndarray) -> None:
@@ -170,8 +171,7 @@ def result(job_id: str) -> Any:
     state = status(job_id)
     if state["status"] != "done":
         raise RuntimeError(f"job {job_id} is not done (status={state['status']!r})")
-    with open(_result_path(job_id), "rb") as f:
-        return pickle.load(f)
+    return _load_result(_result_path(job_id))
 
 
 def cleanup(max_age_h: float = 24) -> int:
@@ -192,7 +192,7 @@ def cleanup(max_age_h: float = 24) -> int:
         created = datetime.fromisoformat(state["created_utc"])
         if created < cutoff:
             for path in (_state_path(job_id), _mask_path(job_id), _result_path(job_id),
-                         _claim_path(job_id)):
+                         _legacy_result_path(job_id), _claim_path(job_id)):
                 path.unlink(missing_ok=True)
             removed += 1
     return removed
@@ -258,8 +258,64 @@ def _process_one() -> bool:
 
 
 def _dump_result(path: Path, value: Any) -> None:
-    with open(path, "wb") as fh:
-        pickle.dump(value, fh)
+    """Persist a versioned, dependency-tolerant JSON contract (never pickle)."""
+    import networkx as nx
+
+    payload = {
+        "schema_version": 1,
+        "graph": nx.node_link_data(value.graph, link="edges"),
+        "criticality": {
+            "columns": list(value.criticality.columns),
+            "records": value.criticality.to_dict(orient="records"),
+        },
+        "resilience_index": value.resilience_index,
+        "top_node": value.top_node,
+        "n_nodes": value.n_nodes,
+        "n_edges": value.n_edges,
+        "resolution_m": value.resolution_m,
+        "summary": value.summary,
+    }
+    path.write_text(json.dumps(payload, default=_json_default, separators=(",", ":")))
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"unsupported queue-result value: {type(value).__name__}")
+
+
+def _load_result(path: Path) -> Any:
+    import networkx as nx
+    import pandas as pd
+
+    from src.app.upload_analysis import AnalysisResult
+
+    payload = json.loads(path.read_text())
+    if payload.get("schema_version") != 1:
+        raise RuntimeError(
+            f"unsupported upload result schema {payload.get('schema_version')!r}"
+        )
+    table = payload["criticality"]
+    criticality = pd.DataFrame(table["records"], columns=table["columns"])
+    graph = nx.node_link_graph(payload["graph"], link="edges")
+    return AnalysisResult(
+        graph=graph,
+        criticality=criticality,
+        resilience_index=float(payload["resilience_index"]),
+        top_node=payload["top_node"],
+        n_nodes=int(payload["n_nodes"]),
+        n_edges=int(payload["n_edges"]),
+        resolution_m=float(payload["resolution_m"]),
+        summary=payload.get("summary", {}),
+    )
 
 
 def _pid_alive(pid: int | None) -> bool:

@@ -47,6 +47,14 @@ def test_submit_process_done_roundtrip():
     result = job_queue.result(job_id)
     assert result.n_nodes > 0
     assert result.n_edges > 0
+    assert result.graph.is_multigraph()
+    assert result.graph.number_of_nodes() == result.n_nodes
+    assert result.graph.number_of_edges() == result.n_edges
+    assert {"node_id", "betweenness"}.issubset(result.criticality.columns)
+    result_path = job_queue._result_path(job_id)
+    assert result_path.suffix == ".json"
+    assert '"schema_version":1' in result_path.read_text()
+    assert not job_queue._legacy_result_path(job_id).exists()
 
     # Queue is empty now.
     assert job_queue._process_one() is False
