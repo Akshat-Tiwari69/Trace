@@ -62,7 +62,7 @@ TOKENS: dict[str, str] = {
 }
 
 SINGLE_MODE = "Single junction"
-FLOOD_MODE = "Flood area (draw on map)"
+FLOOD_MODE = "Flood area / junction set"
 
 
 def find_repo_root() -> Path:
@@ -1045,16 +1045,55 @@ def render_scenario_tab(
         on_change=_on_failure_mode_change,
         horizontal=True,
     )
+    current_closures = st.session_state.get("disabled_nodes", ())
+    if failure_mode == FLOOD_MODE:
+        st.caption(
+            "Draw an area on the map, or use the keyboard-accessible junction "
+            "list below. Both paths run the same multi-junction failure analysis."
+        )
+        all_ids = criticality.sort_values("rank")["node_id"].astype(int).tolist()
+        manual_nodes = st.multiselect(
+            "Junctions inside the failed area",
+            all_ids,
+            default=(
+                list(current_closures)
+                if st.session_state.get("ablation_source") == "flood"
+                else []
+            ),
+            key="manual_flood_nodes",
+            format_func=lambda node: (
+                f"#{int(ranks[node])} · Junction {node} · score {scores[node]:.3f}"
+            ),
+        )
+        apply_col, clear_col = st.columns(2)
+        if apply_col.button(
+            "Apply junction set",
+            type="primary",
+            use_container_width=True,
+            disabled=not manual_nodes,
+        ):
+            st.session_state["disabled_nodes"] = tuple(sorted(map(int, manual_nodes)))
+            st.session_state["ablation_source"] = "flood"
+            log_event("simulate_flood_nodes", n_closed=len(manual_nodes))
+            st.rerun()
+        if clear_col.button("Clear area failure", use_container_width=True):
+            _reset_simulation()
+
     selected = st.selectbox(
         "Junction to disable",
         critical_ids,
         key="selected_node",
         on_change=_clear_last_map_click,
+        disabled=failure_mode == FLOOD_MODE,
         format_func=lambda node: (
             f"#{int(ranks[node])} · Junction {node} · score {scores[node]:.3f}"
         ),
     )
-    st.caption("Click a critical junction on the map or choose one above.")
+    st.caption(
+        "Click a critical junction on the map or choose one above."
+        if failure_mode == SINGLE_MODE
+        else "Single-junction selection is disabled while area failure is active."
+    )
     # Selected-junction details as text, so the info doesn't live only in
     # hover tooltips (screen readers / touch devices).
     selected_row = criticality.loc[criticality["node_id"] == selected]
@@ -1075,7 +1114,6 @@ def render_scenario_tab(
             )
         )
 
-    current_closures = st.session_state.get("disabled_nodes", ())
     single_active = current_closures and st.session_state.get("ablation_source") == "single"
     add_more = bool(single_active)  # once one junction is down, the button accumulates
 
@@ -1087,6 +1125,7 @@ def render_scenario_tab(
         help=("Add the selected junction to the active closures (compound disaster)."
               if add_more else
               "Disable the selected junction and recompute routes and resilience."),
+        disabled=failure_mode == FLOOD_MODE,
     ):
         # Accumulate closures so users can model a compound disaster (§2D).
         base = set(current_closures) if add_more else set()
@@ -1313,11 +1352,11 @@ def apply_design_theme() -> None:
 
           /* The Folium map iframe becomes a framed panel. Scoped to st_folium only
              (Streamlit injects hidden utility iframes that must stay unstyled), and
-             height-clamped: streamlit-folium's bidirectional frontend inflates the
-             iframe height attribute (observed 3068px for a 760px map), which was
-             stretching the page with dead space below the map and panel. */
+             wrapper-relative: streamlit-folium's bidirectional frontend can inflate
+             the iframe height attribute, so 100% follows each component's requested
+             wrapper height (420px Briefing, 640px Analysis) without global forcing. */
           iframe[title="streamlit_folium.st_folium"] {
-            height: 640px !important;
+            height: 100% !important;
             border-radius: 14px;
             border: 1px solid var(--rr-border) !important;
             box-shadow: 0 10px 30px rgba(2,6,17,.45);
