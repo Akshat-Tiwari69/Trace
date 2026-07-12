@@ -23,8 +23,10 @@ MODEL_URL = (
 MODEL_SHA256 = "0ebedf973c0ffe0b1148d3de38382d17ac88398c6a55f4550d661a6b1e9eed1d"
 MODEL_PATH = "/model/road_pan.pt"
 
-# Payload guardrails for the public endpoint.
-MAX_B64_LEN = 15 * 1024 * 1024  # reject bodies before the base64 decode
+# Payload guardrails for the public endpoint. The UI enforces the same original-
+# byte limit; derive the base64 ceiling so transport expansion cannot disagree.
+MAX_SOURCE_BYTES = 11 * 1024 * 1024
+MAX_B64_LEN = 4 * ((MAX_SOURCE_BYTES + 2) // 3)
 MAX_IMAGE_PIXELS = 4096 * 4096  # PIL decompression-bomb ceiling
 
 
@@ -142,9 +144,10 @@ class Segmenter:
         from fastapi import HTTPException
 
         # Auth FIRST (constant-time), before any decode/parse work on the body.
-        if not hmac.compare_digest(
-            str(item.get("key", "")), os.environ.get("ROADSEG_KEY", "")
-        ):
+        expected_key = os.environ.get("ROADSEG_KEY", "")
+        if not expected_key:
+            raise HTTPException(status_code=503, detail="endpoint auth is not configured")
+        if not hmac.compare_digest(str(item.get("key", "")), expected_key):
             raise HTTPException(status_code=401, detail="unauthorized")
 
         img_b64 = item.get("image_b64")
@@ -156,6 +159,8 @@ class Segmenter:
             image_bytes = base64.b64decode(img_b64, validate=True)
         except (binascii.Error, ValueError):
             raise HTTPException(status_code=400, detail="invalid image")
+        if len(image_bytes) > MAX_SOURCE_BYTES:
+            raise HTTPException(status_code=413, detail="image too large")
         try:
             png = self._infer_png(image_bytes)
         except ValueError:

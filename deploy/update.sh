@@ -7,18 +7,18 @@ set -euo pipefail
 REPO="$HOME/Trace"
 cd "$REPO"
 
-# Optional DEPLOY_REF: deploy a specific branch or tag (e.g. DEPLOY_REF=v1.0.0)
-# instead of the tracked branch. Default = current behavior (upstream of the
-# checked-out branch, i.e. dev). Documented in deploy/README.md.
+# Public production must opt into an explicit release ref. The service reads it
+# from ~/.config/roadresilience/deploy.env; refusing an empty value prevents an
+# accidental return to continuously shipping the checked-out dev branch.
 DEPLOY_REF="${DEPLOY_REF:-}"
+if [ -z "$DEPLOY_REF" ]; then
+    echo "DEPLOY_REF is required (use an immutable release tag, e.g. v1.2.3)" >&2
+    exit 2
+fi
 
 git fetch --quiet origin
 
-if [ -n "$DEPLOY_REF" ]; then
-    TARGET="$(git rev-parse "origin/$DEPLOY_REF" 2>/dev/null || git rev-parse "$DEPLOY_REF")"
-else
-    TARGET="$(git rev-parse '@{u}')"
-fi
+TARGET="$(git rev-parse "origin/$DEPLOY_REF" 2>/dev/null || git rev-parse "$DEPLOY_REF")"
 LOCAL="$(git rev-parse @)"
 
 if [ "$LOCAL" = "$TARGET" ]; then
@@ -26,6 +26,15 @@ if [ "$LOCAL" = "$TARGET" ]; then
 fi
 
 echo "$(date -Is) update: ${LOCAL:0:8} -> ${TARGET:0:8}"
+
+rollback() {
+    echo "$(date -Is) ERROR: deploy transaction failed @ ${TARGET:0:8}; rolling back to ${LOCAL:0:8}" >&2
+    git reset --hard --quiet "$LOCAL"
+    ./.venv/bin/pip install -q -r deploy/requirements-app.txt || true
+    systemctl --user restart roadresilience.service || true
+}
+trap rollback ERR
+
 # Deploy checkout is read-only — hard-sync beats pull (no merge state to break).
 git reset --hard --quiet "$TARGET"
 
@@ -47,6 +56,7 @@ healthy() {
 }
 
 if healthy; then
+    trap - ERR
     echo "$(date -Is) restarted roadresilience @ ${TARGET:0:8} (healthy)"
 else
     echo "$(date -Is) ERROR: health check FAILED @ ${TARGET:0:8} — ROLLING BACK to ${LOCAL:0:8}" >&2
@@ -58,5 +68,6 @@ else
     else
         echo "$(date -Is) CRITICAL: rollback also unhealthy — manual intervention required" >&2
     fi
+    trap - ERR
     exit 1
 fi

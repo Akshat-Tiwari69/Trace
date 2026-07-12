@@ -25,6 +25,8 @@ Example::
 from __future__ import annotations
 
 import json
+import hashlib
+import os
 import logging
 import time
 from pathlib import Path
@@ -99,6 +101,47 @@ def _fresh(output: Path, *inputs: Path) -> bool:
     return all(out_mtime >= i.stat().st_mtime for i in inputs if i.exists())
 
 
+def _file_identity(path: Path) -> dict[str, Any]:
+    """Content identity used by stage manifests (missing files are explicit)."""
+    path = Path(path)
+    if not path.exists():
+        return {"path": str(path), "exists": False}
+    digest = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            digest.update(chunk)
+    stat = path.stat()
+    return {"path": str(path), "exists": True, "size": stat.st_size,
+            "sha256": digest.hexdigest()}
+
+
+def _stage_signature(name: str, inputs: list[Path], settings: dict[str, Any]) -> dict:
+    return {"version": 1, "stage": name,
+            "inputs": [_file_identity(path) for path in inputs], "settings": settings}
+
+
+def _stage_manifest_path(output: Path) -> Path:
+    return output.with_name(f"{output.name}.stage.json")
+
+
+def _stage_is_current(output: Path, signature: dict) -> bool:
+    manifest = _stage_manifest_path(output)
+    if not output.exists() or not manifest.exists():
+        return False
+    try:
+        return json.loads(manifest.read_text(encoding="utf-8")) == signature
+    except (OSError, json.JSONDecodeError):
+        return False
+
+
+def _write_stage_manifest(output: Path, signature: dict) -> None:
+    manifest = _stage_manifest_path(output)
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = manifest.with_name(f".{manifest.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(signature, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, manifest)
+
+
 def _stage_enabled(stage: str, from_stage: str | None, force: bool) -> bool:
     """Whether a stage must run because of ``--force`` / ``--from-stage``."""
     if force:
@@ -146,15 +189,20 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
     cfg = config.graph_config()
     stages: list[dict[str, Any]] = []
 
-    def _run_stage(name: str, output: Path, inputs: list[Path], fn: Callable[[], Any]) -> Any:
-        """Run a stage unless its output is fresh (and not forced); time + log it."""
+    def _run_stage(name: str, output: Path, inputs: list[Path],
+                   settings: dict[str, Any], fn: Callable[[], Any]) -> Any:
+        """Run unless output has an exact input/config content signature."""
         forced = _stage_enabled(name, from_stage, force)
-        if not forced and _fresh(output, *inputs):
-            log.info("[%s] skip '%s' — %s is fresh", name.upper(), config.aoi, output.name)
-            stages.append({"stage": name, "ran": False, "reason": "fresh", "seconds": 0.0})
+        signature = _stage_signature(name, inputs, settings)
+        if not forced and _stage_is_current(output, signature):
+            log.info("[%s] skip '%s' — %s signature matches", name.upper(), config.aoi, output.name)
+            stages.append({"stage": name, "ran": False, "reason": "signature-match", "seconds": 0.0})
             return None
         t0 = time.perf_counter()
         result = fn()
+        # Recompute after the stage because upstream callbacks may create inputs
+        # (notably injected test segmenters); persist only a completed run.
+        _write_stage_manifest(output, _stage_signature(name, inputs, settings))
         dt = round(time.perf_counter() - t0, 3)
         log.info("[%s] done in %ss", name.upper(), dt)
         stages.append({"stage": name, "ran": True, "seconds": dt})
@@ -173,14 +221,23 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
                           pp_open_radius=config.pp_open_radius, pp_close_radius=config.pp_close_radius,
                           fill_holes=config.fill_holes)
 
-    p1_result = _run_stage("p1", mask_path, [], _p1)
+    p1_inputs = [Path(config.image or image_path), Path(config.checkpoint or checkpoint)]
+    p1_settings = {key: getattr(config, key) for key in (
+        "tile_size", "threshold", "device", "tta", "blend", "postprocess",
+        "min_component_size", "pp_open_radius", "pp_close_radius", "fill_holes")}
+    p1_result = _run_stage("p1", mask_path, p1_inputs, p1_settings, _p1)
     coverage = p1_result[1] if p1_result is not None else None
 
     # P2 — mask → healed routable graph
     def _p2() -> Any:
         return build_graph(cfg)
 
-    _run_stage("p2", cfg.graphml_path, [mask_path], _p2)
+    p2_inputs = [mask_path, cfg.manifest_path, cfg.prob_path, cfg.provenance_path]
+    p2_settings = {key: getattr(config, key) for key in (
+        "resolution_m", "gap_max_m", "angle_max_deg", "angle_penalty_factor", "min_edge_len_m",
+        "simplify", "min_stub_len_m", "consolidate", "consolidate_tol_m",
+        "simplify_geom", "geom_tol_m", "min_corridor_support", "corridor_samples")}
+    _run_stage("p2", cfg.graphml_path, p2_inputs, p2_settings, _p2)
 
     # Copy the P1 provenance next to the processed artifacts (best-effort).
     from src.pipeline.p1_segment.provenance import read_provenance, write_provenance
@@ -193,7 +250,7 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
         return analyze(cfg, curve_steps=config.curve_steps)
 
     analysis = _run_stage("p3", cfg.processed_dir / f"{config.aoi}_criticality.csv",
-                          [cfg.graphml_path], _p3)
+                          [cfg.graphml_path], {"curve_steps": config.curve_steps}, _p3)
 
     # P4 — dashboard contract check (fail-loud)
     graph = _load_graph_for_summary(cfg)

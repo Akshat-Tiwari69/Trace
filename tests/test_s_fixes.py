@@ -196,3 +196,18 @@ def test_foreground_bias_validation():
 
     with pytest.raises(ValueError, match="foreground_bias"):
         RoadTileDataset([("a", "b")], foreground_bias=1.5)
+
+
+def test_geographic_raster_transform_is_converted_to_metres():
+    from affine import Affine
+
+    from src.pipeline.p2_graph.skeleton_graph import ensure_metric_transform
+
+    geographic = Affine(1e-5, 0.0, 72.8, 0.0, -1e-5, 19.1)
+    metric, metric_crs = ensure_metric_transform(
+        geographic, "EPSG:4326", width=100, height=100)
+    x0, y0 = metric * (50, 50)
+    x1, y1 = metric * (51, 50)
+    pixel_m = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+    assert 0.8 < pixel_m < 1.3
+    assert metric_crs.is_projected

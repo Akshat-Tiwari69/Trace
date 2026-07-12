@@ -84,14 +84,14 @@ def paired_bootstrap_ci(
 
     alpha = 1.0 - ci_level
     ci_low, ci_high = np.quantile(boot_means, [alpha / 2, 1 - alpha / 2])
-    # Two-sided bootstrap p-value: how often the resampled mean lands on the
-    # opposite side of 0 from the observed delta (doubled). Clamped to [0, 1].
+    # Valid paired randomization p-value under H0: each paired difference is
+    # exchangeable in sign. The bootstrap distribution is for the CI only; using
+    # its uncentred mass across zero as a p-value is not a null test.
     observed = float(diffs.mean())
-    if observed >= 0:
-        p = 2.0 * float(np.mean(boot_means <= 0.0))
-    else:
-        p = 2.0 * float(np.mean(boot_means >= 0.0))
-    p = min(1.0, p)
+    signs = rng.choice((-1.0, 1.0), size=(n_boot, n))
+    null_means = (diffs * signs).mean(axis=1)
+    p = float((np.count_nonzero(np.abs(null_means) >= abs(observed)) + 1) /
+              (n_boot + 1))
 
     return BootstrapCI(
         delta=observed,

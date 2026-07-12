@@ -20,7 +20,7 @@ import csv
 from pathlib import Path
 
 from src.pipeline.p2_graph.config import GraphConfig
-from src.pipeline.p2_graph.graph_io import atomic_write, load_graphml, save_geojson
+from src.pipeline.p2_graph.graph_io import atomic_write, load_graphml, save_geojson, save_graphml
 from src.pipeline.p3_analysis.criticality import (
     annotate_criticality,
     annotate_cut_structure,
@@ -92,7 +92,9 @@ def analyze(
     resilience_path = cfg.processed_dir / f"{cfg.aoi}_resilience.csv"
     _write_csv(curve_rows, resilience_path)
 
-    # Refresh the GeoJSON so nodes now carry betweenness/is_critical for the map.
+    # Refresh both canonical graph artifacts so P3 annotations are not present in
+    # GeoJSON while silently absent from the lossless GraphML contract.
+    save_graphml(graph, cfg.graphml_path)
     save_geojson(graph, cfg.geojson_path)
 
     top = rows[0] if rows else {"node_id": None, "betweenness": 0.0}

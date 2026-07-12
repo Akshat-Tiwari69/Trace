@@ -187,10 +187,9 @@ def load_geojson_graph(path: Path) -> "nx.MultiGraph":
     The inverse of :func:`graph_to_geojson`: node Point features restore
     ``x, y, degree, type, betweenness, is_critical``; edge LineString features
     restore ``length_m, is_bridged, edge_betweenness`` (and ``width_m`` /
-    ``confidence`` when present). Returns a **MultiGraph** so parallel branches
-    (loops, dual carriageways) keep their own keyed edges — the GeoJSON
-    ``edge_key`` property is informational; NetworkX re-keys by insertion order
-    on ``add_edge``, which matches the writer's order. Lets the committed
+    ``confidence`` when present), including the LineString geometry. Returns a
+    **MultiGraph** so parallel branches keep their persisted ``edge_key`` values.
+    Lets the committed
     ``data/sample/`` GeoJSON be re-analysed without the (gitignored) GraphML.
     """
     import networkx as nx
@@ -218,6 +217,7 @@ def load_geojson_graph(path: Path) -> "nx.MultiGraph":
         if props.get("feature_type") == "edge":
             attrs = dict(
                 length_m=float(props.get("length_m", 0.0)),
+                geometry=feat["geometry"]["coordinates"],
                 is_bridged=bool(props.get("is_bridged", False)),
                 is_bridge=bool(props.get("is_bridge", False)),
                 edge_betweenness=float(props.get("edge_betweenness", 0.0)),
@@ -226,6 +226,7 @@ def load_geojson_graph(path: Path) -> "nx.MultiGraph":
                 attrs["width_m"] = float(props["width_m"])
             if props.get("confidence") is not None:  # optional mean prob (A37)
                 attrs["confidence"] = float(props["confidence"])
-            graph.add_edge(int(props["u"]), int(props["v"]), **attrs)
+            graph.add_edge(int(props["u"]), int(props["v"]),
+                           key=int(props.get("edge_key", 0)), **attrs)
     _validate_edge_lengths(graph, Path(path))
     return graph

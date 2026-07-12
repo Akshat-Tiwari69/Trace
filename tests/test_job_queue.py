@@ -9,6 +9,7 @@ data/outputs/upload_jobs/.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import os
 
 import numpy as np
 import pytest
@@ -98,6 +99,25 @@ def test_recover_stale_running_requeues():
     # And it's processable again afterwards.
     assert job_queue._process_one() is True
     assert job_queue.status(job_id)["status"] == "done"
+
+
+def test_live_lease_is_not_recovered_or_double_claimed():
+    job_id = job_queue.submit(_grid_mask(), resolution_m=0.5)
+    state = job_queue.status(job_id)
+    state.update({
+        "status": "running",
+        "started_utc": job_queue._now(),
+        "owner_pid": os.getpid(),
+        "lease_expires_utc": (
+            datetime.now(timezone.utc) + timedelta(minutes=5)
+        ).isoformat(timespec="seconds"),
+    })
+    job_queue._write_state(job_id, state)
+    job_queue._claim_path(job_id).touch()
+
+    assert job_queue._recover_stale_running() == 0
+    assert job_queue.status(job_id)["status"] == "running"
+    assert job_queue._process_one() is False
 
 
 def test_cleanup_removes_old_files():

@@ -1,9 +1,9 @@
 # Deploying the Route Resilience dashboard (Oracle Always-Free ARM)
 
-Public dashboard on the free Oracle box. **Dashboard only** — it reads precomputed
-`data/sample/` artifacts and never loads the model, so it needs only the slim
-`requirements-app.txt` (no torch/rasterio/osmnx). Heavy model inference lives
-elsewhere (see "Model inference" below).
+Public dashboard on the free Oracle box. It reads precomputed `data/sample/`
+artifacts and runs CPU mask-to-graph/resilience analysis for uploaded masks, so
+`requirements-app.txt` includes the minimal P2/P3 stack but not Torch or the
+segmentation model. Heavy model inference lives elsewhere (see below).
 
 Target box: Ubuntu 24.04 aarch64, user `ubuntu`. Runs as a **user** systemd service
 (lingering already enabled) — no root needed except the one-time Caddy/journald setup.
@@ -16,14 +16,16 @@ sudo apt-get update && sudo apt-get install -y python3.12-venv
 
 # 1. clone (public repo) + pick the deployed branch
 git clone https://github.com/Akshat-Tiwari69/Trace.git ~/Trace
-cd ~/Trace && git checkout dev          # or the release branch you deploy from
+cd ~/Trace && git checkout v1.0.0       # use the approved immutable release tag
 
 # 2. slim venv
 python3 -m venv .venv
 ./.venv/bin/pip install -U pip
 ./.venv/bin/pip install -r deploy/requirements-app.txt
 
-# 3. install the user services (dashboard + auto-update timer)
+# 3. pin the immutable release ref and install the user services
+mkdir -p ~/.config/roadresilience
+printf 'DEPLOY_REF=v1.0.0\n' > ~/.config/roadresilience/deploy.env
 mkdir -p ~/.config/systemd/user
 cp deploy/roadresilience.service          ~/.config/systemd/user/
 cp deploy/roadresilience-update.service   ~/.config/systemd/user/
@@ -95,12 +97,10 @@ It then polls `http://127.0.0.1:8501/_stcore/health` for ~30 s; **on failure it
 rolls back** to the previous commit, reinstalls deps, restarts again, and logs
 loudly to the journal.
 
-- Default deploy target = upstream of the checked-out branch (`dev`; set upstream
-  so `@{u}` resolves).
-- **`DEPLOY_REF`** (optional env var for `update.sh`): deploy a specific branch or
-  **tag** instead — e.g. `DEPLOY_REF=v1.0.0` — the path to pinned, tag-based
-  deploys. Set it via a systemd drop-in on `roadresilience-update.service`
-  (`Environment=DEPLOY_REF=v1.0.0`) or when invoking the script manually.
+- **`DEPLOY_REF` is required** and should name an immutable approved release tag
+  (for example `v1.0.0`). Put it in
+  `~/.config/roadresilience/deploy.env`; the updater refuses to deploy when it is
+  absent, preventing accidental raw-`dev` production releases.
 - Want *instant* deploys instead of ~2-min polling? Add a GitHub Actions job that
   SSHes in and runs `deploy/update.sh` on push (uses the already-open port 22).
 

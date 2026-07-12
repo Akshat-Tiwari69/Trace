@@ -40,3 +40,33 @@ jobs:
         # src/app/app.py keeps all Streamlit calls inside main(), so a bare
         # import must succeed without a Streamlit runtime.
         run: python -c "import src.app.app"
+
+  production-upload-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: deploy/requirements-app.txt
+      - name: Install production-only dependencies
+        run: |
+          python -m pip install -U pip
+          pip install -r deploy/requirements-app.txt
+      - name: Exercise upload mask-to-resilience path
+        run: |
+          python - <<'PY'
+          import numpy as np
+          from src.app.upload_analysis import analyze_mask
+          mask = np.zeros((128, 128), dtype=np.uint8)
+          mask[31:34, 8:120] = 1
+          mask[63:66, 8:120] = 1
+          mask[95:98, 8:120] = 1
+          mask[8:120, 31:34] = 1
+          mask[8:120, 63:66] = 1
+          mask[8:120, 95:98] = 1
+          result = analyze_mask(mask, resolution_m=0.5)
+          assert result.n_nodes > 1 and result.n_edges > 0
+          PY

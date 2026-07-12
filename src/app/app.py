@@ -1365,7 +1365,7 @@ def log_event(event: str, **fields: object) -> None:
 
 
 MODAL_SEG_URL = os.environ.get("MODAL_SEG_URL")
-MAX_UPLOAD_MB = 20  # keep in sync with [server] maxUploadSize in .streamlit/config.toml
+MAX_UPLOAD_MB = 11  # source bytes; base64 transport expands this to ~14.7 MiB
 UPLOAD_GUIDANCE = (
     "Runs the deployed SegFormer model on a serverless T4 (Modal). The first "
     "call after idle takes ~30 s to warm up; subsequent calls are near-instant. "

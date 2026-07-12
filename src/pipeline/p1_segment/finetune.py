@@ -183,13 +183,21 @@ def finetune(cfg: FineTuneConfig) -> dict:
     the optimizer/scaler/epoch/best/history — instead of from ``init_checkpoint``
     at epoch 1, so an interrupted run continues rather than warm-restarting.
     """
+    random.seed(cfg.seed)
+    np.random.seed(cfg.seed)
     torch.manual_seed(cfg.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(cfg.seed)
     init_from = cfg.resume if cfg.resume else cfg.init_checkpoint
     model, meta = load_checkpoint(init_from, map_location=cfg.device)
     model = model.to(cfg.device)
     thr = float(meta.get("threshold", 0.5))
 
     train_pairs, indian_val, deepglobe_val = gather_pairs(cfg)
+    if not deepglobe_val:
+        raise ValueError(
+            "DeepGlobe anchor/forget-check is required; provide deepglobe_dir "
+            "instead of allowing the release gate to pass open")
     resume_state = load_train_state(cfg.resume, map_location=cfg.device) if cfg.resume else None
     if resume_state:  # keep the v1 anchor (keep_floor) fixed — model here is already fine-tuned
         base_dg, base_ind = resume_state["v1_deepglobe"], resume_state["v1_indian"]
@@ -224,7 +232,7 @@ def finetune(cfg: FineTuneConfig) -> dict:
         start_epoch = resume_state["epoch"] + 1
         print(f"resumed from {cfg.resume} @ epoch {resume_state['epoch']} -> starting epoch {start_epoch}",
               flush=True)
-    keep_floor = (base_dg - cfg.deepglobe_iou_tolerance) if deepglobe_val else -1.0
+    keep_floor = base_dg - cfg.deepglobe_iou_tolerance
     for epoch in range(start_epoch, cfg.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, cfg.device, scaler)
         ind_iou = _iou_on_pairs(model, indian_val, cfg.image_size, cfg.device, thr)
@@ -232,7 +240,7 @@ def finetune(cfg: FineTuneConfig) -> dict:
         # A24: track the Cartosat-PAN (grayscale) gap on the Indian val each epoch.
         gray_iou = (_iou_on_pairs(model, indian_val, cfg.image_size, cfg.device, thr, grayscale=True)
                     if cfg.grayscale_p > 0 else float("nan"))
-        keeps_dg = (not deepglobe_val) or (dg_iou >= keep_floor)
+        keeps_dg = dg_iou >= keep_floor
         score = ind_iou if keeps_dg else -1e9
         row = {"epoch": epoch, "train_loss": train_loss, "indian_iou": ind_iou,
                "deepglobe_iou": dg_iou, "indian_gray_iou": gray_iou, "keeps_deepglobe": keeps_dg}

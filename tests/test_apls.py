@@ -5,7 +5,7 @@ from __future__ import annotations
 import networkx as nx
 import pytest
 
-from src.pipeline.p3_analysis.apls import apls
+from src.pipeline.p3_analysis.apls import _densify, apls
 
 SPACING_DEG = 0.001          # ~111 m at the equator
 SEG_M = SPACING_DEG * 111_320.0
@@ -52,3 +52,26 @@ def test_apls_detour_scores_between_zero_and_one():
     prop.edges[1, 2]["length_m"] = SEG_M * 5
     result = apls(gt, prop, n_samples=200, tol_m=20.0)
     assert 0.0 < result["apls"] < 1.0
+
+
+def test_apls_penalizes_fragmented_identical_graph():
+    g = nx.Graph()
+    for i in range(20):
+        g.add_node(i, x=73.82 + i * SPACING_DEG, y=15.49)
+    g.add_edge(0, 1, length_m=SEG_M)
+    result = apls(g, g.copy(), n_samples=5000, interval_m=1000.0)
+    assert result["apls"] < 0.05
+    assert result["reachable_pair_fraction_gt"] == pytest.approx(2 / (20 * 19), abs=1e-4)
+
+
+def test_densify_follows_curved_edge_geometry():
+    g = nx.Graph()
+    g.add_node(0, x=0.0, y=0.0)
+    g.add_node(1, x=0.002, y=0.0)
+    g.add_edge(0, 1, length_m=200.0,
+               geometry=[[0.0, 0.0], [0.001, 0.001], [0.002, 0.0]])
+    dense = _densify(g, interval_m=100.0)
+    inserted = [d for n, d in dense.nodes(data=True) if n not in (0, 1)]
+    assert len(inserted) == 1
+    assert inserted[0]["x"] == pytest.approx(0.001)
+    assert inserted[0]["y"] == pytest.approx(0.001)

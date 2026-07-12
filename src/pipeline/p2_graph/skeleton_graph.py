@@ -34,6 +34,40 @@ TYPE_ENDPOINT = "endpoint"
 TYPE_BRIDGED = "bridged"
 
 
+def ensure_metric_transform(transform, crs, width: int, height: int):
+    """Return an affine/CRS pair whose world coordinates are metres.
+
+    Projected inputs pass through. Geographic rasters get a locally linearised
+    affine in their centre-point UTM zone, preventing degrees from being labelled
+    and pruned/healed as metres while preserving the source pixel grid.
+    """
+    if transform is None or crs is None:
+        return transform, crs
+
+    from affine import Affine
+    from pyproj import CRS, Transformer
+
+    source_crs = CRS.from_user_input(crs)
+    if not source_crs.is_geographic:
+        return transform, crs
+
+    cx, cy = width / 2.0, height / 2.0
+    sx, sy = transform * (cx, cy)
+    lon, lat = Transformer.from_crs(source_crs, 4326, always_xy=True).transform(sx, sy)
+    zone = max(1, min(60, int((lon + 180.0) // 6.0) + 1))
+    metric_crs = CRS.from_epsg((32600 if lat >= 0 else 32700) + zone)
+    project = Transformer.from_crs(source_crs, metric_crs, always_xy=True).transform
+
+    x0, y0 = project(*transform * (cx, cy))
+    xc, yc = project(*transform * (cx + 1.0, cy))
+    xr, yr = project(*transform * (cx, cy + 1.0))
+    a, d = xc - x0, yc - y0
+    b, e = xr - x0, yr - y0
+    metric_transform = Affine(a, b, x0 - a * cx - b * cy,
+                              d, e, y0 - d * cx - e * cy)
+    return metric_transform, metric_crs
+
+
 def mask_to_skeleton(mask01: np.ndarray) -> np.ndarray:
     """Thin a binary {0,1} road mask to a 1-px-wide skeleton (bool array)."""
     from skimage.morphology import skeletonize

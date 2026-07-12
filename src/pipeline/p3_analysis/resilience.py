@@ -56,20 +56,12 @@ def global_efficiency(
     """
     import networkx as nx
 
-    from src.pipeline.p3_analysis.criticality import auto_k
-
     if k is not None and k <= 0:
         raise ValueError("k must be a positive sample size (or None for exact)")
 
     n = graph.number_of_nodes()
     if n < 2:
         return 0.0
-
-    # Auto-sample above the node threshold when the caller didn't fix sources/k,
-    # so a city-scale ablation click stays responsive (bugs.md §4). Small graphs
-    # (the committed demo) stay exact, so their numbers never drift.
-    if sources is None:
-        k = auto_k(graph, k)
 
     nodes = list(graph.nodes)
     if sources is not None:
@@ -124,7 +116,18 @@ def resilience_index(
         )
 
     perturbed = graph.copy()
-    perturbed.remove_nodes_from(removed_nodes)
+    # Keep the baseline node universe and isolate failed nodes. This preserves the
+    # N(N-1) normaliser and makes removed nodes contribute unreachable pairs,
+    # rather than shrinking the denominator and allowing RI > 1.
+    failed_edges = []
+    for node in removed_nodes:
+        if not perturbed.has_node(node):
+            continue
+        if perturbed.is_multigraph():
+            failed_edges.extend(perturbed.edges(node, keys=True))
+        else:
+            failed_edges.extend(perturbed.edges(node))
+    perturbed.remove_edges_from(failed_edges)
     eff = global_efficiency(perturbed, weight, k=k)
 
     ri = eff / base
@@ -242,7 +245,7 @@ def ablation_curve(
     working = graph.copy()
     for i, node in enumerate(sequence, start=1):
         working.remove_node(node)
-        eff = global_efficiency(working, weight, k=k)
+        eff = _efficiency(working)
         curve.append(
             AblationPoint(
                 n_removed=i,
