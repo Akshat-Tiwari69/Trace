@@ -30,6 +30,7 @@ import argparse
 import dataclasses
 import functools
 import random
+import re
 from pathlib import Path
 
 import numpy as np
@@ -81,15 +82,24 @@ class FineTuneConfig:
 
 
 def gather_pairs(cfg: FineTuneConfig) -> tuple[list, list, list]:
-    """Build (train, indian_val, deepglobe_val). Val sets are disjoint from train."""
+    """Build train/validation sets, keeping sibling SpaceNet tiles together."""
     rng = random.Random(cfg.seed)
     indian = list(cfg.finetune_pairs) if cfg.finetune_pairs is not None else pair_deepglobe(cfg.finetune_dir)
     if not indian:
         raise SystemExit(f"no DeepGlobe-format pairs in {cfg.finetune_dir} — run build_finetune_data first.")
-    rng.shuffle(indian)
-    n_val = max(1, round(len(indian) * cfg.val_fraction))
-    indian_val = indian[:n_val]
-    train = indian[n_val:] * cfg.finetune_oversample
+    groups: dict[str, list] = {}
+    for pair in indian:
+        name = Path(pair[0]).name
+        match = re.search(r"(chip\d+)", name)
+        group = match.group(1) if match else Path(name).stem.removesuffix("_sat")
+        groups.setdefault(group, []).append(pair)
+    group_ids = sorted(groups)
+    rng.shuffle(group_ids)
+    n_val_groups = max(1, round(len(group_ids) * cfg.val_fraction))
+    val_groups = set(group_ids[:n_val_groups])
+    indian_val = [pair for group in group_ids if group in val_groups for pair in groups[group]]
+    indian_train = [pair for group in group_ids if group not in val_groups for pair in groups[group]]
+    train = indian_train * cfg.finetune_oversample
 
     deepglobe_val: list = []
     if cfg.deepglobe_dir:
@@ -209,12 +219,16 @@ def finetune(cfg: FineTuneConfig) -> dict:
           f"encoder {'FROZEN' if frozen else f'lr×{cfg.encoder_lr_scale}'} | "
           f"train {len(train_pairs)} (anchor incl.) | val dg {len(deepglobe_val)}/ind {len(indian_val)}")
 
+    loader_generator = torch.Generator()
+    loader_generator.manual_seed(cfg.seed)
+    if resume_state and resume_state.get("loader_rng_state") is not None:
+        loader_generator.set_state(resume_state["loader_rng_state"].cpu())
     train_ds = RoadTileDataset(train_pairs, build_train_transform(cfg.image_size, occlusion=cfg.occlusion,
                                                                   grayscale_p=cfg.grayscale_p),
                                crops_per_image=cfg.crops_per_image,
                                foreground_bias=cfg.foreground_bias)
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True,
-                              num_workers=cfg.num_workers)
+                              num_workers=cfg.num_workers, generator=loader_generator)
     loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=cfg.cldice_weight,
                        sdt_bce_weight=cfg.sdt_bce_weight)
     optimizer = _build_optimizer(model, cfg)
@@ -229,6 +243,20 @@ def finetune(cfg: FineTuneConfig) -> dict:
         best_score, best_row = resume_state["best_score"], resume_state["best_row"]
         history = list(resume_state["history"])
         torch.set_rng_state(resume_state["rng_state"].cpu())
+        if resume_state.get("python_rng_state") is not None:
+            py_state = resume_state["python_rng_state"]
+            random.setstate((int(py_state[0]), tuple(py_state[1]), py_state[2]))
+        if resume_state.get("numpy_rng_state") is not None:
+            np_state = resume_state["numpy_rng_state"]
+            np.random.set_state((
+                np_state["name"],
+                np.asarray(np_state["keys"], dtype=np.uint32),
+                int(np_state["pos"]),
+                int(np_state["has_gauss"]),
+                float(np_state["cached_gaussian"]),
+            ))
+        if torch.cuda.is_available() and resume_state.get("cuda_rng_states") is not None:
+            torch.cuda.set_rng_state_all(resume_state["cuda_rng_states"])
         start_epoch = resume_state["epoch"] + 1
         print(f"resumed from {cfg.resume} @ epoch {resume_state['epoch']} -> starting epoch {start_epoch}",
               flush=True)
@@ -269,6 +297,16 @@ def finetune(cfg: FineTuneConfig) -> dict:
             "optimizer": optimizer.state_dict(), "scaler": scaler.state_dict(), "epoch": epoch,
             "best_score": best_score, "best_row": best_row, "history": history,
             "rng_state": torch.get_rng_state(), "v1_deepglobe": base_dg, "v1_indian": base_ind,
+            "loader_rng_state": loader_generator.get_state(),
+            "python_rng_state": list(random.getstate()),
+            "numpy_rng_state": {
+                "name": np.random.get_state()[0],
+                "keys": np.random.get_state()[1].tolist(),
+                "pos": int(np.random.get_state()[2]),
+                "has_gauss": int(np.random.get_state()[3]),
+                "cached_gaussian": float(np.random.get_state()[4]),
+            },
+            "cuda_rng_states": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
         })
 
     if best_row is None:
