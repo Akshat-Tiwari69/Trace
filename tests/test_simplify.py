@@ -43,6 +43,18 @@ def test_collapse_merges_degree2_chain():
     assert g.edges[0, 2]["is_bridged"] is True   # bridged flag carried through (OR)
 
 
+def test_collapse_preserves_length_weighted_width_and_confidence():
+    g = nx.Graph()
+    _edge(g, 0, (0, 0), 1, (10, 0))
+    _edge(g, 1, (10, 0), 2, (30, 0))
+    g.edges[0, 1].update(width_m=4.0, confidence=0.9)
+    g.edges[1, 2].update(width_m=10.0, confidence=0.3)
+
+    assert collapse_degree2_nodes(g) == 1
+    assert g.edges[0, 2]["width_m"] == pytest.approx(8.0)
+    assert g.edges[0, 2]["confidence"] == pytest.approx(0.5)
+
+
 def test_collapse_collapses_whole_chain():
     g = nx.Graph()
     for i in range(5):                            # 0—1—2—3—4 straight chain
@@ -142,6 +154,23 @@ def test_consolidate_merges_near_duplicate_junction():
     assert 1 not in g.nodes                  # 1 merged into 0
     assert set(g.neighbors(0)) == {2, 3}     # both external edges rewired to keeper
     assert nx.is_connected(g)
+
+
+def test_consolidate_snaps_rewired_geometries_to_new_centroid():
+    g = nx.Graph()
+    _edge(g, 0, (0, 0), 1, (2, 0))
+    _edge(g, 0, (0, 0), 2, (-10, 0))
+    _edge(g, 1, (2, 0), 3, (12, 0))
+
+    assert consolidate_nearby_nodes(g, tol_m=5.0) == 1
+    assert (g.nodes[0]["x"], g.nodes[0]["y"]) == pytest.approx((1.0, 0.0))
+    for other in (2, 3):
+        geom = g.edges[0, other]["geometry"]
+        endpoint_distances = [
+            ((p[0] - 1.0) ** 2 + p[1] ** 2) ** 0.5 for p in (geom[0], geom[-1])
+        ]
+        assert min(endpoint_distances) == pytest.approx(0.0)
+        assert g.edges[0, other]["length_m"] == pytest.approx(11.0)
 
 
 def test_consolidate_overpass_guard():
