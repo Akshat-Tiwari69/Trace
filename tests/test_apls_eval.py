@@ -18,6 +18,16 @@ def test_mask_to_apls_graph_has_nodes_and_edges():
     assert all(abs(d["x"]) < 1 and abs(d["y"]) < 1 for _, d in g.nodes(data=True))
 
 
+def test_mask_to_apls_graph_respects_configured_gsd():
+    half_m = mask_to_apls_graph(_cross(), gsd_m=0.5)
+    two_m = mask_to_apls_graph(_cross(), gsd_m=2.0)
+    assert math.isclose(
+        sum(d["length_m"] for *_, d in two_m.edges(data=True)),
+        4 * sum(d["length_m"] for *_, d in half_m.edges(data=True)),
+        rel_tol=1e-9,
+    )
+
+
 def test_identical_masks_score_near_one():
     m = _cross()
     assert tile_apls(m, m, n_samples=100) >= 0.95
