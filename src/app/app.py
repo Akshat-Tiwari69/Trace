@@ -1,6 +1,5 @@
 """Interactive Streamlit dashboard for road-network resilience."""
 
-import base64
 from dataclasses import dataclass
 import hashlib
 import io
@@ -10,10 +9,8 @@ import logging
 from math import inf, isfinite
 import os
 from pathlib import Path
-import threading
 import time
 import urllib.error
-import urllib.request
 
 import branca.colormap as cm
 import folium
@@ -28,6 +25,11 @@ matplotlib.use("Agg")
 from matplotlib.figure import Figure
 from PIL import Image
 
+from src.app.modal_client import (
+    MODAL_SEG_URL,
+    EndpointBusyError,
+    call as _call_modal_seg,
+)
 from src.pipeline.p3_analysis.resilience import resilience_index
 
 # Refuse to decode anything above 4096x4096 px (PIL decompression-bomb guard
@@ -1403,7 +1405,6 @@ def log_event(event: str, **fields: object) -> None:
     log.info("%s %s", event, extra)
 
 
-MODAL_SEG_URL = os.environ.get("MODAL_SEG_URL")
 MAX_UPLOAD_MB = 11  # source bytes; base64 transport expands this to ~14.7 MiB
 UPLOAD_GUIDANCE = (
     "Runs the deployed SegFormer model on a serverless T4 (Modal). The first "
@@ -1418,90 +1419,6 @@ UPLOAD_DISCLOSURE = (
     "not upload classified, restricted, personal, or otherwise sensitive "
     "imagery. For those datasets, run the local pipeline instead."
 )
-
-
-# Bound concurrent GPU calls so a burst of uploads can't pin every Streamlit
-# worker thread on a 120 s blocking request (bugs.md §5C). A cache hit never
-# reaches here, so only genuine inference calls consume a slot.
-_MODAL_MAX_INFLIGHT = 2
-_modal_semaphore = threading.BoundedSemaphore(_MODAL_MAX_INFLIGHT)
-
-
-class EndpointBusyError(RuntimeError):
-    """Raised when all in-flight GPU slots are taken (surface a 'retry' message)."""
-
-
-def _post_modal_once(body: bytes) -> dict:
-    """One POST to the Modal endpoint → parsed JSON (raises on transport/HTTP errors)."""
-    req = urllib.request.Request(
-        MODAL_SEG_URL, data=body,
-        headers={"Content-Type": "application/json",
-                 "X-API-Key": os.environ.get("MODAL_SEG_KEY", "")}
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        status = getattr(resp, "status", 200)
-        if status != 200:
-            raise RuntimeError(f"endpoint returned HTTP {status}")
-        raw = resp.read()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise RuntimeError("endpoint returned a non-JSON response") from error
-
-
-def _is_retryable(error: Exception) -> bool:
-    """Cold-start / transient failures are worth a retry; 4xx client errors are not."""
-    if isinstance(error, urllib.error.HTTPError):
-        return error.code >= 500  # 5xx transient; 401/413/etc. won't fix themselves
-    if isinstance(error, urllib.error.URLError):  # incl. socket timeout
-        return True
-    return False
-
-
-def _call_modal_seg(image_bytes: bytes, retries: int = 2) -> tuple[bytes, float | None]:
-    """POST an image to the Modal GPU endpoint; return (mask PNG bytes, threshold).
-
-    Retries transient/cold-start failures with a short backoff (a scaled-to-zero
-    container may 5xx or time out on the first hit), but never retries a 4xx —
-    those are deterministic (bad key, oversized image). Concurrency-bounded so
-    simultaneous uploads queue rather than starve the app (bugs.md §5C/§6).
-    """
-    body = json.dumps(
-        {
-            "image_b64": base64.b64encode(image_bytes).decode(),
-        }
-    ).encode()
-
-    if not _modal_semaphore.acquire(blocking=False):
-        raise EndpointBusyError(
-            "The GPU endpoint is busy with other requests — please retry in a moment."
-        )
-    try:
-        last: Exception | None = None
-        for attempt in range(retries + 1):
-            try:
-                out = _post_modal_once(body)
-                break
-            except Exception as error:  # noqa: BLE001 — classify, then retry or raise
-                last = error
-                if attempt < retries and _is_retryable(error):
-                    time.sleep(1.5 * (attempt + 1))  # linear backoff for a warming GPU
-                    continue
-                raise
-        else:  # pragma: no cover - loop always breaks or raises
-            raise last  # type: ignore[misc]
-    finally:
-        _modal_semaphore.release()
-
-    if "mask_png_b64" not in out:
-        raise RuntimeError(out.get("error", "unexpected response from endpoint"))
-    try:
-        mask_png = base64.b64decode(out["mask_png_b64"], validate=True)
-    except ValueError as error:  # binascii.Error subclasses ValueError
-        raise RuntimeError("endpoint returned an undecodable mask") from error
-    if not mask_png:
-        raise RuntimeError("endpoint returned an empty mask")
-    return mask_png, out.get("threshold")
 
 
 @st.cache_data(show_spinner=False, ttl=3600)

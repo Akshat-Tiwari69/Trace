@@ -14,7 +14,7 @@ def test_modal_client_sends_auth_header_outside_json(monkeypatch):
     """The shared key is authenticated before the server parses the body."""
     import json
 
-    from src.app import app
+    from src.app import modal_client
 
     captured = {}
 
@@ -36,11 +36,11 @@ def test_modal_client_sends_auth_header_outside_json(monkeypatch):
         return _Response()
 
     monkeypatch.setenv("MODAL_SEG_KEY", "test-secret")
-    monkeypatch.setattr(app, "MODAL_SEG_URL", "https://example.test/segment")
-    monkeypatch.setattr(app.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(modal_client, "MODAL_SEG_URL", "https://example.test/segment")
+    monkeypatch.setattr(modal_client.urllib.request, "urlopen", _urlopen)
     body = json.dumps({"image_b64": "AA=="}).encode()
 
-    app._post_modal_once(body)
+    modal_client.post_once(body)
 
     request = captured["request"]
     assert request.get_header("X-api-key") == "test-secret"
