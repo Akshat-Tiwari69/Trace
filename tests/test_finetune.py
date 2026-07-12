@@ -97,6 +97,10 @@ def test_finetune_selects_and_saves_releasable_checkpoint(tmp_path):
     model, meta = load_checkpoint(out)
     assert meta["encoder_frozen"] is True
     assert "indian_val_iou" in meta and "deepglobe_val_iou" in meta
+    assert meta["threshold"] in cfg.selection_thresholds
+    assert meta["threshold"] == summary["best"]["threshold"]
+    assert "deepglobe_delta_ci_low" in meta
+    assert "deepglobe_delta_ci_high" in meta
 
 
 def test_finetune_resume_continues_from_next_epoch(tmp_path):
