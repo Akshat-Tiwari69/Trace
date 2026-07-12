@@ -24,17 +24,19 @@
 
 Map-centric two-column layout: the **map ~65%** (left), a **control panel ~35%** (right). Key metrics (Resilience Index, travel-time impact) sit atop the panel; a persistent legend overlays the map bottom-left. On wide screens (1920×1080+) the map spans most of the viewport; on a laptop (1366×768) panels may stack **below** the map to stay readable.
 
-**How the dashboard fits the system (matches `TRD.md`):** the heavy work happens **offline** in the Python pipeline; the dashboard is a thin **read layer** over precomputed files. The only thing it computes live is the cheap node-ablation simulation.
+**How the dashboard fits the system (matches `TRD.md`):** the dashboard reads committed/precomputed artifacts for the demo path. For user imagery it sends source bytes to an authenticated Modal GPU endpoint for segmentation, then runs mask-to-graph/resilience analysis in the Oracle-hosted Streamlit process.
 
 ```mermaid
 flowchart LR
     IMG[Satellite imagery + OSM] --> PIPE[Offline Python pipeline<br/>segmentation -> graph -> criticality]
     PIPE -->|precomputed artifacts<br/>graph.graphml + criticality.csv| APP[Streamlit + Folium dashboard]
-    USER[User] -->|click a junction| APP
-    APP -->|in-process simulate_ablation| APP
+    USER[User] -->|click a junction or upload imagery| APP
+    APP -->|authenticated image request| MODAL[Modal GPU segmentation]
+    MODAL -->|road mask| APP
+    APP -->|in-process graph analysis + simulate_ablation| APP
 ```
 
-No separate backend service, database, REST API, or login in v1 — the dashboard reads files and calls an in-process function.
+There is no database, login system, or separately managed application backend in v1. The one network API is the shared-secret Modal segmentation endpoint; P2/P3 and simulations remain in-process.
 
 ## 4. Screens & Mockups
 
@@ -55,7 +57,7 @@ The panel shows the headline **Resilience Index** plus two charts: travel-time i
 Overlays the model-detected roads (thin lines) on the raw satellite image, with an opacity slider, so the team (or a curious user) can verify extraction quality and spot gaps. Mainly a debugging/transparency view.
 
 ### 4.5 Future screens *(out of v1 scope)*
-- **Disaster (flood-polygon) simulator:** draw a flood polygon; the map closes affected roads and shows rerouting. *Aspirational.*
+- **Disaster simulator:** shipped — draw a flood polygon or select affected junctions with the keyboard-accessible list; the map closes affected roads and shows resilience impact.
 - **Mobile companion:** a stripped-down map + current Resilience Index for field teams. *Out of v1 scope (PRD marks mobile out of scope); kept here as a future idea.*
 
 ## 5. Component Library
@@ -110,8 +112,8 @@ Follow cartographic good practice: Web Mercator (EPSG:3857) for city/regional sc
 ## 9. Implementation Notes
 
 - **Frontend (v1):** Streamlit + Folium (`streamlit-folium`); charts via Matplotlib or Plotly; `branca` for the colour legend. Consumes **precomputed GeoJSON + CSV** — deliver against sample/mock artifacts first, then wire to real outputs.
-- **No separate backend / DB / auth in v1** (see `TRD.md`): the pipeline is offline Python (PyTorch for segmentation, NetworkX for graph/criticality); the dashboard reads files and calls an in-process simulate function.
-- **Reproducibility:** optional `Dockerfile` + pinned deps so the app runs identically elsewhere; a free CPU host (Streamlit Community Cloud / Hugging Face Spaces) can serve the precomputed dashboard.
+- **Deployed services:** Oracle-hosted Streamlit + Caddy, with an authenticated Modal GPU endpoint for uploaded-image segmentation. No database or user-login system; graph analysis and simulation run in-process.
+- **Reproducibility:** pinned dependencies and CI cover both the full pytest suite and the production upload-analysis environment.
 - **Future option (not v1):** a React + deck.gl frontend with a FastAPI + PostGIS backend, only if the product outgrows Streamlit.
 
 ## 10. Timeline

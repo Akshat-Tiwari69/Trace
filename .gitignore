@@ -46,3 +46,8 @@ Thumbs.db
 *.stackdump
 .vscode/
 .idea/
+
+# Agent-local state and permissions (never project configuration)
+.claude/*.json
+!.claude/settings.json
+.tokensave/

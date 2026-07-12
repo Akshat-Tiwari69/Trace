@@ -37,7 +37,7 @@ Then, every session, in order:
 6. **Update this file:** flip the task status, add a one-line §10 daily-log entry. Keep task IDs stable.
 7. **If you must change a shared contract** (artifact format, a shared interface), STOP, warn the user, and update §4 explicitly — a silent contract change breaks someone else's work.
 
-**Hard "never" list:** violate §2 rules · edit another owner's files · invent results/metrics/citations · commit secrets or raw/restricted data · switch the resilience metric · introduce a database/auth/REST/JS-SPA.
+**Hard "never" list:** violate §2 rules · edit another owner's files · invent results/metrics/citations · commit secrets or raw/restricted data · switch the resilience metric · introduce a database/user-login/JS-SPA. The deployed shared-secret Modal inference endpoint is the documented exception to the original no-API prototype rule.
 
 **Warning templates (use verbatim-ish):**
 - *Out of lane:* "⚠️ That's **{Owner}'s** area (task **{ID}**, files `{path}`). I shouldn't modify it as **{You}**. Options: switch me to {Owner}, or I'll log this as a request for them in the Tracker."
@@ -48,7 +48,7 @@ Then, every session, in order:
 
 ## §2 · Ground Rules (non-negotiable — from `Rules.md`)
 
-- **Stack:** Streamlit + Folium, **pure Python**. ❌ no React/JS SPA · ❌ no database (file-based artifacts) · ❌ no REST API · ❌ no auth in v1.
+- **Stack:** Streamlit + Folium, **pure Python**. ❌ no React/JS SPA · ❌ no database (file-based artifacts) · ❌ no user-login system. The dashboard calls the authenticated Modal inference endpoint; P2/P3 remain in-process.
 - **ML:** **fine-tune pretrained models only** (no training from scratch). **PyTorch only** (not TensorFlow).
 - **Resilience Index = global efficiency** ratio (finite when the graph disconnects). ❌ never raw average-path-length ratio.
 - **Compute:** training is **hardware-agnostic via Colab/Kaggle** (or an optional local NVIDIA GPU); **graph + dashboard run on CPU**. No one remote-accesses anyone's machine.
@@ -236,7 +236,7 @@ flowchart TD
 |---|---|---|
 | Resilience Index = **global efficiency** | raw avg-path-length → ∞ when graph disconnects | 🔒 locked |
 | Frontend = **Streamlit + Folium** (pure Python) | team skill + CPU-friendly + fast to build | 🔒 locked |
-| **File-based** artifacts, no DB/auth/REST in v1 | single-machine, read-mostly; DB adds no value | 🔒 locked |
+| **File-based** artifacts, no DB/user-login in v1; Modal inference API allowed | single-machine, read-mostly P2/P3; uploaded imagery needs the deployed GPU boundary | 🔒 locked |
 | Segmentation = **fine-tune pretrained** only | fits compute budget; no time to train from scratch | 🔒 locked |
 | Training **hardware-agnostic** (Colab/Kaggle); **no remote access** | everyone runs the same; each sets up their own machine | 🔒 locked |
 | Repo kept **neutral/generic** | public-safe; no hackathon/hardware identity | 🔒 locked |
