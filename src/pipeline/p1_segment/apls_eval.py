@@ -31,6 +31,13 @@ _DEG_X = 111_320.0     # metres per degree lon near the equator
 _DEG_Y = 110_540.0     # metres per degree lat
 
 
+def _write_report(path: Path | str, report: dict) -> None:
+    """Write JSON after ensuring a caller-supplied output directory exists."""
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2))
+
+
 def mask_to_apls_graph(mask01: np.ndarray, gsd_m: float = GSD_M):
     """Skeletonise a binary mask into an apls-ready graph (metric length_m,
     node x,y rescaled to the degrees S7's apls projects back to metres)."""
@@ -120,6 +127,13 @@ def compare_checkpoints_apls(
     common = [t for t in a["per_tile"] if t in b["per_tile"]]
     scores_a = [a["per_tile"][t] for t in common]
     scores_b = [b["per_tile"][t] for t in common]
+    if not common:
+        return {
+            "checkpoint_a": a["checkpoint"], "checkpoint_b": b["checkpoint"],
+            "apls_a": a["apls_mean"], "apls_b": b["apls_mean"], "n_paired": 0,
+            "delta": None, "ci_low": None, "ci_high": None, "p_two_sided": None,
+            "excludes_zero": False, "verdict": "no paired tiles",
+        }
     ci = paired_bootstrap_ci(scores_a, scores_b)
     # ascii only: redirected stdout on Windows is cp1252 and dies on "→" —
     # this print crashed the A38 run AFTER the CI was computed (log 2026-07-09)
@@ -150,14 +164,14 @@ def main() -> None:
             raise SystemExit("--compare needs at least two --checkpoints (a then b)")
         rep = compare_checkpoints_apls(Path(args.checkpoints[0]), Path(args.checkpoints[1]),
                                        n_tiles=args.n_tiles, threshold=args.threshold, device=args.device)
-        Path(args.out).write_text(json.dumps(rep, indent=2)); print(f"-> {args.out}"); return
+        _write_report(args.out, rep); print(f"-> {args.out}"); return
 
     results = []
     for ckpt in args.checkpoints:
         r = apls_on_heldout(Path(ckpt), n_tiles=args.n_tiles, threshold=args.threshold, device=args.device)
         results.append(r)
         print(f"  {r['checkpoint']:42s} APLS {r['apls_mean']:.4f}  (n={r['n_scored']})", flush=True)
-    Path(args.out).write_text(json.dumps({"n_tiles": args.n_tiles, "models": results}, indent=2))
+    _write_report(args.out, {"n_tiles": args.n_tiles, "models": results})
     print(f"-> {args.out}")
 
 

@@ -29,6 +29,13 @@ DEFAULT_CORPUS = Path("data/raw/spacenet/dg_format")
 DEFAULT_MANIFEST = Path("data/sample/spacenet_mumbai_heldout_chips.json")
 
 
+def _write_report(path: Path | str, report: dict) -> None:
+    """Write JSON after ensuring a caller-supplied output directory exists."""
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2))
+
+
 def chip_of(name: str) -> str:
     """Return the SpaceNet chip id embedded in a tile name (e.g. ``chip12``)."""
     m = CHIP_RE.search(name)
@@ -286,17 +293,17 @@ def main() -> None:
     if args.honest_threshold:
         rep = honest_threshold_eval([Path(c) for c in args.checkpoints], Path(args.corpus), Path(args.manifest),
                                     image_size=args.image_size, device=args.device, grayscale=args.grayscale)
-        Path(args.out).write_text(json.dumps(rep, indent=2)); print(f"-> {args.out}"); return
+        _write_report(args.out, rep); print(f"-> {args.out}"); return
 
     if args.sweep:
         rep = threshold_sweep([Path(c) for c in args.checkpoints], Path(args.corpus), Path(args.manifest),
                               image_size=args.image_size, device=args.device, grayscale=args.grayscale)
-        Path(args.out).write_text(json.dumps(rep, indent=2)); print(f"-> {args.out}"); return
+        _write_report(args.out, rep); print(f"-> {args.out}"); return
 
     report = evaluate_checkpoints([Path(c) for c in args.checkpoints], Path(args.corpus),
                                   Path(args.manifest), args.threshold, args.image_size, args.device,
                                   grayscale=args.grayscale)
-    Path(args.out).write_text(json.dumps(report, indent=2))
+    _write_report(args.out, report)
     print(f"-> {args.out}")
 
 

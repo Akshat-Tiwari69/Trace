@@ -10,6 +10,7 @@ import networkx as nx
 
 from src.pipeline.p1_segment.apls_eval import _DEG_X, _DEG_Y
 from src.pipeline.p1_segment.chip_apls_eval import (
+    _native_coord_to_frame, _paired_comparison, _write_report,
     a18_pred_path, adj_to_apls_graph, chip_apls, coverage, strict_exit_code)
 from src.pipeline.p1_segment.stats import paired_bootstrap_ci
 
@@ -28,6 +29,13 @@ def test_horizontal_edge_uses_eff_x():
     g = adj_to_apls_graph({(0, 0): [(0, 5)]}, eff_x=2.0, eff_y=3.0)
     (u, v, d), = g.edges(data=True)
     assert abs(d["length_m"] - 10.0) < 1e-9         # 5 cols * eff_x=2
+
+
+def test_native_border_rounding_clamps_to_valid_frame():
+    assert _native_coord_to_frame(0) == 0
+    assert _native_coord_to_frame(1299) == 399
+    assert _native_coord_to_frame(1300) == 399
+    assert _native_coord_to_frame(-1) == 0
 
 
 def _square():
@@ -58,6 +66,20 @@ def test_bootstrap_sign_is_a18_minus_v32():
     a18 = [0.50, 0.52, 0.48, 0.51, 0.49]
     ci = paired_bootstrap_ci(v32, a18)
     assert ci.delta > 0 and ci.excludes_zero
+
+
+def test_exploratory_comparison_reports_zero_overlap_without_bootstrap():
+    rep = _paired_comparison(["a", "b"], {"a": 0.4}, {"b": 0.5}, False)
+    assert rep["n_paired"] == 0
+    assert rep["verdict"] == "no paired chips"
+    assert rep["delta_a18_minus_v32"] is None
+    assert not rep["excludes_zero"]
+
+
+def test_report_writer_creates_nested_parent(tmp_path):
+    out = tmp_path / "new" / "nested" / "report.json"
+    _write_report(out, {"ok": True})
+    assert out.is_file()
 
 
 def test_coverage_flags_missing_a18():

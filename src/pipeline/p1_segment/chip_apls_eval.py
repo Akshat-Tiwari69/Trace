@@ -63,6 +63,18 @@ V32_SCALE = 0.6    # native 1300 -> 780px (~0.5m, v3.2's deployed GSD)
 GATE_N_SAMPLES = 600   # apls sample count for a gate-grade score
 
 
+def _native_coord_to_frame(value: float) -> int:
+    """Round a native-chip coordinate into the closed 400px raster frame."""
+    return min(IMAGE_SIZE - 1, max(0, int(round(value * IMAGE_SIZE / NATIVE_PX))))
+
+
+def _write_report(path: Path | str, report: dict) -> None:
+    """Write JSON after ensuring a caller-supplied output directory exists."""
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(report, indent=2))
+
+
 def _chip_eff_xy(src) -> tuple[float, float]:
     """Anisotropic metres-per-pixel in the 400px frame: (eff_x [col], eff_y [row]).
 
@@ -120,8 +132,7 @@ def _geojson_adj(chip: str, transform) -> dict:
 
     def to_px(lon, lat):
         r, c = rowcol(transform, lon, lat)
-        return (int(round(r * IMAGE_SIZE / NATIVE_PX)),
-                int(round(c * IMAGE_SIZE / NATIVE_PX)))
+        return (_native_coord_to_frame(r), _native_coord_to_frame(c))
 
     for feat in gj.get("features", []):
         geom = feat.get("geometry") or {}
@@ -283,6 +294,27 @@ def coverage(scorable: list[str], v32_scores: dict, a18_scores: dict,
     }
 
 
+def _paired_comparison(scorable: list[str], v32_scores: dict[str, float],
+                       a18_scores: dict[str, float], coverage_complete: bool) -> dict:
+    """Build the paired A18-vs-v3.2 result, including an empty-overlap report."""
+    common = [c for c in scorable if c in v32_scores and c in a18_scores]
+    if not common:
+        return {"n_paired": 0, "coverage_complete": coverage_complete,
+                "delta_a18_minus_v32": None, "ci_low": None, "ci_high": None,
+                "p_two_sided": None, "excludes_zero": False,
+                "verdict": "no paired chips"}
+
+    from src.pipeline.p1_segment.stats import paired_bootstrap_ci
+    ci = paired_bootstrap_ci([v32_scores[c] for c in common],
+                             [a18_scores[c] for c in common])
+    print(f"  A18 vs v3.2 (chip-level, n={len(common)}, "
+          f"coverage_complete={coverage_complete}): {ci.summary()}", flush=True)
+    return {"n_paired": len(common), "coverage_complete": coverage_complete,
+            "delta_a18_minus_v32": ci.delta, "ci_low": ci.ci_low,
+            "ci_high": ci.ci_high, "p_two_sided": ci.p_two_sided,
+            "excludes_zero": ci.excludes_zero, "verdict": ci.verdict}
+
+
 def compare_on_chips(v32_ckpt: Path | None, a18_pred_dir: Path | None,
                      n_chips: int | None = None, threshold: float | None = None,
                      device: str = "cpu", seed: int = 7,
@@ -341,17 +373,8 @@ def compare_on_chips(v32_ckpt: Path | None, a18_pred_dir: Path | None,
             print(f"  GATE FAIL: {len(cov['missing_v32'])} v32 + "
                   f"{len(cov['missing_a18'])} a18 scorable chips missing", flush=True)
         else:
-            from src.pipeline.p1_segment.stats import paired_bootstrap_ci
-            common = [c for c in scorable if c in v32_scores and c in a18_scores]
-            a = [v32_scores[c] for c in common]
-            b = [a18_scores[c] for c in common]
-            ci = paired_bootstrap_ci(a, b)  # delta = b - a = A18 - v3.2
-            print(f"  A18 vs v3.2 (chip-level, n={len(common)}, "
-                  f"coverage_complete={cov['complete']}): {ci.summary()}", flush=True)
-            out["compare"] = {"n_paired": len(common), "coverage_complete": cov["complete"],
-                              "delta_a18_minus_v32": ci.delta, "ci_low": ci.ci_low,
-                              "ci_high": ci.ci_high, "p_two_sided": ci.p_two_sided,
-                              "excludes_zero": ci.excludes_zero, "verdict": ci.verdict}
+            out["compare"] = _paired_comparison(
+                scorable, v32_scores, a18_scores, cov["complete"])
     return out
 
 
@@ -422,7 +445,7 @@ def main() -> None:
         Path(args.a18_pred_dir) if args.a18_pred_dir else None,
         n_chips=args.n_chips, threshold=args.threshold, device=args.device,
         n_samples=args.n_samples, strict=args.strict)
-    Path(args.out).write_text(json.dumps(rep, indent=2))
+    _write_report(args.out, rep)
     print(f"-> {args.out}", flush=True)
     # Fail-loud for automation: a strict gate encodes promotion success in its exit
     # code (write JSON first). Exploratory (non-strict) runs always exit 0.
