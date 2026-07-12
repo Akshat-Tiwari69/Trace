@@ -2,7 +2,8 @@
 
 Runs the deployed SegFormer MiT-B3 + SCSE checkpoint (`road_pan.pt`, release
 a4-roadseg-v3.2) on a T4 that scales to zero. The dashboard POSTs a base64 image
-+ a shared key and gets back a base64 binary road-mask PNG. Only `model.py` is
+with the shared key in an HTTP header and gets back a base64 binary road-mask
+PNG. Only `model.py` is
 vendored (torch/smp/numpy only), so none of the repo's heavy geo `__init__` chain
 is pulled in. The auth key lives in a Modal Secret (`roadseg-key`, env
 `ROADSEG_KEY`) — never in the repo.
@@ -12,6 +13,7 @@ Deploy (from repo root, Modal authed):  modal deploy deploy/modal_app.py
 from __future__ import annotations
 
 import modal
+from fastapi import Request
 
 MODEL_URL = (
     "https://github.com/Akshat-Tiwari69/Trace/releases/download/"
@@ -131,8 +133,8 @@ class Segmenter:
         return out.getvalue()
 
     @modal.fastapi_endpoint(method="POST", docs=True)
-    def segment(self, item: dict):
-        """POST {"image_b64","key"} -> {"mask_png_b64","threshold"}.
+    async def segment(self, request: Request):
+        """POST {"image_b64"} with X-API-Key -> mask response.
 
         Real HTTP errors: 401 bad key, 400 missing/invalid image, 413 oversized.
         """
@@ -147,8 +149,15 @@ class Segmenter:
         expected_key = os.environ.get("ROADSEG_KEY", "")
         if not expected_key:
             raise HTTPException(status_code=503, detail="endpoint auth is not configured")
-        if not hmac.compare_digest(str(item.get("key", "")), expected_key):
+        if not hmac.compare_digest(request.headers.get("x-api-key", ""), expected_key):
             raise HTTPException(status_code=401, detail="unauthorized")
+
+        try:
+            item = await request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="invalid JSON") from exc
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="invalid JSON object")
 
         img_b64 = item.get("image_b64")
         if not img_b64 or not isinstance(img_b64, str):

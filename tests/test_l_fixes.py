@@ -10,6 +10,44 @@ import numpy as np
 import torch
 
 
+def test_modal_client_sends_auth_header_outside_json(monkeypatch):
+    """The shared key is authenticated before the server parses the body."""
+    import json
+
+    from src.app import app
+
+    captured = {}
+
+    class _Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"mask_png_b64":"AA==","threshold":0.5}'
+
+    def _urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setenv("MODAL_SEG_KEY", "test-secret")
+    monkeypatch.setattr(app, "MODAL_SEG_URL", "https://example.test/segment")
+    monkeypatch.setattr(app.urllib.request, "urlopen", _urlopen)
+    body = json.dumps({"image_b64": "AA=="}).encode()
+
+    app._post_modal_once(body)
+
+    request = captured["request"]
+    assert request.get_header("X-api-key") == "test-secret"
+    assert json.loads(request.data) == {"image_b64": "AA=="}
+    assert captured["timeout"] == 120
+
+
 # --------------------------------------------------------------------------- #
 # §5H — windowed reading + streamed inference for large rasters
 # --------------------------------------------------------------------------- #

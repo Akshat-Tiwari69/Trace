@@ -1388,7 +1388,9 @@ class EndpointBusyError(RuntimeError):
 def _post_modal_once(body: bytes) -> dict:
     """One POST to the Modal endpoint → parsed JSON (raises on transport/HTTP errors)."""
     req = urllib.request.Request(
-        MODAL_SEG_URL, data=body, headers={"Content-Type": "application/json"}
+        MODAL_SEG_URL, data=body,
+        headers={"Content-Type": "application/json",
+                 "X-API-Key": os.environ.get("MODAL_SEG_KEY", "")}
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
         status = getattr(resp, "status", 200)
@@ -1421,7 +1423,6 @@ def _call_modal_seg(image_bytes: bytes, retries: int = 2) -> tuple[bytes, float 
     body = json.dumps(
         {
             "image_b64": base64.b64encode(image_bytes).decode(),
-            "key": os.environ.get("MODAL_SEG_KEY", ""),
         }
     ).encode()
 
