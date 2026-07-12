@@ -1,118 +1,168 @@
-# SETUP.md — Environment Setup
+# SETUP.md — Development Environments
 
-> Get your machine ready to work on Route Resilience. **You do this yourself** — no one remote-accesses anyone's machine. Pick the path that matches your role; it takes ~15–20 minutes. If anything here is out of date, fix it and commit (this file is shared — note it in `Tracker.md` §10).
+> Use an isolated environment. CI targets Python 3.11; the Oracle application uses its own Python 3.12 venv. Do not mix this project with unrelated TensorFlow/Google/agent packages and then treat `pip check` conflicts as a project baseline.
 
-## Which path is mine?
+## Prerequisites
 
-| You are | What you run locally | Your path |
-|---|---|---|
-| **Saanvi** (dashboard) | Streamlit dashboard on CPU, off `data/sample/` | **Path A (CPU)** — done in 2 steps |
-| **Shaivi** (graph/resilience) | graph + analysis on CPU | **Path A (CPU)**. Optional **Path C** if you want to train locally on your GPU |
-| **Akshat** (ML) | data pipeline on CPU; training on cloud or local GPU | **Path A** + **Path B (cloud)**; optional local GPU |
-| **Anyone training** | the segmentation model | **Path B (Colab/Kaggle)** — works on any laptop |
-
----
-
-## 0 · Prerequisites (everyone)
-
-- **Python 3.10+** and **git**.
-- Clone the repo:
-  ```bash
-  git clone <repo-url> && cd <repo>
-  ```
-- Create an isolated environment (conda recommended because of GDAL — see the I-1 note):
-  ```bash
-  conda create -n routeres python=3.10 -y && conda activate routeres
-  # or: python -m venv .venv && source .venv/bin/activate   (Windows: .venv\Scripts\activate)
-  ```
-
-## Path A · CPU (Saanvi, Shaivi, and the base for everyone)
-
-This runs the dashboard and the whole graph/resilience pipeline — **no GPU needed.**
-
-**If you have conda** (recommended on Linux/macOS, or if pip's GDAL/rasterio wheels fail):
-```bash
-# GDAL/rasterio are the fussy ones — install via conda-forge FIRST (avoids the classic build errors)
-conda install -c conda-forge gdal rasterio geopandas -y
-# then the rest
-pip install -r requirements.txt
-```
-
-**If you don't have conda** (e.g. plain Windows + venv): prebuilt wheels for `rasterio`/`fiona`/`geopandas` are available on PyPI for common platforms, so plain pip usually works:
-```bash
-pip install -r requirements.txt
-```
-If pip fails to build `rasterio`/`fiona`/`GDAL` from source on your platform, install [Miniconda](https://docs.conda.io/en/latest/miniconda.html) and fall back to the conda-forge path above.
+- Git
+- Python **3.11** for development and CI parity
+- Optional NVIDIA GPU for training/heavy evaluation
+- No remote access to a teammate’s machine; each contributor uses these reproducible paths
 
 ```bash
-# CPU-only PyTorch (smaller, no CUDA): only needed if you run inference locally
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+git clone https://github.com/Akshat-Tiwari69/Trace.git
+cd Trace
+python -m venv .venv
 ```
-Verify:
+
+Activate it:
+
 ```bash
-python -c "import streamlit, folium, networkx, skimage, sknw, rasterio, osmnx; print('CPU env OK')"
+# Linux/macOS
+source .venv/bin/activate
+
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
 ```
-**Saanvi:** that's it — run the dashboard with `streamlit run src/app/app.py` (it reads `data/sample/`).
-**Shaivi:** that's it — your graph/resilience code (`src/pipeline/p2_graph/`, `p3_analysis/`) runs on this.
 
-## Path B · Cloud training (Colab / Kaggle — works on ANY laptop)
+Upgrade the installer consistently with CI:
 
-The **primary, hardware-agnostic** way to train. Same notebook for everyone.
-1. Open `notebooks/train_segmentation.ipynb` in **Google Colab** or **Kaggle**.
-2. Enable GPU: Colab → *Runtime → Change runtime type → GPU (T4)*; Kaggle → *Settings → Accelerator → **GPU T4×2***. **Avoid Kaggle P100** — our torch build silently fails on it (see `Tracker.md` §10); the API push also defaults to P100, so launch T4 from the Kaggle UI.
-3. Run all cells. The notebook installs its own deps, pulls the dataset, fine-tunes, and saves the checkpoint.
-4. **Save the checkpoint off-device** (Google Drive / Kaggle Dataset) — cloud sessions are wiped when they end.
-   - Kaggle free GPU: ~30 hrs/week, ≤9 hr/session. Colab free: a T4 with variable limits.
-
-## Path C · Local NVIDIA GPU (optional — Akshat's 3070 Ti, Shaivi's 5070)
-
-Only if you want faster local training. **Not required** — Path B covers training for everyone.
-
-**Check your GPU architecture matters here:**
-- **Ampere / Ada (e.g. RTX 30-series, 40-series):** standard install —
-  ```bash
-  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-  ```
-- **Blackwell / RTX 50-series (e.g. RTX 5070, compute capability sm_120):** you **must** use PyTorch ≥2.7 with CUDA 12.8, or the GPU is silently ignored —
-  ```bash
-  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-  ```
-
-Verify the GPU is actually seen:
 ```bash
-python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-', torch.cuda.get_device_capability(0) if torch.cuda.is_available() else '-')"
-# RTX 50-series should print: True ... (12, 0)
+python -m pip install --upgrade pip==24.2
 ```
-If it prints `False` or a `sm_120 not compatible` warning on a 50-series card, you're on the wrong wheel — reinstall with the **cu128** line above.
 
-**Laptop GPU tips:** use a cooling pad / performance power mode; keep tiles small (256²); checkpoint often so a thermal shutdown loses ≤1 epoch.
+## Path A — Sample dashboard and CPU upload analysis
 
----
+Use this when you need the app, sample graph or P2/P3 upload-analysis path but not P1 inference/training:
 
-## Datasets
+```bash
+python -m pip install -r deploy/requirements-app.txt
+python -c "import streamlit, folium, networkx, geopandas, skimage, sknw; print('app/graph env OK')"
+streamlit run src/app/app.py
+```
 
-Download pointers (sources, licenses, roles) are in `docs/Research.md` → *Dataset Analysis*. The data-pipeline + OSM→mask script (task **A3**) automates label generation. Do **not** commit raw imagery or checkpoints (they're `.gitignore`d); commit only the small `data/sample/` set.
+The committed Panaji sample works without a checkpoint, GPU, Modal URL or secret.
 
-## Run P1 inference (imagery → road mask)
+The **Your imagery** tab is enabled only when both `MODAL_SEG_URL` and `MODAL_SEG_KEY` are present in the environment. Local sample exploration remains available when they are absent.
 
-Once you have a trained checkpoint (grab the best one, `road_pan.pt`, from the [`a4-roadseg-v3.2` release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2), or train your own), turn an image into the road-mask artifact P2 consumes — runs on **CPU**, no GPU needed:
+## Path B — Full development on CPU
+
+Install the intended CPU Torch wheels **before** root requirements so `segmentation-models-pytorch` does not resolve an unintended default Torch build:
+
+```bash
+python -m pip install torch==2.4.1 torchvision==0.19.1 --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -r requirements.txt
+python -m pip check
+```
+
+This mirrors CI. Verify:
+
+```bash
+python -c "import torch, streamlit, rasterio, geopandas, osmnx, sknw; print('full CPU env OK', torch.__version__)"
+python -m pytest tests/ -q
+```
+
+PyPI wheels cover the supported rasterio/geopandas/pyogrio path on common Windows/macOS/Linux Python versions. If a platform tries to compile GDAL-family packages and fails, use a clean conda-forge Python 3.11 environment for the geospatial packages, then install the remaining requirements. Direct system GDAL installation is not the normal project path.
+
+## Path C — Local NVIDIA GPU
+
+Create a fresh Python 3.11 venv and use the current official [PyTorch installation selector](https://pytorch.org/get-started/locally/) or [official version matrix](https://pytorch.org/get-started/previous-versions/). Do not copy an old CUDA wheel URL from a log.
+
+As of July 2026, the project’s working local research environment used PyTorch `2.12.1+cu126`; official 2.12.1 wheels also include newer CUDA variants. For Blackwell-class GPUs, use the current official CUDA 13.x recommendation rather than the deprecated 12.8 path. Re-check the selector whenever PyTorch changes.
+
+After installing Torch/Torchvision from the chosen official index:
+
+```bash
+python -m pip install -r requirements.txt
+python -m pip check
+python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-')"
+```
+
+Do not proceed with a GPU experiment unless `torch.cuda.is_available()` is true and the device capability is supported by that wheel. Record Python, Torch, CUDA, device, config and Git commit with the experiment.
+
+## Path D — Colab or Kaggle
+
+Cloud GPU is the hardware-agnostic training path. Accelerator names, quotas and default images change, so verify them in the provider UI rather than relying on a fixed promise here.
+
+1. Start a GPU notebook/session and clone the reviewed branch/commit.
+2. Install the Torch build compatible with that runtime, then `requirements.txt`.
+3. Run the module/CLI recipe from `src/pipeline/p1_segment/`; notebooks should remain thin launchers over those modules.
+4. Save checkpoints, configs and result JSON outside ephemeral session storage.
+5. Record the exact runtime/package versions and source commit.
+
+`notebooks/train_segmentation.ipynb` preserves the historical v1 training path. Current v3.x fine-tuning uses `src.pipeline.p1_segment.finetune`; A46 graph-first experiments have their own tracked protocol in `Research.md`/`Evaluation.md`.
+
+## Data and checkpoints
+
+- Raw/restricted imagery belongs under ignored `data/raw/` paths.
+- Training/intermediate corpora remain ignored.
+- Checkpoints belong under ignored `models/` and in an approved external artifact store/release.
+- Only small, license-safe contract fixtures/evidence belong in `data/sample/`.
+- Dataset roles, limitations and licenses are in `docs/Research.md`.
+
+Download the intended deployed mask checkpoint from [`a4-roadseg-v3.2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) as `models/road_pan.pt`. Verify release/checksum guidance before production use.
+
+## Run the sample dashboard
+
+```bash
+streamlit run src/app/app.py
+```
+
+Open the displayed local URL. Start in Briefing/Analysis; upload remains optional.
+
+## Run P1 locally
+
+Blended Hann inference is the default. Use `--no-blend` only for a deliberate legacy comparison.
 
 ```bash
 python -m src.pipeline.p1_segment.predict \
-    --image data/raw/<tile>.tif --checkpoint models/road_pan.pt --aoi <id> \
-    [--blend] [--postprocess]
-# writes data/interim/<id>_mask.png  (binary {0,1}); large images are tiled + stitched.
-# threshold/tile-size default to the checkpoint meta; --blend = seamless Hann-overlap
-# inference; --postprocess = A10 cleanup. GeoTIFFs (incl. 1-band Cartosat PAN) are read
-# with their CRS/transform and a georef manifest is written for P2 automatically.
+  --image data/raw/<tile>.tif \
+  --checkpoint models/road_pan.pt \
+  --aoi <safe-id> \
+  --postprocess
 ```
 
-For the full CLI (eval on the truthful Indian benchmark, the v3 fine-tune, whole-pipeline) see the AUTO-GENERATED reference in [`README.md`](README.md).
+Outputs include `data/interim/<id>_mask.png`, provenance, and georeference/probability sidecars when applicable. Threshold and tile size default to checkpoint metadata.
 
-## Troubleshooting (I-1)
+## Run the full batch pipeline
 
-- **GDAL/rasterio build errors on pip:** prebuilt wheels usually cover Windows/macOS/Linux + common Python versions, so plain `pip install -r requirements.txt` works on most machines. If pip tries to build from source and fails, install Miniconda and use the conda-forge path in Path A instead.
-- **`torch.cuda.is_available()` is False on a 50-series card:** wrong wheel → use **cu128** (Path C).
-- **Dashboard shows nothing:** confirm `data/sample/` has the graph + criticality files (Shaivi's S1 output).
+```bash
+python -m src.pipeline.run_pipeline \
+  --image data/raw/<tile>.tif \
+  --checkpoint models/road_pan.pt \
+  --aoi <safe-id> \
+  --postprocess
+```
 
-> Found a fix that isn't here? Add it and log it in `Tracker.md` §10 — this file is the shared setup memory.
+The runner performs P1→P2→P3, verifies the dashboard artifact seam and writes `data/processed/<id>_run.json` only after success. Use `--force` or `--from-stage` deliberately; normal reuse is based on input/config signatures.
+
+## Evaluation commands
+
+```bash
+# Historical/current mask-model development benchmark
+python -m src.pipeline.p1_segment.eval_spacenet --help
+
+# Legacy mask→skeleton tile APLS
+python -m src.pipeline.p1_segment.apls_eval --help
+
+# Strict common-unit v3.2 vs graph-first chip gate
+python -m src.pipeline.p1_segment.chip_apls_eval --help
+
+# Current sample graph/APLS evidence
+python -m src.pipeline.p3_analysis.evaluate --aoi panaji_demo --sample-dir data/sample
+python -m src.pipeline.p3_analysis.apls --aoi panaji_demo --sample-dir data/sample
+```
+
+Read `docs/Evaluation.md` before interpreting or comparing outputs; the chip and tile protocols are not interchangeable.
+
+## Troubleshooting
+
+- **Imports missing under the default shell Python:** activate the project venv; do not install into a global mixed environment.
+- **Torch pulled the wrong build:** recreate the venv and install the intended CPU/GPU Torch wheels before `requirements.txt`.
+- **GPU unavailable/unsupported capability:** select a compatible current official PyTorch/CUDA wheel; do not proceed on silent CPU fallback.
+- **Geospatial wheel build failure:** use a clean Python 3.11 environment and common supported platform; fall back to conda-forge rather than hand-building GDAL.
+- **Dashboard sample missing:** verify `data/sample/panaji_demo_graph.geojson`, `_criticality.csv` and `_resilience.csv` exist.
+- **Upload tab disabled:** set both Modal environment variables or use sample mode.
+- **Local environment has unrelated dependency conflicts:** recreate it by role; clean CI and the commands above are the reference.
+
+Production setup is intentionally separate: see `deploy/README.md`.

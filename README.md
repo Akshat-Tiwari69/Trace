@@ -1,144 +1,159 @@
 # Route Resilience
 
-**Find the road junctions a city can't afford to lose.**
+**Find the road junctions a city can least afford to lose.**
 
-Route Resilience extracts roads from satellite imagery, heals likely gaps into a routable network, then scores which junctions are critical and how gracefully the network degrades when they fail. It ends in an interactive map you can click to simulate a closure and watch the city reroute.
+Route Resilience converts satellite imagery into a routable road graph, flags inferred/healed links, ranks structural chokepoints and shows how junction or area failures change routing and global efficiency.
 
-> Status: **road-seg v3.2 released** — full pipeline end-to-end (segmentation → graph → resilience → dashboard); the full pytest and production-upload smoke suites run in CI. Mumbai is the repeatedly used **development benchmark**, not an untouched test set; v3.2 remains deployed while A18 validates the graph-first direction.
+[Open the public dashboard](https://trace.tiwaribabu.in) · [Setup](SETUP.md) · [Evaluation](docs/Evaluation.md) · [Current work](docs/Tracker.md)
 
----
+> **Status (2026-07-13):** the P1→P4 product and public sample dashboard are working; repository CI is green. Mask model v3.2 is the intended production checkpoint. A18-LoRA validates a graph-first research direction but is not deploy-ready. The exact live Oracle/Modal ref/checksum still requires the O1 operator audit.
 
-## Why it matters
-
-When a junction floods, collapses, or is blocked, *which* failures actually break the city's connectivity — and which barely matter? Route Resilience answers that quantitatively, using **global efficiency** (a resilience measure that stays meaningful even when the network splits into pieces), and shows it on a map a planner can actually use.
-
-## The pipeline
+## What it does
 
 ```mermaid
 flowchart LR
-    A[Satellite imagery] -->|P1 · SegFormer| B[Road mask]
-    B -->|P2 · skeletonize + heal| C[Routable graph]
-    C -->|P3 · criticality + resilience| D[Metrics]
-    D -->|P4 · Streamlit + Folium| E[Interactive dashboard]
+    A[Imagery] --> B["P1 · road evidence"]
+    B --> C["P2 · MultiGraph + explicit healing"]
+    C --> D["P3 · criticality + resilience"]
+    D --> E["P4 · Streamlit/Folium dashboard"]
 ```
 
-| Phase | What it does | Tech |
-|---|---|---|
-| **P1 · Segment** | RGB tile → binary road mask, robust to occlusion | SegFormer **MiT-B3 + SCSE U-Net** (PyTorch, fine-tuned) |
-| **P2 · Heal** | mask → skeleton → graph, then bridge canopy-broken gaps | `skimage` + `sknw` + **MST / Union-Find** healing |
-| **P3 · Analyze** | rank junctions by betweenness; measure resilience under failure | `networkx` · **global-efficiency** Resilience Index |
-| **P4 · Dashboard** | click a junction → simulate closure → reroute + impact | **Streamlit + Folium** (CPU, no GPU) |
+- **P1:** pretrained PyTorch road segmentation with tiled/Hann inference, GeoTIFF/PAN reading, optional probability maps and provenance.
+- **P2:** skeletonization, parallel-edge-preserving MultiGraph extraction, simplification and probability/geometry-aware gap healing.
+- **P3:** betweenness, articulation points/bridges and global-efficiency failure analysis.
+- **P4:** Briefing, Analysis, uploaded imagery and Methodology views with junction/area scenarios, rerouting and exports.
 
-## Results
+The system is designed to recover useful continuity under occlusion and fragmentation, but it does not claim literal knowledge of every hidden road. Inferred links are marked and model evidence is reported with its limitations.
 
-<!-- AUTO-GENERATED: segmentation results — from data/sample/spacenet_mumbai_*.json; see docs/Evaluation.md -->
-**Segmentation — frozen SpaceNet-5 Mumbai development split (real Indian ground truth, 512px, each model at its deploy threshold):**
+## Current evidence
 
-| Model | RGB IoU | Grayscale (Cartosat-PAN proxy) | APLS (routing) | Deploy thr | Release |
-|---|---|---|---|---|---|
-| **v3.2** — PAN-hardened (grayscale + gamma aug) | **0.459** | **0.418** | **0.499** | 0.52 | [`a4-roadseg-v3.2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) |
-| v3 — SpaceNet-Mumbai fine-tuned | 0.449 | 0.405 | 0.437 | 0.50 | [`a4-roadseg-v3.1`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.1) |
-| v1 — DeepGlobe baseline | 0.399 | 0.345 | 0.420 | 0.50 | [`a4-roadseg-v1`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v1) |
+### Mask-model development evidence
 
-**v3.2 is the best deployed segmentation model on this development benchmark** — RGB, grayscale/PAN, and routing. These single-city, repeatedly consulted results do not establish geographic generalization. The A24 sensor-robustness aug (heavier grayscale + radiometric gamma) lifted **routing the most (APLS +14% over v3)**. On DeepGlobe (in-domain) v1 scores IoU **0.670** / synthetic-cutout recall **0.793** @0.44; that cutout metric is not evidence of recovery under real trees or shadows.
-<!-- END AUTO-GENERATED -->
+SpaceNet-5 Mumbai has been repeatedly consulted, so these are **development-benchmark**, not untouched-test, results. RGB→gray is a PAN proxy, not real Cartosat PAN.
 
-Model releases: **[`a4-roadseg-v3.2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2)** (deployed — PAN-hardened, threshold 0.52) · `v3.1` · `v3` · `v2` · `v1`.
+| Checkpoint | Development-selected threshold | RGB IoU | Gray-proxy IoU | Legacy tile-mask APLS |
+|---|---:|---:|---:|---:|
+| **v3.2** `road_pan.pt` | 0.52 | **0.4594** | **0.4177** | **0.4987** |
+| v3/v3.1 weights | 0.50 | 0.4493 | 0.4046 | 0.4374 |
+| v1 weights | 0.50 sweep result | 0.3993 | 0.3447 | 0.4198 |
 
-**Resilience (the core thesis holds):** removing high-betweenness junctions collapses global efficiency *far faster* than removing random ones — i.e. the criticality scoring finds genuine chokepoints. On the OSM sample, targeted ablation mean RI **0.674 vs 0.860** random; on a live, tree-occluded Panaji satellite tile run end-to-end, **0.503 vs 0.780**.
+The released v1 deploy threshold is `0.44`; its row above is a development sweep at `0.50`, not the v1 release protocol. Exact fixed-threshold tables and source JSON are in [Evaluation.md](docs/Evaluation.md).
 
-**Dashboard:** disabling the top junction drops the Resilience Index **1.000 → 0.925** and draws the rerouted path live on the map.
+### Graph-first research evidence
 
----
+On the strict common-unit chip/vector-GT gate (127/127 chips), A18-LoRA raw APLS was `0.1051` vs v3.2 `0.0121`; the paired delta was `+0.0930`, CI `[+0.0782,+0.1095]`. Normalized by each chip’s GT-self ceiling, A18-LoRA captured about **18%** of achievable routing—roughly twice the frozen A18 result, but still far below deploy quality.
 
-## Quickstart
+Do not compare those absolute chip scores to the legacy tile-mask APLS column above; they use different units and ground truth.
 
-Runs on **CPU, no GPU, no prior pipeline run** — the dashboard ships with committed sample data.
+### Current committed Panaji sample
+
+- 364 nodes / 500 edges
+- build-time healing: 8 → 3 components; five bridges added, four surviving final inferred edges
+- 79 articulation nodes / 92 structural bridges
+- APLS vs cached OSM truth: `0.5369`
+
+Multi-step resilience-curve absolutes are temporarily withheld from headline use because A45 must fix a shrinking-node denominator in `ablation_curve()` and regenerate the curves. The single-scenario dashboard RI already preserves the baseline node universe.
+
+## Quickstart — sample dashboard
+
+Python 3.11:
 
 ```bash
-pip install -r requirements.txt
+python -m venv .venv
+# Linux/macOS: source .venv/bin/activate
+# Windows PowerShell: .venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip==24.2
+python -m pip install -r deploy/requirements-app.txt
 streamlit run src/app/app.py
 ```
 
-Then open the local URL, pick a critical junction, and hit **Simulate closure**.
+The committed sample needs no model, GPU or Modal secret. The **Your imagery** tab is enabled only when `MODAL_SEG_URL` and `MODAL_SEG_KEY` are configured.
 
-### Run the whole pipeline on your own tile
+## Run your own image through P1→P3
 
-Grab the best model from the [`a4-roadseg-v3.2` release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) (`road_pan.pt`) into `models/`, then one command takes imagery all the way to dashboard-ready artifacts:
+Install the full environment from [SETUP.md](SETUP.md) and download `road_pan.pt` from the [`a4-roadseg-v3.2` model release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) into ignored `models/`.
 
-<!-- AUTO-GENERATED: CLI reference — from src/pipeline/**/__main__ entrypoints -->
 ```bash
-# whole pipeline: imagery → mask → graph → resilience (threshold/tile-size come from the checkpoint meta)
-python -m src.pipeline.run_pipeline --image data/raw/your_tile.jpg \
-    --checkpoint models/road_pan.pt --aoi your_area --postprocess
-
-# stages individually
-python -m src.pipeline.p1_segment.predict --image <tile> --checkpoint <pt> --aoi <id> \
-    [--blend] [--postprocess]                 # → data/interim/{id}_mask.png (+ georef manifest for GeoTIFFs)
-python -m src.pipeline.p2_graph.build_graph  --aoi <id>   # → healed routable graph
-python -m src.pipeline.p3_analysis.analyze   --aoi <id>   # → criticality + resilience
-
-# evaluate on the frozen SpaceNet-5 Mumbai development benchmark (real GT)
-python -m src.pipeline.p1_segment.eval_spacenet --checkpoints models/road_pan.pt <v1.pt> \
-    --device cuda [--grayscale] [--sweep]     # IoU/Dice (RGB or Cartosat-PAN proxy; --sweep = best threshold)
-python -m src.pipeline.p1_segment.apls_eval    --checkpoints models/road_pan.pt <v1.pt> --device cuda  # routing APLS
-
-# reproduce the v3.2 PAN-hardened fine-tune (real SpaceNet labels + grayscale + gamma aug)
-python -m src.pipeline.p1_segment.finetune --init <v1.pt> --spacenet-corpus data/raw/spacenet/dg_format \
-    --deepglobe-dir data/raw/deepglobe/train --grayscale-p 0.7 --cldice-weight 0 --oversample 1 \
-    --epochs 10 --out models/road_pan.pt --device cuda
+python -m src.pipeline.run_pipeline \
+  --image data/raw/your_tile.tif \
+  --checkpoint models/road_pan.pt \
+  --aoi your_area \
+  --resolution-m 1.0 \
+  --postprocess
 ```
 
-Cartosat-3 GeoTIFFs (RGB **or** 1-band PAN) are read via rasterio and carry their CRS/transform through as a metric graph automatically.
-<!-- END AUTO-GENERATED -->
+Blended Hann inference is the default. GeoTIFF CRS/transform is carried into metric graph construction. For PNG/JPEG or another non-georeferenced source, `--resolution-m` is the ground-sample-distance assumption and currently defaults to `1.0` m/px; set it explicitly when real metric lengths matter.
 
-Full environment setup (CPU / cloud-GPU training / local-GPU paths) is in [`SETUP.md`](SETUP.md).
+Stage CLIs:
 
----
-
-## Repository layout
-
-```
-src/pipeline/
-  p1_segment/   model, predict (+blend/postprocess), finetune, eval_spacenet + apls_eval
-                (real-GT SpaceNet benchmark), raster_io (GeoTIFF/PAN), OSM→mask data
-  p2_graph/     skeletonize + sknw + MST/Union-Find healing, run_real_mask
-  p3_analysis/  betweenness criticality + global-efficiency resilience, evaluate
-  run_pipeline.py   A5 walking skeleton — P1→P2→P3→P4 in one command
-src/app/        Streamlit + Folium dashboard
-notebooks/      Colab/Kaggle training notebook
-data/sample/    committed demo artifacts (so the app runs with no GPU)
-docs/           Tracker (source of truth) + PRD, TRD, Design, Evaluation, Research, …
-tests/          CPU unit and contract tests (current count reported by CI)
+```bash
+python -m src.pipeline.p1_segment.predict --help
+python -m src.pipeline.p2_graph.build_graph --help
+python -m src.pipeline.p3_analysis.analyze --help
 ```
 
-## Design rules (non-negotiable)
+## Evaluation entry points
 
-- **Stack:** Streamlit + Folium, **pure Python** — no database or JS SPA. The dashboard calls an authenticated Modal HTTP inference endpoint; the local P2/P3 analysis remains in-process.
-- **ML:** fine-tune pretrained models only (never from scratch); **PyTorch** only.
-- **Resilience = global efficiency** ratio — never a raw average-path-length ratio (it must stay finite when the graph disconnects).
-- Training is hardware-agnostic (Colab/Kaggle); graph + dashboard run on **CPU**.
-- Raw data and model checkpoints are git-ignored; only small **sample** data is committed so the repo runs out of the box.
+```bash
+# Mumbai mask-model development benchmark
+python -m src.pipeline.p1_segment.eval_spacenet --help
 
-Evaluation methodology and numbers live in [`docs/Evaluation.md`](docs/Evaluation.md); how the work is coordinated across the team is in [`docs/Tracker.md`](docs/Tracker.md).
+# Legacy tile mask→graph APLS
+python -m src.pipeline.p1_segment.apls_eval --help
+
+# Strict same-chip v3.2 vs graph-first promotion gate
+python -m src.pipeline.p1_segment.chip_apls_eval --help
+
+# Committed Panaji sample reports
+python -m src.pipeline.p3_analysis.evaluate --aoi panaji_demo --sample-dir data/sample
+python -m src.pipeline.p3_analysis.apls --aoi panaji_demo --sample-dir data/sample
+```
+
+Read [Evaluation.md](docs/Evaluation.md) before comparing outputs.
+
+## Repository map
+
+```text
+src/pipeline/p1_segment/   model, inference, data, training and evaluation
+src/pipeline/p2_graph/     skeleton/MultiGraph, simplification, healing and IO
+src/pipeline/p3_analysis/  criticality, resilience, APLS and scenarios
+src/pipeline/run_pipeline.py
+src/app/                   Streamlit/Folium app, Modal client and upload queue/analysis
+data/sample/               committed demo contracts and evidence
+deploy/                    Oracle/Modal/Caddy/systemd configuration
+docs/                      product, architecture, evidence, research and coordination
+tests/                     CPU/unit/contract/application tests
+```
+
+## Non-negotiable design rules
+
+- Streamlit + Folium, pure Python; no database, user-login product or JavaScript SPA in this release.
+- PyTorch and pretrained fine-tuning only.
+- Resilience is based on global efficiency and must preserve the baseline node universe.
+- P2/P3/dashboard remain CPU-capable; training/hosted P1 may use GPU.
+- Raw/provider imagery, restricted data, secrets and checkpoints are not committed.
+- Negative results and benchmark limits are recorded rather than hidden.
 
 ## Tests
 
 ```bash
-python -m pytest -q        # authoritative current count is reported by CI
+python -m pytest tests/ -q
 ```
 
-## Roadmap
+A44 baseline: **284 passed** locally; remote `dev` CI also runs dashboard import and a clean local mask-to-resilience contract smoke under production dependencies.
 
-- **Cartosat-3 deployment:** the georeferenced + PAN inference path is ready; fine-tune / validate on the real Cartosat tiles when provided (keep a never-trained held-out set).
-- **Push v3 further:** small encoder-unfreeze; graph-first SAM-Road++ spike (judged by APLS).
-- Full progress, experiments (incl. negative results), and decisions live in [`docs/Tracker.md`](docs/Tracker.md).
+## Current roadmap
 
-## Team
+1. **A44:** reconcile documentation and evidence.
+2. **A45:** fix resilience/inference protocol correctness, simplify code and measure performance.
+3. **A46:** improve graph-first absolute routing and resolve license/reproducibility/new-geography gates.
+4. **F9:** UI/UX overhaul after architecture/model outputs stabilize.
+5. **O1/X1:** immutable live rollout verification and final demo capture.
 
-Built by a three-person team working in separate lanes (coordinated through `docs/Tracker.md`):
-**ML / segmentation / integration · graph & resilience · dashboard.**
+See [Tracker.md](docs/Tracker.md) for status and [bugs.md](bugs.md) for the current issue ledger.
 
-## Data & licensing
+## Licensing and data
 
-Trained on the DeepGlobe Road Extraction dataset (research use). Sample imagery for demos is fetched from open basemap tiles. Respect each dataset's license; raw imagery and checkpoints are never committed to the repo.
+OSM, DeepGlobe, SpaceNet, Esri/provider imagery, Cartosat and any upstream model code each have separate terms. Raw/provider imagery is not redistributed; dataset use and limitations are recorded in [Research.md](docs/Research.md).
+
+This repository currently has **no top-level code license**, so do not assume permission to reuse or redistribute the project code. Selecting a code license is tracked as `LEGAL-1` in [bugs.md](bugs.md).

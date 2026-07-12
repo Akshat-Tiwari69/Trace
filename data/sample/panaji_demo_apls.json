@@ -1,10 +1,12 @@
 {
-  "apls": 0.4011,
-  "apls_gt_to_prop": 0.2963,
-  "apls_prop_to_gt": 0.6205,
+  "apls": 0.5369,
+  "apls_gt_to_prop": 0.4709,
+  "apls_prop_to_gt": 0.6242,
   "n_samples": 600,
   "snap_tol_m": 15.0,
+  "reachable_pair_fraction_gt": 0.9769,
+  "reachable_pair_fraction_prop": 0.9774,
   "aoi": "panaji_demo",
-  "graph_nodes": 400,
+  "graph_nodes": 364,
   "osm_truth_nodes": 341
 }

@@ -1,98 +1,102 @@
-# PRD.md
+# PRD.md — Product Requirements
 
-> **Purpose.** This Product Requirements Document defines **Route Resilience** — an end-to-end system that extracts road networks from satellite imagery even where roads are hidden, heals the network into a routable graph, identifies critical chokepoints, stress-tests the network against simulated disasters, and presents it all in an interactive dashboard. It specifies the vision, users, requirements, constraints (including the compute limits established in Research.md), and success metrics.
+## Product statement
 
-## Product Vision
+Route Resilience turns satellite imagery or a prepared road graph into an explainable resilience analysis. It extracts road evidence, repairs selected gaps with explicit uncertainty, identifies structural chokepoints and lets a planner explore how junction or area failures change routing and global efficiency.
 
-A decision-support tool that turns raw satellite imagery of an Indian city into a **resilience map**: it shows planners and disaster responders not just *where the roads are*, but *which roads are critical* and *what happens to mobility when they fail*. Where existing tools stop at a road mask, our system "sees through" trees, shadows, and vehicles, repairs the broken network, and lets a user click any junction to simulate its loss and instantly see rerouting and added travel time.
+The product is a research prototype for decision support—not a certified road map, emergency-routing authority or proof that every inferred connection exists on the ground.
 
-## Problem Statement
+## Problem
 
-Urban road networks are vulnerable to floods, accidents, construction, and disasters. Two technical gaps block good planning: **(1)** satellite-derived road maps are *fragmented* because trees, buildings, shadows, and vehicles **occlude** roads, breaking the network so it can't be routed on; and **(2)** even with a good map, planners lack a principled, finite way to quantify how *critical* each road is and how *resilient* the network is to failure. This project delivers an occlusion-robust extraction pipeline plus graph-theoretic criticality analysis for urban mobility. We address both gaps, and we fix a mathematical flaw in the commonly proposed resilience metric.
+Satellite-derived road masks fragment under shadows, vegetation, buildings, vehicles and sensor/domain change. Pixel accuracy alone does not show whether the result is useful for routing. Even a good road graph still needs a finite, interpretable way to describe which failures matter.
 
-## Goals & Objectives
+Route Resilience addresses both layers:
 
-1. **G1 — Occlusion-robust segmentation.** Produce road masks from Sentinel-2 / LISS-IV / Cartosat-3 imagery that infer continuity under occlusion, across seasons and illumination. (Transformer-based: SegFormer + clDice + occlusion augmentation.)
-2. **G2 — Routable healed graph.** Convert fragmented masks into a single connected, weighted vector graph via skeletonization → sknw/NetworkX → MST/Union-Find bridging scored by distance + angular alignment.
-3. **G3 — Criticality & resilience analysis.** Compute betweenness centrality to find "Gatekeeper Nodes"; run node-ablation stress tests; report a **finite Resilience Index based on global efficiency**.
-4. **G4 — Interactive dashboard.** Streamlit + Folium/Leaflet app with a criticality heatmap and a click-to-disable-node simulation that reroutes live and reports increased travel time.
-5. **G5 — Hardware-agnostic & runnable by everyone.** Training runs on free cloud (Colab/Kaggle) so it works identically on any machine; the graph and dashboard run on CPU; committed sample artifacts let any team member run their part without a GPU. Local 8 GB GPUs are an optional faster path.
+1. produce road masks/graphs while preserving confidence, geometry and provenance;
+2. measure topology and network degradation rather than relying only on pixels;
+3. make the evidence explorable by a non-technical user.
 
-## Target Users
+## Users
 
-- **Urban / transport planners** (municipal corporations, city development authorities) — design and retrofit resilient networks.
-- **Disaster-response agencies (NDMA, SDMAs)** — pre-plan evacuation routes and identify chokepoints before floods/earthquakes.
-- **Municipal authorities** — prioritise maintenance/redundancy investment on the most critical roads.
-- **ISRO / NRSC stakeholders** — demonstrate downstream value of Indian EO data (LISS-IV, Cartosat-3) for civic applications.
+- **Urban and transport planners:** identify junctions and corridors that deserve redundancy or maintenance attention.
+- **Disaster-management teams:** explore localized and compound failures before an incident.
+- **Geospatial/remote-sensing reviewers:** inspect extraction, topology, provenance and limitations.
+- **Developers/researchers:** reproduce pipeline stages and evaluate model or graph changes.
 
-## User Personas
+## Current product capabilities
 
-**Persona 1 — Meera Nair, Urban Mobility Planner, a metropolitan development authority.** Needs to know which intersections are single points of failure before approving a flyover budget. Not a coder; wants a map she can click. Success = "I can show my committee what happens to commute times if Junction X floods."
-
-**Persona 2 — Capt. Rohan Desai, District Disaster-Management Officer (NDMA-linked).** During monsoon, needs to pre-identify roads whose loss isolates neighbourhoods, using up-to-date satellite maps where official maps lag. Success = "I get a ranked list of chokepoints and an evacuation-route impact estimate within minutes."
-
-**Persona 3 — Dr. Aishwarya Rao, Scientist, NRSC.** Evaluates whether the pipeline genuinely exploits LISS-IV/Cartosat-3 and whether the methodology (metrics, healing, resilience) is sound. Success = "The project uses a finite, defensible resilience metric and reports APLS/IoU honestly."
-
-## Functional Requirements
-
-| ID | Requirement |
-|---|---|
-| FR1 | Ingest GeoTIFF satellite tiles (Sentinel-2, LISS-IV, Cartosat-3) via rasterio/GDAL; tile to 256²/512². |
-| FR2 | Auto-generate training masks from OSM vectors (osmnx → rasterio), zero manual labelling. |
-| FR3 | Train/fine-tune a pretrained SegFormer (or ResNet34/50-encoder U-Net/DeepLabV3+) with Dice + soft-clDice + BCE loss and occlusion augmentation (Albumentations CoarseDropout). |
-| FR4 | Output binary road masks that bridge occluded gaps. |
-| FR5 | Skeletonize masks (skimage) to 1-px centerlines; convert to NetworkX graph via sknw. |
-| FR6 | Heal gaps with MST + Union-Find, scoring candidate bridges by Euclidean distance AND angular alignment; output a single weighted routable graph. |
-| FR7 | Compute betweenness centrality; rank and highlight Gatekeeper Nodes. |
-| FR8 | Node-ablation simulation: remove top-centrality nodes (flood/accident/closure scenarios) and recompute. |
-| FR9 | Compute Resilience Index using **global efficiency** (finite under disconnection). |
-| FR10 | Dashboard: criticality heatmap overlay (Folium/Leaflet) + click-a-node-to-disable toggle that reroutes and shows added travel time. |
-| FR11 | Export results (GeoJSON graph, metric report). |
-
-## Non-Functional Requirements
-
-- **NFR1 — Hardware/compute constraint.** Must train within an 8 GB VRAM budget (commodity consumer/laptop-class GPUs). Mandatory: fine-tune pretrained encoders only (no training from scratch); AMP/FP16; batch 2–4 at 512² (8–16 at 256²) with gradient accumulation to effective batch 16–32; gradient checkpointing for heavier encoders. Free Colab/Kaggle (T4/P100 16 GB, "up to 30 hours per week … sessions up to 9 hours") for any heavier run.
-- **NFR2 — Recent-GPU compatibility.** On current-generation Blackwell GPUs (compute capability sm_120, e.g. RTX 50-series), use PyTorch ≥2.7.0 with CUDA 12.8 (`cu128`) wheels — the first stable PyTorch release to add native sm_120 support; avoid hard dependence on libraries that lagged on Blackwell (e.g. xFormers). Older Ampere/Ada GPUs need no special handling.
-- **NFR3 — Resilience metric must stay finite** under node removal (global efficiency, not raw average-path-length ratio).
-- **NFR4 — Runtime targets.** Inference on a city tile + graph build + analysis within minutes on a laptop CPU/GPU; dashboard node-toggle reroute should feel near-instant (sub-second to a few seconds on a city-scale graph).
-- **NFR5 — Reproducibility.** Fixed seeds, documented configs, checkpoints saved off-device (cloud storage is ephemeral).
-- **NFR6 — Thermal resilience.** Frequent checkpointing so a laptop thermal shutdown loses ≤1 epoch.
-- **NFR7 — Usability.** Non-technical users (planners) operate the dashboard with clicks only.
-
-## Success Metrics (tied to the evaluation criteria)
-
-| Metric | What it measures | Target/intent |
+| ID | Requirement | Current state |
 |---|---|---|
-| **IoU & Dice (Occlusion-Recall focus)** | Mask overlap with ground truth, weighted to recovering occluded road pixels | Competitive IoU; prioritise recall under occlusion |
-| **Generalisation across terrains** | Performance on unseen Indian cities/terrains | Stable IoU across held-out AOIs |
-| **Connectivity Ratio** | % increase in the largest connected component after MST healing | Large positive jump vs raw skeleton |
-| **Topological Accuracy (APLS)** | Average-path-length error vs OSM benchmark graphs | High APLS; few wrong/missing edges (note: F1=0.72 can mean APLS=0.25, so we optimise topology, not just pixels) |
-| **Length-Complete/Relaxed IoU** | IoU with 3–5 px tolerance buffer (centerline-aware) | High relaxed IoU |
-| **Resilience Index (global efficiency)** | Finite drop in global efficiency under node ablation | Smooth, interpretable degradation curve |
+| **FR1** | Run an end-to-end imagery→mask→graph→analysis pipeline | Shipped via `src.pipeline.run_pipeline` |
+| **FR2** | Accept local raster imagery, including georeferenced RGB/multiband/one-band GeoTIFF/PAN | Shipped for batch/local inference |
+| **FR3** | Accept bounded PNG/JPEG imagery in the public dashboard | Shipped through authenticated Modal P1 |
+| **FR4** | Fine-tune pretrained PyTorch road models; never train a backbone from scratch | Shipped; v3.2 remains deployed |
+| **FR5** | Preserve mask alignment, optional probabilities and model provenance | Shipped |
+| **FR6** | Convert masks to a routable MultiGraph and improve fragmentation without forcing false full connectivity | Shipped |
+| **FR7** | Preserve parallel edges, geometry, inferred-edge flags, confidence when available and positive metric lengths | Shipped |
+| **FR8** | Rank critical nodes and expose articulation points/bridges | Shipped |
+| **FR9** | Simulate single-junction and area/compound failures | Shipped, including drawn flood polygons and keyboard alternatives |
+| **FR10** | Report a finite, bounded Resilience Index based on baseline-normalized global efficiency | Single-scenario path shipped; multi-step curve denominator fix is queued in A45 |
+| **FR11** | Show rerouting, criticality, resilience curves and rankings in a Streamlit/Folium dashboard | Shipped |
+| **FR12** | Export the current graph and a concise visual summary | Shipped as GeoJSON and PNG |
+| **FR13** | Evaluate routing/topology with a common-unit protocol and paired uncertainty | Shipped for v3.2 vs A18 research comparisons |
 
-## Scope Definition
+## Quality requirements
 
-**In scope (initial release):**
-- The four-phase pipeline (segmentation → healing → analysis → dashboard) as a working prototype.
-- Fine-tuning a pretrained model on DeepGlobe/SpaceNet + OSM-labelled Indian AOIs.
-- Global-efficiency Resilience Index; betweenness centrality; node-ablation demo.
-- Streamlit/Folium dashboard with the interactive node-disable simulation.
-- Demonstration on a high-resolution (Cartosat-3 / LISS-IV) tile of an Indian city.
+- **Honesty:** distinguish observed, predicted and healed roads; state benchmark and sensor limitations next to claims.
+- **Reproducibility:** record checkpoint checksum, architecture, threshold, Git revision, config and stage signatures.
+- **Correctness:** metric coordinates when georeference exists; positive edge lengths; graph/file round trips; bounded RI.
+- **Performance:** P2/P3/dashboard remain CPU-capable; hosted P1 uses a scale-to-zero GPU; large operations use measured sampling/caching.
+- **Accessibility:** important map interactions have labeled, keyboard-accessible alternatives; color is never the only signal.
+- **Reliability:** queued uploads survive normal app reruns/restarts on the single host; production deploys use immutable refs, health checks and rollback.
+- **Privacy/security:** no user accounts or permanent upload library; source bytes are processed in memory, while derived queue artifacts are age-cleaned; service authentication and size validation fail closed.
 
-**Out of scope (this phase):**
-- Training large graph-based models (RoadTracer/Sat2Graph) from scratch.
-- Real-time traffic feeds / live GPS data.
-- Multi-city national-scale deployment.
-- Mobile app; production hosting/scaling.
-- Sub-metre lane-level (per-lane) extraction.
+## Evidence and success criteria
 
-The scope is deliberately bounded so the core pipeline is demonstrable as a working prototype within a short, focused build window, with model fine-tuning pre-done on local and free-cloud GPUs beforehand. Phases are loosely coupled (clean file handoffs between segmentation, graph, analysis, and dashboard) so they can be developed in parallel.
+| Area | Promotion/success criterion |
+|---|---|
+| Mask model | Report IoU/Dice on a named development/evaluation unit at the model’s deploy protocol; pass anti-forgetting and runtime/checkpoint gates |
+| Routing model | Improve strict common-unit chip APLS with complete coverage and a paired interval excluding zero; also improve the absolute share of achievable routing |
+| Graph healing | Improve connectivity/routing evidence without unacceptable false bridges; keep inferred edges inspectable |
+| Resilience | Targeted failures degrade baseline-normalized global efficiency faster than matched random failures on the evaluated graph; RI remains in `[0,1]` |
+| Generalization | Final claims require an untouched geography/sensor; Mumbai alone is development evidence |
+| Product | A non-technical user can understand the baseline, run a scenario or upload, interpret limitations and export a result without developer assistance |
+| Operations | The approved immutable ref is live and the public sample/upload flows pass an operator smoke test |
 
-## Future Enhancements
+## Current evidence
 
-1. Replace classical MST healing with a learned graph-completion GNN (PyTorch Geometric).
-2. Add travel-time-weighted edges (speed estimation, à la CRESIv2) for realistic routing.
-3. Multi-temporal change detection (Sentinel-2 revisit) to auto-update maps after disasters.
-4. Incorporate elevation (flood-prone low-lying node removal, as in Boeing & Ha 2024).
-5. Edge-betweenness and articulation-point analysis for finer criticality.
-6. Deploy as a hosted web service for municipal use; integrate with NDMA workflows.
+- v3.2 is the best deployed **mask** model on the repeatedly consulted SpaceNet-5 Mumbai development benchmark.
+- Heavy TTA, stronger occlusion fine-tuning, clDice-first fine-tuning, Massachusetts mixing, OSM mean-teacher self-training, foreground-biased crops and SDT-BCE did not produce a safe routing promotion.
+- A18 SAM-Road++ and its LoRA variant beat v3.2 on the same chip/vector-GT routing frame, validating graph-first research. Absolute routing remains too low for deployment.
+- Real Cartosat PAN and new-geography generalization remain unproven.
+
+`Evaluation.md` owns exact numbers and protocols; `Research.md` owns experiment rationale and negative results.
+
+## Current scope
+
+In scope:
+
+- Single-AOI research analysis from committed sample artifacts or one uploaded/local image.
+- Pretrained PyTorch model fine-tuning and graph-first research.
+- Classical CPU graph construction, healing, criticality and global-efficiency scenarios.
+- Public Streamlit/Folium demonstration on a single Oracle host with Modal P1.
+- Reproducible files, evaluation and exports.
+
+Out of scope:
+
+- Certified navigation, emergency dispatch or claims of complete road-map accuracy.
+- Accounts, collaborative projects, permanent storage, database or multi-tenant platform.
+- Live traffic/GPS feeds and lane-level travel-time modeling.
+- National-scale serving or horizontally distributed queue workers.
+- JavaScript SPA/mobile rewrite in this release.
+- Final sensor/geographic claims before new held-out evidence exists.
+
+## Next product gates
+
+1. A44 documentation and evidence coherence.
+2. A45 code simplification/performance with preserved contracts.
+3. A46 graph-first absolute-routing improvement plus licensing/reproducibility resolution.
+4. F9 UI/UX overhaul on the stable architecture.
+5. O1 live deployment reconciliation and X1 final capture.
+
+The ordered execution plan lives in `Implementation.md`; live status lives only in `Tracker.md`.

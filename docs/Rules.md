@@ -1,79 +1,67 @@
-# Rules.md
+# Rules.md — Engineering Rules
 
-> **Purpose.** This document defines the working standards for everyone contributing to **Route Resilience** — human developers and AI assistants alike. The goals are a consistent, readable codebase, predictable collaboration across three people on three machines, and outputs that are reproducible and safe to make public. When in doubt, favour **simple and readable over clever**.
+> Prefer simple, evidence-backed changes. `AGENTS.md`/`CLAUDE.md` define the agent entry protocol; `Tracker.md` defines current work and ownership.
 
----
+## Code
 
-## Coding Standards
+- Target Python 3.11 for development/CI; production currently runs its isolated Python 3.12 environment.
+- Match the existing style: PEP 8, type hints and short docstrings on public functions.
+- Keep functions focused and names explicit. Do not compress code merely to reduce line count.
+- Centralize configuration and paths; avoid duplicated thresholds and hidden defaults.
+- Put reusable logic in modules, not notebooks or Streamlit render functions.
+- Quarantine rejected experiments from production imports.
+- Refactors require characterization tests and, for performance claims, before/after measurements.
 
-- **Language:** Python 3.10+.
-- **Style:** follow PEP 8; auto-format with **black**, sort imports with **isort**, lint with **ruff** (or flake8). Don't hand-argue formatting — let the tools decide.
-- **Readability first.** Prefer clear, slightly longer code over dense one-liners. A first-year teammate should be able to read any function and understand it. Clever tricks that save three lines but cost ten minutes of understanding are not worth it.
-- **Small functions, one job each.** If a function does three things, split it.
-- **Type hints + docstrings** on public functions — a one-line docstring saying what it does, its inputs, and its output is enough.
-- **No magic numbers / hardcoded paths.** Put tunables (tile size, thresholds, gap/angle limits, file paths) in a single config file, not scattered through the code.
-- **Notebooks for exploration, modules for anything reused.** Once a piece of code is needed twice, move it into a `.py` module.
+## Architecture
 
-## Naming Conventions
+- Stable phase seam: P1 mask/probability/provenance → P2 MultiGraph → P3 criticality/resilience → P4 presentation.
+- The batch pipeline communicates through §4 file artifacts. The hosted upload path may call the authenticated Modal P1 endpoint and run P2/P3 in-process.
+- No database, user-login system, separate REST backend or JavaScript SPA in this release.
+- Streamlit + Folium remains the frontend stack.
+- The resilience metric is baseline-normalized global efficiency and must preserve the baseline node universe so it remains finite and in `[0, 1]`. Any path that shrinks the denominator is a correctness defect.
+- CPU is the deployment target for P2/P3/dashboard; GPU is optional for local inference and required only for training/remote P1.
 
-| Thing | Convention | Example |
-|---|---|---|
-| Files / modules | `snake_case` | `graph_healing.py` |
-| Functions / variables | `snake_case` | `build_graph()` |
-| Classes | `PascalCase` | `RoadGraph` |
-| Constants | `UPPER_SNAKE` | `GAP_MAX_M` |
-| Git branches | `type/short-desc` | `feat/mst-healing`, `fix/crs-mismatch` |
-| Commits | imperative, scoped | `feat(graph): add union-find healing` |
-| Data artifacts | per `Schema.md` | `graph.graphml`, `criticality.csv` |
+## Documentation
 
-## Architecture Rules
+- `Tracker.md`: current status, ownership, contracts, decisions and concise daily log.
+- `Evaluation.md`: metrics, protocols, tables and model/graph verdicts.
+- `Research.md`: literature, hypotheses, experiment rationale and negative results.
+- `TRD.md`/`Schema.md`: current architecture and interfaces.
+- `Design.md`/`UserJourney.md`: current and next UI behavior.
+- `SETUP.md`/`deploy/README.md`: executable environment and operator instructions.
+- Cross-reference the owner document; do not maintain the same status table in multiple files.
+- Update behavior and its owning documentation in the same PR. Never invent results, deployment state or citations.
 
-- **Respect the phase boundaries.** Each phase (segmentation, graph build/heal, analysis, dashboard) is a module that communicates through **file artifacts**, not by reaching into another phase's internals (see `TRD.md`). This is what lets three people work in parallel.
-- **The dashboard reads precomputed artifacts.** It does not run model inference; the only thing it computes live is the cheap node-ablation simulation.
-- **Keep it simple — no premature infrastructure.** No database, no auth, no microservices, no JavaScript SPA in v1 (these are explicit project constraints; see below). Add complexity only when a real need is proven.
-- **One source of truth for configuration.** All paths and parameters come from one config; don't duplicate constants.
+## Testing and evidence
 
-## Documentation Rules
+- Unit-test deterministic graph, metric, IO, queue and inference-contract behavior.
+- Keep an end-to-end sample pipeline test, dashboard import smoke and a local upload-analysis contract smoke under production dependencies.
+- Validate binary masks, coordinate frames, positive edge lengths, graph/GeoJSON round trips, bounded metrics and required artifact columns.
+- Use visual/geospatial QC for alignment and topology; numerical scores alone cannot expose every frame error.
+- Model promotion requires the frozen protocol in `Evaluation.md`, full coverage and paired uncertainty.
+- Negative findings are recorded, not rewritten as success or silently discarded.
 
-- **Docs-first.** Major decisions are written down (in `docs/`) before or alongside the code, per the framework in `Index.md`.
-- **Keep docs in sync with code.** If behaviour changes, update the relevant doc in the same change. A doc that lies is worse than no doc.
-- **Update `Tracker.md`** as tasks move; record decisions in its Team Notes.
-- **Neutral, public-safe framing.** Documentation is written for a general audience: no private hardware specifics, no secrets, no credentials, jargon explained in plain English.
-- **Cross-reference, don't duplicate.** Link to the doc that owns a topic rather than copying its content.
+## Security and data
 
-## Testing Standards
+- Never commit secrets, raw/restricted imagery or checkpoints.
+- Validate AOI identifiers, uploads, decoded size/type and remote responses.
+- Modal authentication must fail closed and occur before app-level base64 decoding, image parsing and model work.
+- Production deploys use immutable refs, health checks and rollback.
+- Respect dataset and upstream-code licenses; record provenance and redistribution restrictions.
+- Uploaded source bytes are held in memory and sent to Modal; the host persists derived queue masks/state/results for age-based cleanup (currently about 24 hours). Disclosure must remain visible in the UI/docs.
 
-Pragmatic, not exhaustive — test the **load-bearing logic**, not everything.
+## Git and collaboration
 
-- **Unit tests** for the deterministic graph functions: MST/Union-Find healing, betweenness, the global-efficiency Resilience Index. These have clear inputs/outputs and are the parts most worth protecting.
-- **Smoke test** for the full pipeline on one small sample tile (does it run end-to-end without crashing?).
-- **Sanity checks / assertions** baked into the code: masks are binary {0,1}; edge weights > 0; betweenness in [0,1]; connected-component count recorded before/after healing; CRS consistent across tile/mask/graph.
-- **Visual QC** for masks and graphs — overlay predictions on imagery and eyeball them; numbers alone hide alignment bugs.
-- Don't gold-plate tests for throwaway exploration code.
+- Branch from current `dev` as `<owner>/<task-id>-<slug>`.
+- One coherent task per PR; target `dev`, never `main`.
+- Akshat is the only approver. Do not self-merge a newly opened PR.
+- Preserve user work, untracked files and unrelated changes.
+- Default ownership remains Akshat=P1/integration, Shaivi=P2/P3, Saanvi=P4/design. A documented coordinator authorization may permit cross-lane work, but reviewers and contracts still apply.
 
-## Security Guidelines
+## Non-negotiable product constraints
 
-- **No secrets in the repo.** Any data-portal keys go in environment variables / a git-ignored config — never committed.
-- **`.gitignore` raw data and checkpoints** (large and/or license-restricted); commit only small sample data so the repo still runs.
-- **Respect dataset licenses** (OSM ODbL, OpenSatMap CC BY-NC-SA *non-commercial*, SpaceNet/DeepGlobe research terms, Cartosat-3 restricted). Record source + license for every dataset used; attribute basemap/imagery in the UI.
-- **Validate inputs** in the dashboard (accept only expected formats; fail gracefully on bad files).
-- **Pin dependency versions**; no PII is handled anywhere in the system.
-
-## AI Instructions
-
-This project uses AI assistants. Any AI agent working in this repo must:
-- **Treat the `docs/` as the source of truth**, and keep new work consistent with `PRD.md`, `TRD.md`, `Schema.md`, and these rules.
-- **Hold the project constraints** below — do not introduce a database, auth system, heavyweight framework, or JavaScript SPA; do not switch the resilience metric back to raw average-path-length.
-- **Prefer simple, readable code** with explanations, over dense or "high-tech" solutions beyond the team's level.
-- **Keep the neutral, public-safe framing** — no private hardware details, no secrets, no committing raw/restricted data.
-- **Update `Tracker.md`** and explain reasoning for non-trivial choices.
-- **Don't invent results or citations.** Where a number isn't known, mark it as a placeholder.
-
-## Project Constraints
-
-The hard boundaries every contribution must respect (from `PRD.md`/`TRD.md`):
-- **Compute:** must fit an 8 GB VRAM budget — fine-tune pretrained models only, AMP/FP16, small tiles, gradient accumulation/checkpointing; free cloud for overflow. The graph/dashboard run on CPU.
-- **Stack:** pure-Python — Streamlit + Folium for the frontend (no JS SPA); file-based artifact store (no database).
-- **Tools:** free / open-source only.
-- **Method:** the Resilience Index uses **global efficiency** (finite under disconnection), not the raw average-path-length ratio.
-- **Scope:** small team — protect scope; aspirational features stay parked until the core pipeline works end-to-end.
+- PyTorch and pretrained fine-tuning only; no training from scratch.
+- Global-efficiency Resilience Index, never raw average-path-length ratio.
+- Pure-Python Streamlit/Folium product; no database or auth/login product scope.
+- Hardware-agnostic training path; no remote access to a teammate’s machine.
+- Neutral, public-safe repository with honest, reproducible evidence.

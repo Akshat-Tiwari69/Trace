@@ -1,226 +1,165 @@
-# Evaluation.md
+# Evaluation.md — Evidence, Protocols and Verdicts
 
-> **Purpose.** This document defines how **Route Resilience** is measured — the metrics for each phase, the datasets and procedures used to validate them, the baselines we compare against, the targets we aim for, and the experiments that prove our design choices actually help. For a project like this, a clear evaluation plan is what separates "looks like it works" from "demonstrably works." Numeric results are filled in as runs complete (this is a living document).
+> Exact results live here. `Research.md` explains hypotheses; `Tracker.md` records current decisions. Numbers from different spatial units or ground-truth constructions are not compared as if they were the same metric.
 
----
+## Evidence boundaries
 
-## Evaluation Metrics
+- **SpaceNet-5 Mumbai is a development benchmark.** Its chips have guided repeated model, threshold and architecture decisions; it is not an untouched final test set.
+- **Grayscale is a PAN proxy.** It is RGB imagery converted to gray, not real Cartosat-3 PAN with its native spectral response, noise and MTF.
+- **DeepGlobe is historical in-domain evidence.** It does not prove Indian or sensor generalization.
+- **Panaji sample graph metrics** describe one committed demonstration graph and OSM comparison.
+- **A18 chip APLS** and the older tile-mask APLS use different prediction units/ground-truth constructions. Compare candidates only within the same protocol.
+- A final claim requires a new geography/sensor that has not guided development.
 
-Each metric is tied to the phase it judges. Plain-English meaning first, then the technical note.
+## Metrics
 
-### Segmentation (Phase I)
+### Mask metrics
 
-| Metric | Plain English | Note |
+- **IoU:** road-mask intersection over union.
+- **Dice:** overlap harmonic score.
+- **Synthetic occlusion recall:** recall on programmatically hidden pixels; useful for controlled comparison but not proof of real canopy/shadow recovery.
+
+### Routing/topology metrics
+
+- **APLS:** similarity of shortest-path lengths after spatial snapping.
+- **Reachable-pair fraction/fragmentation:** reported alongside APLS so a tiny reachable subset cannot appear healthy.
+- **Common-unit chip gate:** both models are evaluated on the same frozen SpaceNet chips, vector ground truth and coordinate frame, with complete coverage and paired uncertainty.
+
+### Graph/resilience metrics
+
+- **Global efficiency:** mean inverse shortest-path distance, finite under disconnection.
+- **Resilience Index:** post-failure efficiency divided by intact efficiency while preserving the baseline node universe.
+- **Connectivity/healing:** component count plus routing evidence before/after healing; a lower component count alone does not prove bridges are correct.
+
+Known correctness gap: the single-scenario `resilience_index()` preserves the baseline node universe, but the current multi-step `ablation_curve()` physically removes nodes and changes the denominator. Its RI may exceed 1 and old curve/flood absolutes are **provisional/invalid for headline use** until A45 fixes the implementation and regenerates those artifacts.
+
+## Segmentation evidence
+
+### Historical DeepGlobe v1
+
+Source: `data/sample/segmentation_eval.json`.
+
+| Model/protocol | IoU | Synthetic occlusion recall | Note |
+|---|---:|---:|---|
+| v1, flip + multi-scale validation | 0.6699 | — | Best historical DeepGlobe validation view |
+| v1, deploy threshold 0.44 | 0.6617 | 0.7927 | Threshold selected to trade ≤0.01 clean IoU for recall |
+
+This establishes a reproducible historical baseline, not deployment-domain generalization.
+
+### Mumbai development benchmark — fixed threshold 0.44
+
+Sources: `spacenet_mumbai_eval.json` and `_gray.json`, 127 chips / 449 tiles, 512 px.
+
+| Checkpoint | RGB IoU | Gray-proxy IoU | RGB Dice | Gray Dice |
+|---|---:|---:|---:|---:|
+| v3.2 `road_pan.pt` | 0.4017 | 0.3418 | 0.5732 | 0.5094 |
+| v3/v3.1 weights `road_spacenet.pt` | **0.4311** | **0.3752** | **0.6025** | **0.5457** |
+| v1 `deepglobe_…pt` | 0.3752 | 0.3183 | 0.5456 | 0.4829 |
+
+This table isolates checkpoint behavior at one threshold. It is not each release at its deployed threshold.
+
+### Mumbai development benchmark — development-set threshold sweep
+
+Sources: `spacenet_mumbai_threshold_sweep*.json`. Threshold selection and reporting use the same repeatedly consulted development data, so these are best-case development numbers.
+
+| Checkpoint | Best threshold | RGB IoU | Gray-proxy IoU | Release interpretation |
+|---|---:|---:|---:|---|
+| v3.2 `road_pan.pt` | 0.52 | **0.4594** | **0.4177** | 0.52 is the deployed v3.2 threshold |
+| v3/v3.1 weights `road_spacenet.pt` | 0.50 | 0.4493 | 0.4046 | 0.50 is the v3.1 deploy threshold |
+| v1 `deepglobe_…pt` | 0.50 | 0.3993 | 0.3447 | **Not** the v1 release threshold; v1 deploys at 0.44 |
+
+Verdict: v3.2 is the best deployed mask model for this development benchmark, especially under the gray proxy. The result cannot establish new-city or real-PAN generalization.
+
+### Legacy tile-mask routing comparison
+
+Source: `spacenet_mumbai_apls.json`, 80 tiles.
+
+| Checkpoint | Tile-mask APLS |
+|---|---:|
+| v3.2 | **0.4987** |
+| v3/v3.1 weights | 0.4374 |
+| v1 | 0.4198 |
+
+This is useful for comparing the segmentation releases under the legacy mask→skeleton unit. It is **not comparable in absolute value** to A18 chip/vector-GT APLS.
+
+## Graph-first evidence
+
+### A41 SDT-BCE candidate — rejected
+
+The anchored rerun preserved DeepGlobe (`0.6299` vs `0.6314`, delta `−0.0015`) and improved Mumbai pixels, but routing regressed:
+
+- n=80 paired tile-mask APLS: v3.2 `0.4942` vs A41b `0.4525`
+- delta `−0.0417`, 95% CI `[−0.0735, −0.0113]`, p=`0.006`
+
+Verdict: no v3.3; pixel improvement without routing improvement is insufficient.
+
+### A18 frozen and LoRA — direction validated, not deploy-ready
+
+Protocol: strict common-unit chip APLS on 127/127 frozen SpaceNet-Mumbai chips, same vector ground truth/frame and paired comparison against v3.2.
+
+| Candidate | Raw APLS | v3.2 raw | Raw delta | Normalized by GT-self ceiling | v3.2 normalized | Verdict |
+|---|---:|---:|---:|---:|---:|---|
+| A18 frozen encoder | 0.0502 | 0.0121 | +0.0381, CI `[+0.0281,+0.0492]` | 0.0862 | 0.0185 | wins relative gate |
+| A18 LoRA r=4 | **0.1051** | 0.0121 | **+0.0930**, CI `[+0.0782,+0.1095]` | **0.1808** | 0.0185 | wins decisively |
+
+The normalized diagnostic estimates the fraction of achievable routing under fragmented chip GT. LoRA roughly doubled the frozen result, showing encoder adaptation was a bottleneck. But `0.1808` is still only about 18% of the achievable ceiling: A18 is a research direction, not a deployment candidate.
+
+Fragmentation diagnosis on those 127 chips: LoRA averages 11.43 components vs 3.46 for GT, largest-component node fraction 0.376 vs 0.719, 4.26 isolated nodes, six empty graphs and roughly 48% of GT edge length. It is more fragmented than GT on 114/127 chips. Missing nodes/edges/connectivity—not background false positives—is the immediate target.
+
+Reproducibility limitation: the inspected upstream snapshot lacks a clear license/dependency lock, and the exact run workspace/config/result JSON currently live outside the tracked release artifacts. A46 must resolve this before redistribution or promotion.
+
+## Current Panaji sample evidence
+
+The sample graph/evidence was regenerated during A44 so the public Methodology tab no longer shows the pre-A32 graph.
+
+Sources: `panaji_demo_graph.geojson`, regenerated `panaji_demo_graph_eval.json`, and regenerated `panaji_demo_apls.json`.
+
+| Property | Current value |
+|---|---:|
+| Nodes / edges | 364 / 500 |
+| Components during build healing | 8 → 3 |
+| Connectivity-ratio change | +8.32% |
+| Bridges added during build | 5 |
+| Surviving final `is_bridged` edges | 4 |
+| Final articulation nodes / structural bridges | 79 / 92 |
+| Top critical node | 278 (`betweenness=0.3307`) |
+| APLS vs cached OSM truth | **0.5369** |
+| APLS directions | GT→proposal `0.4709`; proposal→GT `0.6242` |
+| Reachable pair fraction | GT `0.9769`; proposal `0.9774` |
+
+The `graph_eval.json` field currently labels the five build-time additions as `bridged_edges`; only four survive in the final graph. A45 will correct that evaluator label. Its resilience subsection is also provisional because of the ablation denominator defect above.
+
+## Experiment ledger
+
+| Work | Result | Decision |
 |---|---|---|
-| **IoU** (Intersection over Union) | How much predicted road overlaps true road, ignoring the easy "not-road" ocean | `intersection / union` of road pixels; the primary pixel metric |
-| **Dice / F1** | Similar overlap measure, more forgiving of thin shapes | `2·TP / (2·TP + FP + FN)` |
-| **Synthetic-cutout recall** | Of road pixels hidden by artificial black rectangles, how many did we recover? | Controlled augmentation ablation; not a real-canopy/shadow claim |
-| **Relaxed / Buffered IoU** | IoU with a 3–5 px tolerance so being slightly off-centre isn't punished | Standard for thin structures; prevents penalising minor alignment shifts |
+| A7 D4 TTA | ~flat/slightly worse, 8× compute | opt-in only |
+| A8 heavier occlusion fine-tune | occlusion recall flat, clean IoU down | rejected |
+| A9 clDice-first fine-tune | IoU and hard clDice down; confounded by Lovász removal | rejected; do not repeat as the same fine-tune |
+| A11 Massachusetts mixing | Mumbai zero-shot worse | rejected |
+| A12 OSM mean-teacher self-training | held-out development score worse | rejected; A20/A22 retired |
+| A23/A24 real SpaceNet supervision + gray/radiometric aug | best deployed Mumbai-development mask/routing result | v3.2 adopted |
+| A38/A38b foreground-biased crops | gray pixels improved, APLS significantly worse | rejected |
+| A41/A41b SDT-BCE | pixels improved, APLS regressed | rejected |
+| A18 frozen → LoRA | common-unit routing improved strongly, absolute routing still low | graph-first direction adopted for A46 |
 
-> Don't use plain pixel accuracy — roads are a tiny fraction of pixels (~4.5% in DeepGlobe), so a model predicting "no road" everywhere scores ~95% while finding nothing. See `Research.md`.
+## Promotion protocol for A46
 
-### Topology (Phase II)
+1. Freeze chip IDs, vector GT, coordinate transform, ground-sample distance and v3.2 reference outputs before training.
+2. Assert graph-label alignment (`x=column`, `y=row`) on every converted sample.
+3. Use the 102-chip validation split for checkpoint/threshold/hyperparameter selection. Keep the 127-chip comparison closed until one configuration is pre-registered; it remains development evidence, not a final test.
+4. Require complete candidate/reference coverage; missing outputs fail the gate.
+5. Report raw APLS, GT-self ceiling, normalized diagnostic, component/isolated-node/edge-length/reachability diagnostics and runtime.
+6. Use paired chip resampling/randomization with a CI; promotion requires the interval to exclude zero in the candidate’s favor and exceed a predeclared material-effect floor.
+7. Require a material absolute gain beyond the current LoRA 18% ceiling fraction.
+8. Validate a later candidate on an untouched geography/sensor before final generalization language.
+9. Before deployment: license, dependency lock, deterministic run manifest, checkpoint provenance/checksum, runtime/memory, Modal/local compatibility, rollback and live smoke.
 
-| Metric | Plain English | Note |
-|---|---|---|
-| **Connectivity Ratio** | How much bigger the largest connected road network gets after MST healing | `% increase in largest connected component` — the direct scoreboard for healing |
-| **Topological Accuracy / APLS** | Is the graph actually *routable*? Compare shortest-path lengths to OSM | Average Path Length Similarity; penalises missing/broken edges heavily (a mask with F1=0.72 can score APLS=0.25 — see `Research.md`) |
+## Evidence work queued in A45/A46
 
-### Resilience (Phase III)
-
-| Metric | Plain English | Note |
-|---|---|---|
-| **Resilience Index (global efficiency)** | How much the network's overall efficiency drops when critical nodes fail | Ratio of global efficiency after vs. before perturbation; **stays finite even when the graph splits** |
-| **Largest-CC curve under ablation** | How fast the network fragments as nodes are removed | The classic percolation curve |
-| **Targeted vs. random degradation** | Does removing *critical* nodes hurt more than removing random ones? | Sanity check that betweenness is finding real chokepoints |
-
-## Benchmark Datasets
-
-| Dataset | Used for |
-|---|---|
-| **DeepGlobe Roads** | Primary pretraining + IoU benchmark |
-| **SpaceNet Roads** | Pretraining + APLS/topological benchmark (ships the APLS metric) |
-| **OpenSatMap** | Domain-diverse, occlusion-rich fine-tuning/eval (non-commercial license) |
-| **OSM-labelled Indian AOIs** | Generalisation to local terrain; auto-generated masks |
-| **Cartosat-3 / LISS-IV demo tile** | Final high-res demonstration + qualitative eval |
-
-## Validation Procedures
-
-- **Strict train/val/test split** — never evaluate on data the model trained on.
-- **Held-out Indian city** for the generalisation metric (train elsewhere, test there).
-- **Spot-check OSM auto-labels** before trusting them — they're weak labels (missing/misaligned roads); use buffered/relaxed metrics.
-- **APLS on random point-pairs:** sample many origin–destination pairs, route on our graph vs. OSM, compare path lengths.
-- **Resilience sanity:** confirm targeted (high-betweenness) removal degrades global efficiency **faster** than random removal — if it doesn't, something's wrong.
-
-## Baseline Results
-
-Reference points from the literature to contextualize our numbers (full citations in `Research.md`):
-
-| Reference | Result |
-|---|---|
-| D-LinkNet (DeepGlobe winner) | strong IoU baseline on DeepGlobe |
-| SpaceNet 3 baseline (U-Net + skeletonize + sknw) | APLS ≈ 0.49 |
-| SpaceNet 3 winner ("albu") | APLS ≈ 0.666 |
-| Cautionary point | a mask at F1 = 0.72 can score APLS = 0.25 — pixels ≠ topology |
-| **Our baselines** | seg: A4 IoU **0.670**, synthetic-cutout recall **0.793** @thr 0.44 (DeepGlobe val) · graph: see below |
-
-### Segmentation-lane numbers (A4 — DeepGlobe held-out validation)
-
-Reproduce with `python -m src.pipeline.p1_segment.evaluate` (reads the trained
-checkpoint's embedded validation metrics → `data/sample/segmentation_eval.json`).
-Add `--image <tile>` for a live qualitative inference demo + red overlay.
-
-| Metric | Value | Notes |
-|---|---|---|
-| Model | SegFormer MiT-B3 + SCSE U-Net (EMA), 47.5M params, 30 epochs | full-res sliding-window (Hann) validation |
-| **IoU** | **0.6699** (flip + multi-scale TTA) · 0.6638 best single-view | held-out DeepGlobe val |
-| **Synthetic-cutout recall** | **0.793** @ deploy thr 0.44 | recall under artificial black rectangles; not real occlusion |
-| Deploy threshold | 0.44 → clean IoU 0.6617 | occlusion-aware: max recall within 0.01 IoU of peak |
-| Checkpoint | GitHub Release `a4-roadseg-v1` | meta-driven; `load_checkpoint` rebuilds + deploys it |
-
-*Real-world spot-check (full P1→S2 dry-run on a live tile, not DeepGlobe): on an
-ESRI World-Imagery tile of tree-canopy-heavy Panaji (Altinho), the model recovered
-roads at 5.13% pixel coverage tracing the visible street network; the predicted-mask
-graph healed **38→23 components (+15 bridges, +50% connectivity)** and held the
-resilience sanity check (**targeted RI 0.503 < random 0.780**). Off-domain + heavy
-occlusion ⇒ a deliberately hard, sparse case — reported honestly per the
-error-analysis policy below; on open road grids the mask is far denser.*
-
-### Real Indian GT — frozen SpaceNet-5 Mumbai development benchmark (A17, A23/A24)
-
-The **truthful** Indian metric. DeepGlobe/OSM-agreement numbers above are in-domain
-or weak-label proxies; A12 proved OSM-agreement is *misleading* (it rewarded models
-that lose on the frozen split). A17 froze a chip-level SpaceNet-5 Mumbai split
-(real human vector GT, `data/sample/spacenet_mumbai_heldout_chips.json`, 127/637
-chips) and re-baselined every model on it. Reproduce with
-`python -m src.pipeline.p1_segment.eval_spacenet --checkpoints <ckpts> --device cuda [--grayscale] [--sweep]`
-and `… apls_eval …`.
-
-<!-- AUTO-GENERATED: from data/sample/spacenet_mumbai_{eval,eval_gray,threshold_sweep,apls}.json (512px, global aggregation; APLS n=80 @0.50) -->
-| Model | RGB IoU @0.44 | RGB @best | Grayscale @best (PAN proxy) | APLS (routing, n=80) | best thr |
-|---|---:|---:|---:|---:|---:|
-| **v3.2** `road_pan` (A24 PAN-hardened) | 0.4017 | **0.4594** | **0.4177** | **0.4987** | 0.52 |
-| v3 `road_spacenet` (SpaceNet-Mumbai fine-tune) | 0.4311 | 0.4493 | 0.4046 | 0.4374 | 0.50 |
-| v2 `road_v2` (Indian OSM fine-tune) | 0.3727 | — | — | — | — |
-| v1 `deepglobe_…_best` (DeepGlobe baseline) | 0.3752 | 0.3993 | 0.3447 | 0.4198 | 0.50 |
-<!-- END AUTO-GENERATED -->
-
-> Report each model at **its own best/deploy threshold** (the `@best` / APLS columns) — the fixed `@0.44` column is kept only to show *why* thresholds moved (v3.2 is tuned to 0.52, so it looks weak at 0.44 yet wins at its optimum). APLS is re-baselined to n=80 at deploy thresholds; it supersedes the earlier n=50 @0.44 figures (v3 0.4147 / v1 0.3844).
-
-> **PAN-proxy caveat (bugs.md §3):** every "grayscale" number here is an **RGB→gray proxy** (`A.ToGray` on RGB imagery), not a measurement on real Cartosat-3 panchromatic data. Real PAN has a different spectral response, noise profile, and MTF at 0.25 m native GSD, so the true PAN gap may be larger or differently shaped than the −9 % proxy suggests. Before any go/no-go decision on PAN imagery: re-run the grayscale eval logic on real PAN chips the moment any are available (even unlabeled sanity checks — road-pixel fraction, visual overlays — beat extrapolating from the proxy).
-
-**Findings:** (1) **v3.2 (A24) is the best deployed segmentation model on this development benchmark.** At deploy thresholds it beats v3 by **RGB +2%, grayscale +3%, and APLS +14%**, and v1 by more. Because Mumbai has guided repeated model decisions, this is not an untouched test set and does not establish geographic generalization. Deployed as [`a4-roadseg-v3.2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) (`meta["threshold"]`=0.52). (2) **v3 beat v1** on this benchmark; the lever was real in-domain labels. (3) The grayscale PAN-proxy gap shrank v1 −14% → v3 −10% → **v3.2 −9%**, but real Cartosat validation remains required. (4) Each fine-tune's optimum is 0.50–0.52; deploy thresholds are stored per model.
-
-### Graph-lane first numbers (S1 sample — `panaji_demo`, OSM-derived w/ simulated occlusion)
-
-Reproduce with `python -m src.pipeline.p3_analysis.evaluate` (reads the committed
-`data/sample/` graph; writes `panaji_demo_graph_eval.json` + `_resilience_curve.png`).
-
-| Metric | Value | Notes |
-|---|---|---|
-| Graph size | 400 nodes, 474 edges | after S3 simplification + S4 consolidation; 19 healed/bridged edges |
-| **Simplification (S3)** | **−22%** nodes (630 → 489) | 48 short stubs pruned + 93 degree-2 chain nodes collapsed; lossless for routing |
-| **Consolidation (S4)** | **489 → 400** nodes | 51 near-duplicate junctions merged (tol 10 m); overpass-guarded (only merges along sub-tolerance edges) |
-| **Total node reduction** | **630 → 400 (−37%)** | **all 10 components preserved** throughout |
-| **Polyline simplification (S5)** | vertices **15.4k → 2.2k (−86%)** | Douglas-Peucker (1.5 m); GeoJSON 675 KB → 256 KB; shape preserved (Hausdorff ≤ tol), routing weights untouched |
-| **Cut structure (S8)** | **136** articulation points, **191** bridge edges | true single-points-of-failure — structural criticality distinct from betweenness |
-| **Connectivity Ratio** | **+15.1%** | largest connected component grew after MST/Union-Find healing (components 29 → 10); build-time figure |
-| Top "Gatekeeper" node | betweenness **0.488** | node 45; top-5 cluster near the centre |
-| Baseline global efficiency | 0.0013 | metric units (1/m); only ratios are interpretable |
-| **Resilience: targeted vs random** | mean RI **0.601 vs 0.731** over 40 removals | targeted (high-betweenness-first) ablation degrades the network **far faster** than random ⇒ betweenness finds genuine chokepoints ✓ |
-
-*Numbers are on the OSM stand-in (S1); the same `evaluate` runs unchanged on a real predicted-mask graph (S2). The graph is now S3-simplified + S4-consolidated — 37% lighter, identical connectivity.*
-
-### Topology metric suite (E2)
-
-The connectivity/topology scoreboard, consolidated — does the extracted graph
-*route* like the real network, not just *look* like it pixel-wise?
-
-| Metric | Owner | Value | Source |
-|---|---|---|---|
-| **Connectivity Ratio** | graph | **+15.1%** (largest CC after healing) | `evaluate` · S3/E1 |
-| **APLS** (vs OSM) | graph | **0.40** symmetric (densified, snap 15 m) | `apls` · S7 |
-| **Relaxed / buffered IoU** | seg | *Akshat — released model, A7/A10* | `p1_segment` |
-
-Graph-side topology metrics (connectivity ratio + APLS) are **reported and
-reproducible** (commands above); the buffered-IoU row is the segmentation lane's
-contribution. Together they catch the "good pixels, bad topology" failure mode
-(F1 0.72 → APLS 0.25) the project exists to avoid.
-
-### Topology validation — APLS vs OSM (S7)
-
-Reproduce with `python -m src.pipeline.p3_analysis.apls` (compares the healed graph
-to a committed OSM ground-truth graph for the AOI; writes `panaji_demo_apls.json`).
-Self-contained, densified, symmetric node-based APLS (no heavy CosmiQ dependency).
-
-| Metric | Value | Notes |
-|---|---|---|
-| **APLS (healed graph vs OSM)** | **0.40** | symmetric harmonic mean (gt→prop 0.30, prop→gt 0.62); 600 sampled pairs, 15 m snap, 10 m densification |
-| Reference (SpaceNet-3) | baseline ≈ 0.49, winner ≈ 0.67 | *not* directly comparable — those are on clean SpaceNet imagery |
-
-This is a **deliberately hard** case: the S1 sample is built from OSM but then
-**simulated-occluded** (80 patches) and healed, so the score measures how well the
-heal recovers OSM routing *after* damage — honest, not inflated. On a clean
-(non-occluded) or S3/S4-simplified build the score rises. APLS guards against the
-"good pixels, bad topology" trap (a mask at F1 0.72 can score APLS 0.25).
-
-### Resilience ablations (E4)
-
-The design choices are only justified if turning them on/off *moves the number*.
-
-**Healing on vs off** — does MST/Union-Find healing actually make a more resilient
-network? (Reproduce: `python -m src.pipeline.p3_analysis.evaluate`; "off" = drop the
-`is_bridged` edges from the sample.)
-
-| | components | global efficiency |
-|---|---|---|
-| **Healing OFF** | 26 | 0.001008 |
-| **Healing ON** | **10** | **0.001105** |
-| Δ | −16 components | **+9.6% efficiency** · **+15.1% connectivity ratio** (build-time) |
-
-**Failure mode — targeted vs random vs flood** (same node count; reproduce:
-`python -m src.pipeline.p3_analysis.flood`):
-
-| Failure | end Resilience Index | reading |
-|---|---|---|
-| **Targeted** (highest-betweenness first) | **0.357** | most damaging — losing the real chokepoints |
-| **Random** (scattered) | 0.428 | distributed loss hurts more than a localized one |
-| **Flood** (spatial cluster around the top chokepoint) | 0.785 | least damaging — the network reroutes around a *localized* hole |
-
-**Reading:** healing measurably improves resilience; and the network is **robust to
-localized floods but vulnerable to targeted chokepoint failure** — exactly the
-distinction a disaster planner needs. (A flood of a *redundant* inland area, `--central`,
-is even more survivable, RI > 1.) The naive expectation "flood ≫ random" does **not**
-hold here because a contiguous flood mostly drowns low-importance local streets;
-reported honestly rather than fitted to the hypothesis.
-
-## Target Scores
-
-Stated as intents, not invented precise numbers (actuals filled in as we run):
-
-- **IoU:** competitive with U-Net/D-LinkNet-class baselines; **prioritise Occlusion-Recall** over raw IoU.
-- **Occlusion-Recall:** a clear improvement *with* occlusion augmentation vs. without (the delta is the point).
-- **Connectivity Ratio:** a large positive jump after MST healing.
-- **APLS:** as high as feasible; minimise wrong/missing edges.
-- **Resilience curve:** smooth, interpretable degradation where **targeted ≫ random**.
-
-## Experimental Design
-
-The ablation studies are the **evidence that our design choices work** — they matter as much as headline scores.
-
-| Experiment | Question it answers |
-|---|---|
-| Occlusion augmentation **on vs. off** | Does simulating occlusion improve Occlusion-Recall? |
-| clDice connectivity loss **on vs. off** | Does the topology-aware loss improve connectivity/APLS? |
-| MST/Union-Find healing **on vs. off** | How much does healing raise Connectivity Ratio and APLS? |
-| Targeted **vs.** random node removal | Does betweenness identify genuinely critical nodes? |
-| (Optional) SegFormer **vs.** U-Net baseline | Does the transformer help under occlusion? |
-
-Each ablation changes **one** thing and reports the metric delta. That's what makes the results credible.
-
-## Error Analysis Strategy
-
-- **Where models fail:** heavy tree canopy, complex multi-road junctions, rural/unseen terrain, and OSM-misaligned tiles.
-- **How to inspect:** overlay predictions on imagery; pull the worst-scoring tiles and look at them; specifically examine recall inside occluded regions (not just overall).
-- **Feed back:** use failure patterns to drive the next iteration (more occlusion augmentation, threshold tuning, targeted fine-tuning), and document recurring failure modes here.
-- **Honesty:** report failure cases openly — a credible evaluation shows where it breaks, not just where it shines.
+- Fix `ablation_curve` to preserve the baseline node universe, then regenerate resilience/flood curves and their plots.
+- Correct graph evaluator `bridged_edges` to distinguish build-time additions from surviving final edges.
+- Regenerate the demand/percolation report against the current sample graph.
+- Unify threshold selection, forget checks and reported IoU on one inference protocol.
+- Track exact A18/A46 configs/results in a license-safe reproducible artifact set.
+- Add a genuinely untouched geography/sensor evaluation set.

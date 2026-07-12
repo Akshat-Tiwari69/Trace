@@ -1,98 +1,148 @@
-# Schema.md
+# Schema.md — Artifact and Data Contracts
 
-> **Purpose.** This document defines the **data architecture** of Route Resilience: the data objects (entities), the on-disk formats that store them, how they relate, the rules that keep them valid, and how data moves through its lifecycle. Because the project is a **file-based geospatial pipeline** (no relational database — see `TRD.md`), "tables" here mean **structured artifacts** (GeoTIFFs, masks, a graph file, metric files) rather than SQL tables. The schema is modelled so it could later be lifted into PostGIS unchanged if the project becomes a hosted service.
+> Route Resilience is file-based. This document records the files and fields the current code exchanges; it is not a hypothetical database design.
 
----
+## Directory lifecycle
 
-## Entity Definitions
-
-Plain English: an "entity" is just a *thing the system keeps track of*. Here are ours.
-
-| Entity | What it is | Key attributes |
+| Directory | Purpose | Git policy |
 |---|---|---|
-| **AOI** (Area of Interest) | A city/region being analyzed | `aoi_id`, `name`, `bbox`, `crs` |
-| **ImageTile** | One satellite image patch | `tile_id`, `aoi_id`, `source` (Sentinel-2/LISS-IV/Cartosat-3), `resolution_m`, `path`, `crs`, `transform` |
-| **RoadMask** | Binary road/not-road image from Phase I | `mask_id`, `tile_id`, `path`, `model_version`, `threshold` — *`model_version`/`threshold` are specified but not yet persisted in artifacts (see `bugs.md` §5A provenance finding)* |
-| **RoadGraph** | The routable network for an AOI (the core entity) | `graph_id`, `aoi_id`, `node_count`, `edge_count`, `crs` |
-| **GraphNode** | An intersection or endpoint | `node_id`, `geometry` (lat/lon), `degree`, `type` (intersection / endpoint / bridged), `betweenness`, `is_critical`, `is_disabled` — *`is_disabled` is **runtime-only** (dashboard session state); it is never persisted in artifacts* |
-| **GraphEdge** | A road segment between two nodes | `edge_id`, `u`, `v`, `geometry`, `length_m` (weight), `is_bridged`, `edge_betweenness` |
-| **CriticalityResult** | Centrality scores + ranking for a graph | `graph_id`, per-node/edge scores, `rank` |
-| **SimulationScenario** | One node-ablation stress test | `scenario_id`, `graph_id`, `disabled_nodes[]`, `resilience_index`, `travel_time_delta_pct`, `largest_cc_fraction` |
-| **MetricsReport** | Evaluation results for a model/graph | `iou`, `dice`, `occlusion_recall`, `connectivity_ratio`, `apls`, `relaxed_iou` |
+| `data/raw/` | Source imagery, OSM and downloaded datasets | ignored except placeholders |
+| `data/interim/` | P1 masks and alignment/probability/provenance sidecars | ignored |
+| `data/processed/` | P2/P3 graphs, tables and successful run summaries | ignored by default |
+| `data/outputs/` | Exports and transient hosted upload jobs | ignored |
+| `data/sample/` | Small committed contract fixtures and evidence reports | tracked |
+| `models/` | Checkpoints and resumable training state | ignored |
 
-## Data Stores ("Tables", adapted to files)
+## AOI identity
 
-| Store (directory) | Contents | Format |
+`aoi` is a sanitized identifier used in paths. It cannot contain traversal or path separators. The source image, checkpoint/config signature and optional georeference—not only the AOI name—determine whether a stage is reusable.
+
+## P1 outputs
+
+### Required mask
+
+`data/interim/{aoi}_mask.png`
+
+- Same raster grid as the inference output.
+- Binary road/background when loaded by P2.
+- A successful mask alone does not imply a valid graph or completed pipeline.
+
+### Optional/georeferenced sidecars
+
+`data/interim/{aoi}/manifest.json`
+
+- Raster width/height, CRS and affine transform when the source is georeferenced.
+- P2 converts geographic/projected raster coordinates into metric graph coordinates; silent degree-as-metre behavior is invalid.
+
+`data/interim/{aoi}/prob.png`
+
+- Same grid as the mask.
+- Written by probability-preserving/blended inference.
+- Used only as optional corridor support during healing; mask-only inputs remain valid.
+
+`data/interim/{aoi}/provenance.json`
+
+- `checkpoint`, `model_sha256`, `encoder`, `arch`, `threshold`, `image_size`, `git_commit`, `created_utc`.
+
+## P2/P3 graph
+
+Canonical processed forms:
+
+- `data/processed/{aoi}_graph.graphml`
+- `data/processed/{aoi}_graph.geojson`
+
+The graph is a NetworkX `MultiGraph`. Parallel edges are identified by `(u, v, edge_key)` and must survive GraphML/GeoJSON round trips.
+
+### Node fields
+
+| Field | Required | Meaning |
 |---|---|---|
-| `data/raw/` | Source imagery, OSM extracts | GeoTIFF, OSM PBF/GeoJSON *(git-ignored)* |
-| `data/interim/` | Image tiles, label masks | GeoTIFF, PNG/NPY |
-| `data/processed/` | Road graph, criticality scores | **GraphML** (+ GeoJSON for the dashboard), CSV/Parquet — *GeoPackage was listed as an option but is unused in practice* |
-| `data/outputs/` | Exports, scenario results, reports | GeoJSON, JSON/CSV |
-| `models/` | Trained model checkpoints | `.pt`/`.pth` *(git-ignored)* |
+| `node_id` | GeoJSON | Stable integer identifier within the graph |
+| `x`, `y` / Point geometry | yes | Metric or WGS84 position according to artifact metadata |
+| `degree`, `type` | yes | Graph degree and endpoint/intersection classification |
+| `betweenness` | after P3 | Normalized criticality score |
+| `is_critical` | after P3 | Member of configured top critical set |
+| `is_articulation` | after P3 | Removing the node increases component count |
 
-**Core graph schema (GraphML; GeoPackage unused in practice — artifacts ship as GraphML/GeoJSON):**
+### Edge fields
 
-```
-Node:  node_id (int, unique) | x, y (float) | degree (int)
-       | type (str) | betweenness (float 0–1) | is_critical (bool) | is_disabled (bool, runtime-only — never persisted)
-Edge:  u (int) | v (int) | length_m (float > 0) | geometry (LineString)
-       | is_bridged (bool) | edge_betweenness (float 0–1)
-```
+| Field | Required | Meaning |
+|---|---|---|
+| `u`, `v`, `edge_key` | GeoJSON/topology identity | MultiGraph identity; GraphML may encode the key structurally rather than duplicating every property |
+| `geometry` | yes in GeoJSON | LineString following the road/bridge shape |
+| `length_m` | yes | Positive route weight in metres, or explicit pixel-space fallback converted by `resolution_m` |
+| `is_bridged` | yes | Edge inferred by the P2 healing stage |
+| `is_bridge` | after P3 | Graph-theoretic bridge whose removal disconnects the graph |
+| `edge_betweenness` | reserved/optional | Normalized edge criticality when an evaluation path computes it; production P3 currently leaves the default |
+| `confidence` | when probability exists | Mean P1 support along the edge, clipped for presentation downstream |
+| `width_m` | when medial information exists | Approximate road width |
 
-## Relationships
+Graph invariants:
 
-```mermaid
-erDiagram
-    AOI ||--o{ IMAGETILE : contains
-    IMAGETILE ||--|| ROADMASK : produces
-    AOI ||--|| ROADGRAPH : "has one merged"
-    ROADGRAPH ||--o{ GRAPHNODE : contains
-    ROADGRAPH ||--o{ GRAPHEDGE : contains
-    GRAPHNODE ||--o{ GRAPHEDGE : "endpoint of"
-    ROADGRAPH ||--|| CRITICALITYRESULT : scored_by
-    ROADGRAPH ||--o{ SIMULATIONSCENARIO : stress_tested_by
-    ROADGRAPH ||--|| METRICSREPORT : evaluated_by
-```
+- Every edge endpoint exists; `length_m > 0`.
+- Geometry endpoints agree with node positions after simplification/consolidation.
+- GraphML and GeoJSON describe the same analyzed graph.
+- `is_bridged` and `is_bridge` are different concepts and are never interchanged.
+- Missing georeference is an explicit pixel-space mode, not an accidental default.
 
-In words: an AOI has many image tiles; each tile produces one mask; the masks for an AOI combine into one road graph; the graph contains many nodes and edges; the graph is scored once (criticality), evaluated once (metrics), and stress-tested many times (one scenario per simulation).
+## P3 tables
 
-## Constraints
+### Criticality
 
-- `node_id` is **unique** within a graph; every edge's `u`/`v` must reference **existing** nodes (no dangling edges).
-- `crs` must be **consistent** across an AOI's tile, mask, and graph (mismatched coordinate systems are the classic bug — see `Research.md`).
-- All node/edge geometry must fall **within the AOI bbox**.
-- `length_m` (edge weight) must be **> 0**.
-- `betweenness` / `edge_betweenness` are **normalized to [0, 1]**.
-- `type` ∈ {intersection, endpoint, bridged}; `is_bridged` true only for edges added by the healing step.
+`data/processed/{aoi}_criticality.csv`
 
-## Indexes
+Required columns:
 
-(Not SQL indexes — the equivalents that keep lookups fast.)
+`node_id,betweenness,rank,is_critical,is_articulation,x,y`
 
-- **Spatial index** (R-tree via `geopandas`/`rtree`) over nodes and edges → fast "what's near this click?" map queries.
-- **Node-id lookup** (Python dict) → O(1) access to a node by id during simulation.
-- **Sorted criticality index** → instant "Top-N critical nodes" for the dashboard list.
+### Resilience curve
 
-## Validation Rules
+`data/processed/{aoi}_resilience.csv`
 
-- Mask pixels are strictly **binary {0, 1}**.
-- Graph **connected-component count** is recorded before and after healing (drives the Connectivity Ratio metric).
-- **No self-loops** unless intentional; **no duplicate edges** between the same node pair.
-- **Bridged edges flagged** (`is_bridged = true`) so inferred roads are distinguishable from observed ones everywhere downstream (including the dashboard).
-- All **required fields present** before an artifact is written (fail fast, with a clear message).
-- Coordinates within bounds; weights positive; betweenness in range.
+Required columns:
 
-## Data Lifecycle
+`n_removed,targeted_efficiency,targeted_resilience_index,targeted_largest_cc_fraction,random_efficiency,random_resilience_index,random_largest_cc_fraction`
 
-```mermaid
-flowchart LR
-    R[Raw<br/>downloaded / provided] --> I[Interim<br/>tiled + masked]
-    I --> P[Processed<br/>graph + metrics]
-    P --> O[Output<br/>exports + reports]
-    O --> A[Archive / cleanup]
-```
+The product contract requires resilience to use the baseline node universe and remain in `[0, 1]`. The single-scenario path satisfies this; the current multi-step `ablation_curve` removes nodes and therefore has a known shrinking-denominator defect queued for A45. Existing curve artifacts must be regenerated after that fix.
 
-- **Raw** imagery and **model checkpoints** are **git-ignored** (too large / restricted-license); only small **sample** data is committed so the repo runs out of the box.
-- **Processed** graphs and metrics are small and reproducible, so they can be committed or regenerated.
-- **Cloud storage is ephemeral** — checkpoints and important artifacts are saved off-device (Drive/Kaggle Datasets) as noted in `Research.md`.
-- Re-running the pipeline on the same raw input + same config + fixed seed must reproduce the same processed artifacts (reproducibility requirement from `TRD.md`).
+### Successful run summary
+
+`data/processed/{aoi}_run.json`
+
+Contains `status`, AOI, output paths, node/edge counts, per-stage run/skip timings, resolved configuration and available provenance. It is written only after the P4 artifact seam succeeds.
+
+Stage signature manifests are internal reuse metadata. They mean the named stage completed for a specific input/config signature; they are not whole-pipeline success records.
+
+## Dashboard sample contract
+
+The default app reads:
+
+- `data/sample/panaji_demo_graph.geojson`
+- `data/sample/panaji_demo_criticality.csv`
+- `data/sample/panaji_demo_resilience.csv`
+
+These files are tested as committed fixtures. Evidence JSON derived from the sample must be regenerated whenever the sample graph changes.
+
+## Hosted upload jobs
+
+`data/outputs/upload_jobs/` stores transient single-host queue files:
+
+- `{job_id}.json`: versioned job state, sequence and owner/lease metadata.
+- `{job_id}.npy`: binary mask input.
+- `{job_id}.claim`: atomic process claim.
+- `{job_id}.result.json`: versioned serializable analysis result.
+- `sequence.counter`/`sequence.lock`: persistent FIFO allocation.
+
+Jobs are disposable and age-cleaned. This is not a user data store or a horizontally scalable queue.
+
+## Evaluation artifacts
+
+Committed JSON reports in `data/sample/` must name the model/data unit, sample count, thresholds, coverage and metric settings needed to interpret them. Mumbai reports are development-benchmark evidence, not untouched-test evidence.
+
+## Validation ownership
+
+- P1 validates imagery, mask shape, checkpoint metadata and sidecars.
+- P2 validates coordinates, geometry and positive edges.
+- P3 validates required graph/table fields and bounded metrics.
+- P4 validates its committed/runtime input columns and handles missing artifacts gracefully.
+- CI guards the sample contract and production upload-analysis dependency path.

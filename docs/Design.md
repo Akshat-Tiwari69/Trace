@@ -1,121 +1,105 @@
-# Design.md
+# Design.md — Dashboard Baseline and F9 Brief
 
-> **Purpose.** This document defines the visual design and user-experience standards for the **Route Resilience** dashboard — the map-first web app that shows the road network, highlights critical junctions, and lets a user simulate a junction failure. It keeps the UI legible for non-technical users, consistent across screens, and quick to build. Read alongside `PRD.md` (what/why), `TRD.md` (stack/architecture), and `UserJourney.md` (flows). Design decisions here follow the project's actual stack — **Streamlit + Folium, pure Python** — not a custom JS frontend.
+> The product remains Streamlit + Folium. This document records the current visual/interaction contract and the goals for the later F9 overhaul; it does not propose a different frontend stack.
 
-> **Design scope.** v1 is a **single Streamlit + Folium dashboard** driven by **precomputed artifacts**: the road network, the criticality heatmap, region drilldown, the resilience metrics, and the click-a-junction-to-disable simulation. Screens marked *Future* below (flood-polygon simulator, mobile companion, a separate extraction-debug view) are **aspirational / out of v1 scope**. Numbers in mockups are **illustrative placeholders**.
+## Current information architecture
 
----
+| View | Primary purpose | Key content |
+|---|---|---|
+| **Briefing** | Orient a first-time user | Value proposition, baseline metrics, simplified map and worst-failure demonstration |
+| **Analysis** | Explore network behavior | Full map, scenario/rankings/curves sub-tabs, metrics and export |
+| **Your imagery** | Run the uploaded-image path | Disclosure/consent, validation, Modal P1, queue progress and result |
+| **Methodology** | Explain evidence and limits | Pipeline, metric definitions, model/benchmark caveats |
 
-## 1. Vision & Philosophy
+The Analysis view is map-led; the whole application is not a single fixed 65/35 screen.
 
-- **Map is the hero.** The interactive map dominates the UI, with roads coloured by criticality. Panels and charts support the map and never distract from it.
-- **Mission-control tone.** Calm, authoritative, data-focused — inspired by operations-centre UIs. A neutral dark theme; **no flags or patriotic motifs**.
-- **Colour means data.** Colour is reserved for encoding information (criticality, status), never decoration. The criticality ramp is a **colourblind-safe sequential scheme (Viridis / cividis)**; semantic states are also labelled so meaning never depends on colour alone.
-- **Clarity & accessibility.** Clean, legible type (Inter), comfortable sizes for non-technical users, WCAG AA contrast (≥ 4.5:1), and plain-language tooltips for every metric.
-- **Honest about uncertainty.** Inferred/healed roads are shown distinctly (e.g. dashed lines) so users can tell observed roads from reconstructed ones.
+## Current visual system
 
-## 2. Visual Identity
+- Dark operations-dashboard foundation with navy surfaces and restrained amber/blue accents.
+- Fira Sans for interface text and Fira Code/tabular numerals for metrics.
+- Satellite imagery is the default basemap; an alternate dark basemap is available.
+- Criticality uses a labeled colorblind-conscious sequential ramp.
+- Selected, disabled, rerouted, inferred and single-point-of-failure states have separate colors **and** line/marker/label cues.
+- The header state chip says `DEMO · PANAJI` at rest and animates only when a simulation is active.
+- Streamlit native components inherit the dark theme through `.streamlit/config.toml`; custom CSS must not fight native semantics.
 
-- **Colour scheme:** dark base (background `#121212`, panels `#1E1E2E`). **Criticality ramp:** cividis clipped to its upper range (0.3–1.0; 4 hardcoded stops `#4F576C → #848279 → #C0B16A → #FEE838`) — colourblind-safe, chosen for dark-tile legibility; supersedes the earlier Viridis note, whose near-black low end was invisible on dark basemap tiles. **Semantic palette:** normal road = grey, selected = cyan, rerouted path = orange, disabled junction = red (always paired with an icon). Every colour-coded element carries a label or icon.
-- **Typography:** a neutral sans-serif (Inter or system font). Hierarchy: titles 26–28 px bold, section headers 18–20 px semibold, body 14–16 px, captions 12 px. Metric numbers use **tabular figures** so they align. No more than **3 sizes per screen**.
-- **Iconography:** simple glyphs from a standard set (Material/Font Awesome style) that reinforce meaning — e.g. a "!" on critical nodes. No decorative imagery.
+Exact production colors live in the `TOKENS` mapping in `src/app/app.py` until F9 extracts a dedicated theme module. Do not maintain a second hex-value source here.
 
-## 3. Layout & Architecture
+## Interaction contract
 
-Map-centric two-column layout: the **map ~65%** (left), a **control panel ~35%** (right). Key metrics (Resilience Index, travel-time impact) sit atop the panel; a persistent legend overlays the map bottom-left. On wide screens (1920×1080+) the map spans most of the viewport; on a laptop (1366×768) panels may stack **below** the map to stay readable.
+- Map pan/zoom persists through normal control changes.
+- A junction can be selected from the map or an accessible list/control.
+- Rankings can recenter/highlight the selected junction.
+- Area failure has a keyboard-accessible alternative to drawing.
+- Disabled links are dashed; reroutes are visually dominant but do not obscure context.
+- Healed roads are distinguishable from observed roads.
+- RI is explained as retained baseline efficiency; destructive deltas use the correct semantic treatment.
+- Export is user-triggered, not eagerly recomputed on every rerun.
+- Motion honors `prefers-reduced-motion`.
 
-**How the dashboard fits the system (matches `TRD.md`):** the dashboard reads committed/precomputed artifacts for the demo path. For user imagery it sends source bytes to an authenticated Modal GPU endpoint for segmentation, then runs mask-to-graph/resilience analysis in the Oracle-hosted Streamlit process.
+## Data visualization rules
 
-```mermaid
-flowchart LR
-    IMG[Satellite imagery + OSM] --> PIPE[Offline Python pipeline<br/>segmentation -> graph -> criticality]
-    PIPE -->|precomputed artifacts<br/>graph.graphml + criticality.csv| APP[Streamlit + Folium dashboard]
-    USER[User] -->|click a junction or upload imagery| APP
-    APP -->|authenticated image request| MODAL[Modal GPU segmentation]
-    MODAL -->|road mask| APP
-    APP -->|in-process graph analysis + simulate_ablation| APP
-```
+- Never use color as the only carrier of meaning.
+- Label units and assumptions; do not imply measured travel speed when only length at constant speed is available.
+- Separate `is_bridged` (inferred edge) from `is_bridge` (structural single point of failure).
+- Keep baseline and post-failure values comparable and name the removal count.
+- Explain when a route is unreachable or a multi-node travel-time summary is not meaningful.
+- Leaflet renders the WGS84 data in Web Mercator; pipeline metric computation remains in the appropriate metric frame.
 
-There is no database, login system, or separately managed application backend in v1. The one network API is the shared-secret Modal segmentation endpoint; P2/P3 and simulations remain in-process.
+## Layout and responsive behavior
 
-## 4. Screens & Mockups
+Current layout uses Streamlit wide mode with a full-width product header. Analysis typically places the map and controls side by side; other tabs use task-appropriate sections.
 
-### 4.1 Main Dashboard — Map-First *(v1 core)*
-The landing screen: a full-screen dark basemap with roads coloured by the criticality heatmap. Top: key metrics (overall **Resilience Index**, **average travel-time impact**). Right panel: scenario dropdown (flood / accident / closure), region selector, layer toggles. Bottom-left: the colour-ramp legend. Hovering/clicking a road or junction shows a tooltip (name + criticality). Clicking a junction lets the user **disable** it ("Simulate Road Closure"), after which the map re-colours and the metrics + rerouted path update.
-- **Flow:** load → city overview → zoom/pan → click a junction to disable → see instant re-colour + updated index + reroute.
-- **Mockup prompt:** *"High-tech navigation dashboard, interactive city map, roads in a heatmap colour ramp on a dark basemap, sleek dark UI panels with metrics and a dropdown, clean flat style."*
+F9 must define and browser-test at least:
 
-### 4.2 Region Drilldown *(v1)*
-On region selection the map zooms in and the panel lists the **Top 5 Critical Nodes** for that area (sortable, each with an icon + score). Hovering a list item highlights the road on the map; a small bar chart shows critical nodes per sub-zone.
-- **Flow:** select region → see ranked hotspots → click an item to centre the map → optionally disable it.
+- wide desktop (about 1440 px and above);
+- common laptop (about 1280–1366 px);
+- narrow/tablet-width fallback where map and controls stack without horizontal clipping.
 
-### 4.3 Criticality Analysis *(v1)*
-The panel shows the headline **Resilience Index** plus two charts: travel-time increase vs. number of roads closed (line), and top delays by road (bar). Charts update instantly when a node is disabled, and use colourblind-safe palettes with labels.
-- **Mockup prompt:** *"Data-analytics panel beside a map, a line chart and a bar chart of road-network resilience metrics, clean 2D flat style."*
+Mobile field use remains out of scope, but a narrow browser must stay readable and operable.
 
-### 4.4 Road-Extraction View *(optional / developer)*
-Overlays the model-detected roads (thin lines) on the raw satellite image, with an opacity slider, so the team (or a curious user) can verify extraction quality and spot gaps. Mainly a debugging/transparency view.
+## Accessibility baseline
 
-### 4.5 Future screens *(out of v1 scope)*
-- **Disaster simulator:** shipped — draw a flood polygon or select affected junctions with the keyboard-accessible list; the map closes affected roads and shows resilience impact.
-- **Mobile companion:** a stripped-down map + current Resilience Index for field teams. *Out of v1 scope (PRD marks mobile out of scope); kept here as a future idea.*
+- WCAG-AA contrast for normal text and essential controls.
+- Visible focus indicators.
+- Plain-language labels/help for RI, criticality, inferred roads and routing impact.
+- Keyboard access to the full non-map scenario flow.
+- Reduced-motion support.
+- Maps have nearby text/tabular alternatives for essential findings.
 
-## 5. Component Library
+F9 adds browser-level checks for focus order, keyboard completion, narrow layout and meaningful labels.
 
-Reusable blocks, each with states and the **v1 (Streamlit/Folium)** implementation.
+## Loading, empty and error states
 
-| Component | Purpose | States | v1 implementation |
-|---|---|---|---|
-| **Map canvas** | Show roads + layers | loading, idle, error | `folium.Map` via `streamlit-folium` |
-| **Road segment** | One road, coloured by criticality | normal, selected, disabled | `folium.PolyLine` |
-| **Intersection marker** | A junction (clickable) | default, hovered, disabled | `folium.CircleMarker` |
-| **Metric card** | A key number (e.g. Resilience Index) | normal, alert | `st.metric` |
-| **Legend / colour bar** | Explain the criticality ramp | static | `branca` colormap / custom HTML |
-| **Top-critical list** | Ranked nodes + scores | hover-highlight, sortable | `st.dataframe` |
-| **Scenario selector** | Pick flood/accident/closure | default, open, selected | `st.selectbox` |
-| **Disable-node control** | Trigger the simulation | enabled, processing | map click (`st_folium`) + `st.button` |
-| **Loading indicator** | During recompute | active, done | `st.spinner` |
+- Sample-load failure names the expected artifact problem.
+- Upload remains visibly disabled when Modal configuration is absent; sample use still works.
+- Upload validation happens before remote work.
+- Cold start, queue position, analysis and completion are distinct states.
+- Retryable failures offer a retry; safe errors do not expose secrets or raw tracebacks.
+- A degenerate uploaded graph is a failed job, not an empty successful analysis.
 
-*Empty/error states:* every component degrades gracefully — "no simulation running", "no data for this area", a spinner during compute — rather than showing a blank or a stack trace.
+## Performance design
 
-**Mapping-library note (for future reference only):** v1 uses **Folium / Leaflet via Streamlit** (pure Python, matches `TRD.md`). The table below compares JavaScript mapping libraries that would only be relevant if the product later moved to a custom JS frontend — **not part of v1**.
+- Cache stable graph/data transformations by an input fingerprint.
+- Render edges as vectorized GeoJSON rather than one Python Folium object per edge.
+- Avoid rebuilding static map layers and exports on unrelated reruns.
+- Keep map payload/AOI bounded; use measured graph sampling/caching for large analysis.
+- Preserve the production-only dependency smoke when components are extracted during A45/F9.
 
-| Library | 2D/3D | Use case | License |
-|---|---|---|---|
-| Leaflet | 2D | simple maps, many plugins | open (BSD) |
-| Mapbox GL JS | 2D + extruded 3D | modern vector maps | proprietary (free tier) |
-| deck.gl | 2D/3D GPU | very large datasets on WebGL | open (MIT) |
-| CesiumJS | 3D globe | global/terrain views | open (Apache) |
-| ArcGIS JS | 2D/3D | enterprise GIS | commercial (Esri) |
+## F9 overhaul objectives
 
-## 6. Interaction & Motion
+1. Make “Explore the sample” and “Analyze your imagery” unmistakable first-run paths.
+2. Reduce nested navigation and keep the primary scenario story visible.
+3. Create a consistent component/layout system outside the 1,900-line `app.py` without introducing a framework rewrite.
+4. Improve evidence hierarchy: result first, supporting metrics second, method/limitations always reachable.
+5. Make upload privacy, cold-start/queue status and uncertainty understandable before submission.
+6. Preserve every working analysis/export/recovery behavior through browser and unit tests.
 
-Motion is subtle and purposeful:
-- **Transitions:** smooth map pan/zoom (Leaflet default); keep a plan (top-down) view.
-- **Loading:** a spinner/overlay on affected components during a recompute (e.g. "Simulating…" when a junction is disabled).
-- **Highlight changes:** when a new rerouted path appears, briefly emphasise it (draw it last / slightly thicker) so the eye catches it.
-- **Avoid overuse:** no gratuitous animation; chart/metric updates are instant.
+## F9 acceptance evidence
 
-*Feasibility note:* some effects (custom blur, animated line "drawing", custom gauges) aren't native to Streamlit and may need custom CSS/HTML or a small component. Treat them as design intent; for v1, approximate with what Streamlit + Folium support cleanly and don't let styling block the core interaction.
-
-## 7. Accessibility & Performance
-
-- **Keyboard & screen reader:** controls reachable via keyboard; `aria-label`s on buttons; note Streamlit's a11y limits and avoid colour-only controls.
-- **Colour & contrast:** never colour alone — critical nodes also get an icon; text meets WCAG AA (≥ 4.5:1), checked with a contrast tool.
-- **Text alternatives:** a short caption near the map explains the colour ramp ("brighter = more critical"); tooltips give names + values.
-- **Performance (v1 reality):** the dashboard works against **precomputed GeoJSON/CSV** for one AOI, so it stays light. Precompute betweenness once (k-sample for large graphs); cache loads with `st.cache_data`; keep the rendered graph to a reasonable AOI size. Heavy WebGL rendering of whole cities is a *future-frontend* concern, not v1.
-
-## 8. Data-Visualization Standards
-
-Follow cartographic good practice: Web Mercator (EPSG:3857) for city/regional scale, clear legend + title alignment, inline labels where possible, and no decorative 3D that obscures data. Every gauge/chart has a tooltip explaining its units. Charts use the same colourblind-safe palette as the map.
-
-## 9. Implementation Notes
-
-- **Frontend (v1):** Streamlit + Folium (`streamlit-folium`); charts via Matplotlib or Plotly; `branca` for the colour legend. Consumes **precomputed GeoJSON + CSV** — deliver against sample/mock artifacts first, then wire to real outputs.
-- **Deployed services:** Oracle-hosted Streamlit + Caddy, with an authenticated Modal GPU endpoint for uploaded-image segmentation. No database or user-login system; graph analysis and simulation run in-process.
-- **Reproducibility:** pinned dependencies and CI cover both the full pytest suite and the production upload-analysis environment.
-- **Future option (not v1):** a React + deck.gl frontend with a FastAPI + PostGIS backend, only if the product outgrows Streamlit.
-
-## 10. Timeline
-
-Timeline, milestones, and deliverables are owned by **`Implementation.md`** (single source of truth) and tracked in **`Tracker.md`** — not duplicated here. The dashboard is built in the frontend workstream against precomputed/mock artifacts, so it can progress in parallel without waiting on the model.
+- Before/after screenshots at the three target widths.
+- Browser walkthroughs of every flow in `UserJourney.md`.
+- Keyboard-only scenario and area-selection completion.
+- No regression in existing app/unit/import/production-upload tests.
+- Updated design tokens/components and removal of superseded CSS/UI paths.
+- Tracker log with the user problems solved, not only aesthetic changes.

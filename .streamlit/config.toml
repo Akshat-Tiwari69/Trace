@@ -3,7 +3,7 @@
 # charts, dataframe, dropdown menus) follows this dark theme, so the custom CSS
 # in app.py only has to layer polish on top instead of fighting a light base.
 [server]
-# Cap uploads at 20 MB (the live-detection uploader also enforces this in-app).
+# Cap encoded uploads at 11 MB; the app/Modal limits account for base64 expansion.
 maxUploadSize = 11
 
 [theme]
