@@ -46,6 +46,29 @@ def test_gather_pairs_3way_split_disjoint(tmp_path):
     assert {p[0] for p in dg_val}.isdisjoint(p[0] for p in train)
 
 
+def test_gather_pairs_keeps_spacenet_chip_tiles_in_one_split(tmp_path):
+    dg = tmp_path / "dg"
+    dg.mkdir()
+    for i in range(8):
+        _write_pair(dg, f"dg{i}")
+    indian = []
+    for chip in range(5):
+        for tile in range(3):
+            sat = tmp_path / f"sn5mum_chip{chip}_r0_c{tile}_sat.jpg"
+            mask = tmp_path / f"sn5mum_chip{chip}_r0_c{tile}_mask.png"
+            indian.append((sat, mask))
+    cfg = FineTuneConfig(
+        init_checkpoint="x", finetune_pairs=indian, deepglobe_dir=dg,
+        deepglobe_subset=2, deepglobe_val=2, finetune_oversample=1,
+        val_fraction=0.4,
+    )
+
+    train, val, _ = gather_pairs(cfg)
+    train_chips = {p[0].name.split("_")[1] for p in train if "sn5mum_" in p[0].name}
+    val_chips = {p[0].name.split("_")[1] for p in val}
+    assert train_chips.isdisjoint(val_chips)
+
+
 def test_freeze_encoder_disables_encoder_grads(tmp_path):
     model = build_model(encoder_weights=None, decoder_attention_type="scse")
     cfg = FineTuneConfig(init_checkpoint="x", finetune_dir=tmp_path, encoder_lr_scale=0.0)
@@ -74,6 +97,10 @@ def test_finetune_selects_and_saves_releasable_checkpoint(tmp_path):
     model, meta = load_checkpoint(out)
     assert meta["encoder_frozen"] is True
     assert "indian_val_iou" in meta and "deepglobe_val_iou" in meta
+    assert meta["threshold"] in cfg.selection_thresholds
+    assert meta["threshold"] == summary["best"]["threshold"]
+    assert "deepglobe_delta_ci_low" in meta
+    assert "deepglobe_delta_ci_high" in meta
 
 
 def test_finetune_resume_continues_from_next_epoch(tmp_path):

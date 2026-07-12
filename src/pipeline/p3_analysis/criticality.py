@@ -252,7 +252,11 @@ def benchmark_betweenness(
     from scipy.stats import spearmanr
 
     t = time.perf_counter()
-    exact = compute_betweenness(graph, weight=weight, k=None, seed=seed)
+    # Bypass compute_betweenness's interactive auto-sampling: a benchmark labelled
+    # "exact" must call NetworkX exact mode even above AUTO_K_NODE_THRESHOLD.
+    import networkx as nx
+    exact = nx.betweenness_centrality(
+        graph, k=None, weight=weight, normalized=True, seed=seed)
     exact_s = time.perf_counter() - t
 
     t = time.perf_counter()

@@ -97,9 +97,25 @@ def heldout_pairs(corpus: Path, test_chips: list[str]) -> list[tuple[Path, Path]
     return _pairs_by_chip(corpus, set(test_chips), keep_in_set=True)
 
 
-def train_pairs(corpus: Path, test_chips: list[str]) -> list[tuple[Path, Path]]:
-    """(sat, mask) pairs whose chip is NOT held out — the A23 supervised train set."""
-    return _pairs_by_chip(corpus, set(test_chips), keep_in_set=False)
+def train_pairs(corpus: Path, test_chips: list[str],
+                min_road_fraction: float = 0.005) -> list[tuple[Path, Path]]:
+    """Non-heldout road-bearing train pairs; heldout eval retains negatives."""
+    pairs = _pairs_by_chip(corpus, set(test_chips), keep_in_set=False)
+    if min_road_fraction <= 0:
+        return pairs
+    from PIL import Image
+    import numpy as np
+
+    kept = []
+    for pair in pairs:
+        try:
+            fraction = float((np.asarray(Image.open(pair[1]).convert("L")) > 127).mean())
+        except Exception:
+            kept.append(pair)  # tolerate legacy/test placeholder files
+            continue
+        if fraction >= min_road_fraction:
+            kept.append(pair)
+    return kept
 
 
 def _pairs_by_chip(corpus: Path, chips: set[str], keep_in_set: bool) -> list[tuple[Path, Path]]:
@@ -112,12 +128,49 @@ def _pairs_by_chip(corpus: Path, chips: set[str], keep_in_set: bool) -> list[tup
     return out
 
 
+def _evaluate_with_chip_stats(model, loader, pairs, device: str, threshold: float) -> dict:
+    """Global IoU/Dice plus chip-clustered IoU from one inference pass."""
+    import torch
+
+    eps = 1e-7
+    total_inter = total_pred = total_target = 0.0
+    chip_counts: dict[str, list[float]] = {}
+    offset = 0
+    with torch.inference_mode():
+        for images, masks in loader:
+            probs = torch.sigmoid(model(images.to(device))).cpu()
+            pred = probs >= threshold
+            target = masks >= 0.5
+            for j in range(len(images)):
+                p, t = pred[j], target[j]
+                inter = float((p & t).sum())
+                pred_sum, target_sum = float(p.sum()), float(t.sum())
+                total_inter += inter
+                total_pred += pred_sum
+                total_target += target_sum
+                chip = chip_of(pairs[offset + j][0].name)
+                counts = chip_counts.setdefault(chip, [0.0, 0.0, 0.0])
+                counts[0] += inter
+                counts[1] += pred_sum
+                counts[2] += target_sum
+            offset += len(images)
+    union = total_pred + total_target - total_inter
+    return {
+        "iou": (total_inter + eps) / (union + eps),
+        "dice": (2 * total_inter + eps) / (total_pred + total_target + eps),
+        "per_chip_iou": {
+            chip: (inter + eps) / (pred_sum + target_sum - inter + eps)
+            for chip, (inter, pred_sum, target_sum) in chip_counts.items()
+        },
+    }
+
+
 def evaluate_checkpoints(
     checkpoints: list[Path],
     corpus: Path = DEFAULT_CORPUS,
     manifest: Path = DEFAULT_MANIFEST,
     threshold: float | None = None,
-    image_size: int = 384,
+    image_size: int = 512,
     device: str = "cpu",
     grayscale: bool = False,
     chips: list[str] | None = None,
@@ -136,7 +189,6 @@ def evaluate_checkpoints(
 
     from src.pipeline.p1_segment.dataset import RoadTileDataset, build_val_transform
     from src.pipeline.p1_segment.model import load_checkpoint
-    from src.pipeline.p1_segment.train import evaluate
 
     all_chips = sorted({chip_of(p.name) for p in Path(corpus).glob("*_sat.jpg")})
     test_chips = chips if chips is not None else load_or_make_heldout(all_chips, manifest)
@@ -152,14 +204,34 @@ def evaluate_checkpoints(
         model, meta = load_checkpoint(ckpt, map_location=device)
         model.to(device).eval()
         thr = threshold if threshold is not None else float(meta.get("threshold", 0.44))
-        m = evaluate(model, loader, device, threshold=thr)
-        results[Path(ckpt).name] = {"iou": m["iou"], "dice": m["dice"], "threshold": thr}
+        m = _evaluate_with_chip_stats(model, loader, pairs, device, thr)
+        results[Path(ckpt).name] = {
+            "iou": m["iou"], "dice": m["dice"], "threshold": thr,
+            "per_chip_iou": m["per_chip_iou"],
+        }
         print(f"  {Path(ckpt).name:42s} real-GT IoU {m['iou']:.4f}  Dice {m['dice']:.4f}  (thr {thr:.2f})",
               flush=True)
         del model
-    return {"n_test_chips": len(test_chips), "n_test_tiles": len(pairs),
-            "threshold": threshold, "image_size": image_size, "grayscale": grayscale,
-            "models": results}
+    report = {"n_test_chips": len(test_chips), "n_test_tiles": len(pairs),
+              "threshold": threshold, "image_size": image_size, "grayscale": grayscale,
+              "models": results}
+    if len(checkpoints) >= 2:
+        from src.pipeline.p1_segment.stats import paired_bootstrap_ci
+
+        a_name, b_name = Path(checkpoints[0]).name, Path(checkpoints[1]).name
+        a_scores = results[a_name]["per_chip_iou"]
+        b_scores = results[b_name]["per_chip_iou"]
+        common = sorted(set(a_scores) & set(b_scores))
+        if common:
+            ci = paired_bootstrap_ci([a_scores[c] for c in common],
+                                     [b_scores[c] for c in common])
+            report["paired_chip_iou"] = {
+                "checkpoint_a": a_name, "checkpoint_b": b_name,
+                "n_paired_chips": len(common), "delta_b_minus_a": ci.delta,
+                "ci_low": ci.ci_low, "ci_high": ci.ci_high,
+                "excludes_zero": ci.excludes_zero, "verdict": ci.verdict,
+            }
+    return report
 
 
 def threshold_sweep(
@@ -175,11 +247,12 @@ def threshold_sweep(
     restricts the sweep to a subset of the held-out chips (used by
     :func:`honest_threshold_eval` to select the threshold on a held-out half that
     is disjoint from the reporting half)."""
-    import cv2
     import numpy as np
+    import torch
+    from torch.utils.data import DataLoader
 
-    from src.pipeline.p1_segment.model import load_checkpoint, predict_prob_batch
-    from src.pipeline.p1_segment.raster_io import imread_gray, imread_rgb
+    from src.pipeline.p1_segment.dataset import RoadTileDataset, build_val_transform
+    from src.pipeline.p1_segment.model import load_checkpoint
 
     if thresholds is None:
         thresholds = [round(0.20 + 0.02 * i, 2) for i in range(26)]  # 0.20..0.70
@@ -187,6 +260,9 @@ def threshold_sweep(
     all_chips = sorted({chip_of(p.name) for p in corpus.glob("*_sat.jpg")})
     test_chips = chips if chips is not None else load_or_make_heldout(all_chips, manifest)
     pairs = heldout_pairs(corpus, test_chips)
+    loader = DataLoader(
+        RoadTileDataset(pairs, build_val_transform(image_size, grayscale=grayscale)),
+        batch_size=16, shuffle=False, num_workers=0)
     mode = "GRAYSCALE (Cartosat-PAN proxy)" if grayscale else "RGB"
     print(f"threshold sweep [{mode}] over {len(pairs)} held-out tiles, {len(thresholds)} thresholds", flush=True)
 
@@ -197,31 +273,19 @@ def threshold_sweep(
         eps = 1e-7
         inter = {t: 0.0 for t in thresholds}
         union = {t: 0.0 for t in thresholds}
-        # Batch tiles through the model (A28): read+preprocess a bounded chunk, run
-        # one (device-aware) batched forward, then sweep thresholds on each prob map.
-        batch = 16
-        for start in range(0, len(pairs), batch):
-            imgs, gts = [], []
-            for sat, mask_path in pairs[start : start + batch]:
-                img = imread_rgb(sat)
-                if img.shape[0] != image_size:
-                    img = cv2.resize(img, (image_size, image_size))
-                if grayscale:
-                    g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-                    img = np.stack([g, g, g], -1)
-                gt = imread_gray(mask_path) > 127
-                if gt.shape[0] != image_size:
-                    gt = cv2.resize(gt.astype(np.uint8), (image_size, image_size),
-                                    interpolation=cv2.INTER_NEAREST).astype(bool)
-                imgs.append(img)
-                gts.append(gt)
-            for prob, gt in zip(predict_prob_batch(model, imgs, device=device), gts):
-                gt_sum = float(gt.sum())  # constant across thresholds — hoisted out of the loop
-                for t in thresholds:
-                    pred = prob >= t
-                    i = float(np.logical_and(pred, gt).sum())
-                    inter[t] += i
-                    union[t] += float(pred.sum()) + gt_sum - i
+        # Use the exact same centre-crop/normalise transform as report evaluation;
+        # selecting a threshold under a different resize protocol is invalid.
+        with torch.inference_mode():
+            for images, masks in loader:
+                probs = torch.sigmoid(model(images.to(device))).cpu().numpy()[:, 0]
+                gts = masks.numpy()[:, 0] > 0.5
+                for prob, gt in zip(probs, gts):
+                    gt_sum = float(gt.sum())
+                    for t in thresholds:
+                        pred = prob >= t
+                        i = float(np.logical_and(pred, gt).sum())
+                        inter[t] += i
+                        union[t] += float(pred.sum()) + gt_sum - i
         iou = {t: (inter[t] + eps) / (union[t] + eps) for t in thresholds}
         best_t = max(iou, key=iou.get)
         results[Path(ckpt).name] = {"best_threshold": best_t, "best_iou": round(iou[best_t], 4),
@@ -280,7 +344,7 @@ def main() -> None:
     p.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
     p.add_argument("--threshold", type=float, default=None,
                    help="shared override; default = each checkpoint's deployed meta threshold")
-    p.add_argument("--image-size", type=int, default=384)
+    p.add_argument("--image-size", type=int, default=512)
     p.add_argument("--device", default="cpu")
     p.add_argument("--sweep", action="store_true", help="A21: sweep thresholds 0.20-0.70 and report each model's best")
     p.add_argument("--honest-threshold", action="store_true",

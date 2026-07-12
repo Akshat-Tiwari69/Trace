@@ -67,6 +67,41 @@ def _sole_edge_key(graph: "nx.Graph", u: int, v: int) -> int:
     return keys[0]
 
 
+def _length_weighted(ea: dict, ec: dict, name: str) -> float | None:
+    """Merge a continuous edge attribute without discarding one-sided data."""
+    values = []
+    weights = []
+    for edge in (ea, ec):
+        value = edge.get(name)
+        if value is not None:
+            values.append(float(value))
+            weights.append(max(float(edge.get("length_m", 0.0)), 0.0))
+    if not values:
+        return None
+    if sum(weights) == 0:
+        return float(np.mean(values))
+    return float(np.average(values, weights=weights))
+
+
+def _polyline_length(coords: list) -> float:
+    points = np.asarray(coords, dtype=float)
+    if len(points) < 2:
+        return 0.0
+    return float(np.hypot(*(np.diff(points, axis=0).T)).sum())
+
+
+def _snap_incident_geometry(graph: "nx.Graph", node: int, xy: tuple[float, float]) -> None:
+    """Move every incident polyline endpoint with a consolidated node."""
+    for other in list(graph.neighbors(node)):
+        keys = list(graph[node][other]) if graph.is_multigraph() else [0]
+        for key in keys:
+            data = graph.edges[node, other, key] if graph.is_multigraph() else graph.edges[node, other]
+            geom = _oriented_geometry(graph, node, other, key)
+            geom[0] = [float(xy[0]), float(xy[1])]
+            data["geometry"] = geom
+            data["length_m"] = _polyline_length(geom)
+
+
 def collapse_degree2_nodes(graph: "nx.Graph") -> int:
     """Merge every degree-2 pass-through node into a single edge. Returns count.
 
@@ -97,10 +132,19 @@ def collapse_degree2_nodes(graph: "nx.Graph") -> int:
         ea = graph.edges[a, node, ka] if graph.is_multigraph() else graph.edges[a, node]
         ec = graph.edges[node, c, kc] if graph.is_multigraph() else graph.edges[node, c]
         merged_len = float(ea.get("length_m", 0.0) + ec.get("length_m", 0.0))
-        bridged = bool(ea.get("is_bridged", False) or ec.get("is_bridged", False))
+        attrs = {
+            "length_m": merged_len,
+            "geometry": merged_geom,
+            "is_bridged": bool(ea.get("is_bridged", False) or ec.get("is_bridged", False)),
+            "is_bridge": bool(ea.get("is_bridge", False) or ec.get("is_bridge", False)),
+        }
+        for name in ("width_m", "confidence"):
+            merged_value = _length_weighted(ea, ec, name)
+            if merged_value is not None:
+                attrs[name] = merged_value
 
         graph.remove_node(node)  # drops both incident edges
-        graph.add_edge(a, c, length_m=merged_len, geometry=merged_geom, is_bridged=bridged)
+        graph.add_edge(a, c, **attrs)
         collapsed += 1
     return collapsed
 
@@ -251,6 +295,7 @@ def consolidate_nearby_nodes(graph: "nx.Graph", tol_m: float) -> int:
                         graph.add_edge(keeper, m, **data)
             graph.remove_node(n)
 
+        _snap_incident_geometry(graph, keeper, (cx, cy))
         graph.nodes[keeper]["x"], graph.nodes[keeper]["y"] = cx, cy
         merged += len(members) - 1
     return merged

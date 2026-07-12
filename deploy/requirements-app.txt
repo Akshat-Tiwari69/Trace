@@ -1,7 +1,7 @@
 # Route Resilience — SLIM dashboard-only deps for public deploy (Oracle ARM / CPU).
-# The dashboard (src/app/app.py -> p3_analysis/resilience.py) reads precomputed
-# data/sample/ artifacts and never loads the model, so NONE of the heavy ML/geo-IO
-# stack (torch, rasterio, osmnx, opencv, scikit-image, smp) is needed here.
+# The dashboard reads precomputed artifacts and also runs the CPU mask-to-graph
+# upload analysis path. It does not load the segmentation model, but P2 requires
+# scikit-image/sknw and healing requires SciPy.
 # pyogrio bundles GDAL in its wheel -> no system GDAL/apt required, installs clean
 # on aarch64. Versions mirror the root requirements.txt where they overlap.
 
@@ -19,5 +19,8 @@ networkx==3.3
 pandas==2.2.2
 numpy==1.26.4
 matplotlib==3.8.2
+scikit-image==0.24.0
+sknw==0.15
+scipy==1.13.1
 # decodes untrusted uploads — keep pinned & patched (matches the Modal image pin)
 Pillow==10.4.0

@@ -16,9 +16,8 @@ UI runtime; app.py drives it from session_state (submit -> poll status/position
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-import itertools
 import json
-import pickle
+import os
 import threading
 import time
 import uuid
@@ -37,7 +36,8 @@ JOBS_DIR = Path(__file__).resolve().parents[2] / "data" / "outputs" / "upload_jo
 # FIFO order key, separate from created_utc: created_utc is second-precision
 # (readable in the state file) and several jobs can land in the same second,
 # so ordering by it alone isn't stable. A simple incrementing counter is.
-_seq_counter = itertools.count()
+LEASE_SECONDS = 30 * 60
+SEQUENCE_LOCK_STALE_SECONDS = 30.0
 
 
 def _now() -> str:
@@ -53,10 +53,48 @@ def _mask_path(job_id: str) -> Path:
 
 
 def _result_path(job_id: str) -> Path:
-    # Pickled AnalysisResult. Internal-only: the only writer is _process_one()
-    # below, reading a mask this same module wrote moments earlier — never a
-    # user-supplied file — so unpickling it here doesn't cross a trust boundary.
+    return JOBS_DIR / f"{job_id}.result.json"
+
+
+def _legacy_result_path(job_id: str) -> Path:
+    """Pre-v1 pickle path, retained only so cleanup removes stale artifacts."""
     return JOBS_DIR / f"{job_id}.result.pkl"
+
+
+def _claim_path(job_id: str) -> Path:
+    return JOBS_DIR / f"{job_id}.claim"
+
+
+def _next_seq() -> int:
+    """Allocate a persistent FIFO sequence under a cross-process lock."""
+    counter = JOBS_DIR / "sequence.counter"
+    lock = JOBS_DIR / "sequence.lock"
+    wait_started = time.monotonic()
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.close(fd)
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - lock.stat().st_mtime
+                if age > SEQUENCE_LOCK_STALE_SECONDS:
+                    lock.unlink(missing_ok=True)
+                    continue
+            except FileNotFoundError:
+                continue
+            if time.monotonic() - wait_started > SEQUENCE_LOCK_STALE_SECONDS + 5:
+                raise RuntimeError("timed out acquiring persistent queue sequence lock")
+            time.sleep(0.005)
+    try:
+        try:
+            value = int(counter.read_text()) + 1
+        except (FileNotFoundError, ValueError):
+            value = 0
+        atomic_write(counter, lambda tmp: tmp.write_text(str(value)))
+        return value
+    finally:
+        lock.unlink(missing_ok=True)
 
 
 def _write_state(job_id: str, state: dict) -> None:
@@ -75,7 +113,7 @@ def _try_read_state(job_id: str) -> dict | None:
 def _iter_job_ids() -> list[str]:
     if not JOBS_DIR.is_dir():
         return []
-    return [p.stem for p in JOBS_DIR.glob("*.json")]
+    return [p.stem for p in JOBS_DIR.glob("*.json") if not p.name.endswith(".result.json")]
 
 
 def _save_mask(path: Path, mask: np.ndarray) -> None:
@@ -94,7 +132,7 @@ def submit(mask01: np.ndarray, resolution_m: float) -> str:
     _write_state(job_id, {
         "job_id": job_id,
         "status": "queued",
-        "seq": next(_seq_counter),
+        "seq": _next_seq(),
         "created_utc": _now(),
         "started_utc": None,
         "finished_utc": None,
@@ -133,8 +171,7 @@ def result(job_id: str) -> Any:
     state = status(job_id)
     if state["status"] != "done":
         raise RuntimeError(f"job {job_id} is not done (status={state['status']!r})")
-    with open(_result_path(job_id), "rb") as f:
-        return pickle.load(f)
+    return _load_result(_result_path(job_id))
 
 
 def cleanup(max_age_h: float = 24) -> int:
@@ -154,7 +191,8 @@ def cleanup(max_age_h: float = 24) -> int:
             continue
         created = datetime.fromisoformat(state["created_utc"])
         if created < cutoff:
-            for path in (_state_path(job_id), _mask_path(job_id), _result_path(job_id)):
+            for path in (_state_path(job_id), _mask_path(job_id), _result_path(job_id),
+                         _legacy_result_path(job_id), _claim_path(job_id)):
                 path.unlink(missing_ok=True)
             removed += 1
     return removed
@@ -169,11 +207,30 @@ def _process_one() -> bool:
     ]
     if not queued:
         return False
-    job_id, state = min(queued, key=lambda item: item[1]["seq"])
-
-    state["status"] = "running"
-    state["started_utc"] = _now()
-    _write_state(job_id, state)
+    claimed = None
+    for job_id, state in sorted(queued, key=lambda item: (item[1]["seq"], item[0])):
+        try:
+            fd = os.open(_claim_path(job_id), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            continue
+        os.close(fd)
+        current = _try_read_state(job_id)
+        if current is None or current.get("status") != "queued":
+            _claim_path(job_id).unlink(missing_ok=True)
+            continue
+        state = current
+        state["status"] = "running"
+        state["started_utc"] = _now()
+        state["owner_pid"] = os.getpid()
+        state["lease_expires_utc"] = (
+            datetime.now(timezone.utc) + timedelta(seconds=LEASE_SECONDS)
+        ).isoformat(timespec="seconds")
+        _write_state(job_id, state)
+        claimed = (job_id, state)
+        break
+    if claimed is None:
+        return False
+    job_id, state = claimed
 
     from src.app.upload_analysis import analyze_mask  # lazy: heavy P2/P3 imports
 
@@ -189,31 +246,116 @@ def _process_one() -> bool:
         state["finished_utc"] = _now()
         state["error"] = str(exc)
         _write_state(job_id, state)
+        _claim_path(job_id).unlink(missing_ok=True)
         return True
 
-    with open(_result_path(job_id), "wb") as f:
-        pickle.dump(analysis_result, f)
+    atomic_write(_result_path(job_id), lambda tmp: _dump_result(tmp, analysis_result))
     state["status"] = "done"
     state["finished_utc"] = _now()
     _write_state(job_id, state)
+    _claim_path(job_id).unlink(missing_ok=True)
     return True
+
+
+def _dump_result(path: Path, value: Any) -> None:
+    """Persist a versioned, dependency-tolerant JSON contract (never pickle)."""
+    import networkx as nx
+
+    payload = {
+        "schema_version": 1,
+        "graph": nx.node_link_data(value.graph, link="edges"),
+        "criticality": {
+            "columns": list(value.criticality.columns),
+            "records": value.criticality.to_dict(orient="records"),
+        },
+        "resilience_index": value.resilience_index,
+        "top_node": value.top_node,
+        "n_nodes": value.n_nodes,
+        "n_edges": value.n_edges,
+        "resolution_m": value.resolution_m,
+        "summary": value.summary,
+    }
+    path.write_text(json.dumps(payload, default=_json_default, separators=(",", ":")))
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, np.integer):
+        return int(value)
+    if isinstance(value, np.floating):
+        return float(value)
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, Path):
+        return str(value)
+    raise TypeError(f"unsupported queue-result value: {type(value).__name__}")
+
+
+def _load_result(path: Path) -> Any:
+    import networkx as nx
+    import pandas as pd
+
+    from src.app.upload_analysis import AnalysisResult
+
+    payload = json.loads(path.read_text())
+    if payload.get("schema_version") != 1:
+        raise RuntimeError(
+            f"unsupported upload result schema {payload.get('schema_version')!r}"
+        )
+    table = payload["criticality"]
+    criticality = pd.DataFrame(table["records"], columns=table["columns"])
+    graph = nx.node_link_graph(payload["graph"], link="edges")
+    return AnalysisResult(
+        graph=graph,
+        criticality=criticality,
+        resilience_index=float(payload["resilience_index"]),
+        top_node=payload["top_node"],
+        n_nodes=int(payload["n_nodes"]),
+        n_edges=int(payload["n_edges"]),
+        resolution_m=float(payload["resolution_m"]),
+        summary=payload.get("summary", {}),
+    )
+
+
+def _pid_alive(pid: int | None) -> bool:
+    if not pid:
+        return False
+    if os.name == "nt":
+        import ctypes
+
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, int(pid))
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError):
+        return False
 
 
 def _recover_stale_running() -> int:
     """Re-queue any job stuck in 'running' (bugs.md §5H crash-safety).
 
-    Only _process_one() ever sets 'running', and it runs one job at a time on
-    a single worker thread per process — so any 'running' job found before
-    that thread has started in *this* process must be left over from a
-    process that died mid-job. Returns the count recovered.
+    Recover only jobs whose owner process is no longer alive. Leases are useful
+    crash metadata, but this worker does not renew them during long analyses;
+    expiring a live owner's claim would allow duplicate processing and racy
+    final writes.
     """
     recovered = 0
     for job_id in _iter_job_ids():
         state = _try_read_state(job_id)
         if state is None or state["status"] != "running":
             continue
+        if _pid_alive(state.get("owner_pid")):
+            continue
+        _claim_path(job_id).unlink(missing_ok=True)
         state["status"] = "queued"
         state["started_utc"] = None
+        state["owner_pid"] = None
+        state["lease_expires_utc"] = None
         _write_state(job_id, state)
         recovered += 1
     return recovered

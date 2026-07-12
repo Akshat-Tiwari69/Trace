@@ -3,4 +3,5 @@ Description=Route Resilience — pull latest from GitHub and restart if changed
 
 [Service]
 Type=oneshot
+EnvironmentFile=-%h/.config/roadresilience/deploy.env
 ExecStart=%h/Trace/deploy/update.sh

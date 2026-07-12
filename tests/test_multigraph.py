@@ -84,6 +84,39 @@ def test_geojson_roundtrip_preserves_parallel_edges(tmp_path):
     assert lengths_and_bridged == [(100.0, False), (140.0, True)]
 
 
+def test_geojson_roundtrip_preserves_geometry_and_edge_keys(tmp_path):
+    from src.pipeline.p2_graph.graph_io import load_geojson_graph, save_geojson
+
+    g = nx.MultiGraph()
+    g.add_node(0, x=0.0, y=0.0)
+    g.add_node(1, x=0.001, y=0.0)
+    curved = [[0.0, 0.0], [0.0005, 0.0004], [0.001, 0.0]]
+    g.add_edge(0, 1, key=7, length_m=140.0, geometry=curved)
+    path = tmp_path / "curved.geojson"
+    save_geojson(g, path)
+
+    back = load_geojson_graph(path)
+    assert list(back[0][1]) == [7]
+    assert back[0][1][7]["geometry"] == curved
+
+
+def test_legacy_geojson_without_keys_keeps_parallel_edges(tmp_path):
+    import json
+    from src.pipeline.p2_graph.graph_io import graph_to_geojson, load_geojson_graph
+
+    g = nx.MultiGraph()
+    g.add_node(0, x=0.0, y=0.0)
+    g.add_node(1, x=0.001, y=0.0)
+    g.add_edge(0, 1, length_m=100.0)
+    g.add_edge(0, 1, length_m=140.0)
+    payload = graph_to_geojson(g)
+    for feature in payload["features"]:
+        feature["properties"].pop("edge_key", None)
+    path = tmp_path / "legacy.geojson"
+    path.write_text(json.dumps(payload))
+    assert load_geojson_graph(path).number_of_edges() == 2
+
+
 # --------------------------------------------------------------------------- #
 # End-to-end: a parallel branch survives skeleton -> simplify -> criticality
 # -> resilience without breaking the pipeline (bugs.md §4 / A37).

@@ -31,6 +31,7 @@ from src.pipeline.p2_graph.simplify import (
 )
 from src.pipeline.p2_graph.skeleton_graph import (
     build_metric_to_pixel,
+    ensure_metric_transform,
     mask_to_skeleton_with_distance,
     prune_degenerate_edges,
     reproject_graph_to_wgs84,
@@ -90,6 +91,7 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
               f"graph is built in PIXEL space (resolution_m={cfg.resolution_m}); "
               "length_m and resilience numbers are not true metres unless "
               "--resolution-m matches the imagery's real GSD")
+    transform, crs = ensure_metric_transform(transform, crs, mask.shape[1], mask.shape[0])
 
     skeleton, distance = mask_to_skeleton_with_distance(mask)
     graph = skeleton_to_graph(skeleton, transform=transform, resolution_m=cfg.resolution_m,

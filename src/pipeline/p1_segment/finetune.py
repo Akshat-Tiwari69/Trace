@@ -30,6 +30,7 @@ import argparse
 import dataclasses
 import functools
 import random
+import re
 from pathlib import Path
 
 import numpy as np
@@ -46,6 +47,7 @@ from src.pipeline.p1_segment.model import (
     load_checkpoint,
     load_train_state,
     predict_large,
+    predict_large_prob,
     save_checkpoint,
 )
 from src.pipeline.p1_segment.train import train_one_epoch
@@ -78,18 +80,28 @@ class FineTuneConfig:
     device: str = "cpu"
     seed: int = 2026
     resume: str | Path | None = None     # A19: resume from a rolling `.last` checkpoint
+    selection_thresholds: tuple[float, ...] = (0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65)
 
 
 def gather_pairs(cfg: FineTuneConfig) -> tuple[list, list, list]:
-    """Build (train, indian_val, deepglobe_val). Val sets are disjoint from train."""
+    """Build train/validation sets, keeping sibling SpaceNet tiles together."""
     rng = random.Random(cfg.seed)
     indian = list(cfg.finetune_pairs) if cfg.finetune_pairs is not None else pair_deepglobe(cfg.finetune_dir)
     if not indian:
         raise SystemExit(f"no DeepGlobe-format pairs in {cfg.finetune_dir} — run build_finetune_data first.")
-    rng.shuffle(indian)
-    n_val = max(1, round(len(indian) * cfg.val_fraction))
-    indian_val = indian[:n_val]
-    train = indian[n_val:] * cfg.finetune_oversample
+    groups: dict[str, list] = {}
+    for pair in indian:
+        name = Path(pair[0]).name
+        match = re.search(r"(chip\d+)", name)
+        group = match.group(1) if match else Path(name).stem.removesuffix("_sat")
+        groups.setdefault(group, []).append(pair)
+    group_ids = sorted(groups)
+    rng.shuffle(group_ids)
+    n_val_groups = max(1, round(len(group_ids) * cfg.val_fraction))
+    val_groups = set(group_ids[:n_val_groups])
+    indian_val = [pair for group in group_ids if group in val_groups for pair in groups[group]]
+    indian_train = [pair for group in group_ids if group not in val_groups for pair in groups[group]]
+    train = indian_train * cfg.finetune_oversample
 
     deepglobe_val: list = []
     if cfg.deepglobe_dir:
@@ -141,8 +153,8 @@ def _read_val_pair(sat_path: str, mask_path: str):
 
 
 @torch.no_grad()
-def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False) -> float:
-    """Mean IoU over (sat, mask) pairs via full-image sliding prediction.
+def _iou_scores_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False) -> list[float]:
+    """Per-tile IoU via full-image sliding prediction.
 
     ``grayscale=True`` decolorizes each image (3-channel grey) before predicting —
     a Cartosat-PAN proxy, so the fine-tune can watch the sensor-modality gap close
@@ -151,8 +163,8 @@ def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False)
     import cv2
 
     if not pairs:
-        return float("nan")
-    total = 0.0
+        return []
+    scores = []
     for sat_path, mask_path in pairs:
         img, gt = _read_val_pair(str(sat_path), str(mask_path))
         if grayscale:
@@ -160,10 +172,35 @@ def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False)
         pred = predict_large(model, img, tile_size=tile_size, device=device, threshold=thr) > 0
         inter = np.logical_and(pred, gt).sum()
         union = np.logical_or(pred, gt).sum()
-        total += inter / max(union, 1)
+        scores.append(float(inter / max(union, 1)))
+    return scores
+
+
+def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False) -> float:
+    scores = _iou_scores_on_pairs(model, pairs, tile_size, device, thr, grayscale)
+    if not scores:
+        return float("nan")
     # Plain float, not numpy float64 — this value is stored in the .last.pt
     # train_state, which must stay weights_only=True-loadable (see model.py).
-    return float(total / len(pairs))
+    return float(np.mean(scores))
+
+
+@torch.no_grad()
+def _select_threshold(model, pairs, tile_size, device, thresholds) -> tuple[float, float]:
+    """Calibrate the candidate threshold on Indian validation in one inference pass."""
+    if not pairs:
+        return float(thresholds[0]), float("nan")
+    accum = np.zeros(len(thresholds), dtype=float)
+    for sat_path, mask_path in pairs:
+        image, gt = _read_val_pair(str(sat_path), str(mask_path))
+        probability = predict_large_prob(model, image, tile_size=tile_size, device=device)
+        for index, threshold in enumerate(thresholds):
+            pred = probability >= threshold
+            union = np.logical_or(pred, gt).sum()
+            accum[index] += np.logical_and(pred, gt).sum() / max(union, 1)
+    means = accum / len(pairs)
+    best = int(np.argmax(means))
+    return float(thresholds[best]), float(means[best])
 
 
 def _last_path(out_path: str | Path) -> Path:
@@ -183,30 +220,50 @@ def finetune(cfg: FineTuneConfig) -> dict:
     the optimizer/scaler/epoch/best/history — instead of from ``init_checkpoint``
     at epoch 1, so an interrupted run continues rather than warm-restarting.
     """
+    random.seed(cfg.seed)
+    np.random.seed(cfg.seed)
     torch.manual_seed(cfg.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(cfg.seed)
     init_from = cfg.resume if cfg.resume else cfg.init_checkpoint
     model, meta = load_checkpoint(init_from, map_location=cfg.device)
     model = model.to(cfg.device)
     thr = float(meta.get("threshold", 0.5))
 
     train_pairs, indian_val, deepglobe_val = gather_pairs(cfg)
+    if not deepglobe_val:
+        raise ValueError(
+            "DeepGlobe anchor/forget-check is required; provide deepglobe_dir "
+            "instead of allowing the release gate to pass open")
     resume_state = load_train_state(cfg.resume, map_location=cfg.device) if cfg.resume else None
     if resume_state:  # keep the v1 anchor (keep_floor) fixed — model here is already fine-tuned
         base_dg, base_ind = resume_state["v1_deepglobe"], resume_state["v1_indian"]
+        if "v1_deepglobe_scores" not in resume_state:
+            raise ValueError(
+                "resume checkpoint predates the paired DeepGlobe gate; restart from init"
+            )
+        base_dg_scores = list(resume_state["v1_deepglobe_scores"])
     else:
-        base_dg = _iou_on_pairs(model, deepglobe_val, cfg.image_size, cfg.device, thr)
+        base_dg_scores = _iou_scores_on_pairs(
+            model, deepglobe_val, cfg.image_size, cfg.device, thr
+        )
+        base_dg = float(np.mean(base_dg_scores))
         base_ind = _iou_on_pairs(model, indian_val, cfg.image_size, cfg.device, thr)
     frozen = cfg.encoder_lr_scale <= 0.0
     print(f"v1 baseline | DeepGlobe IoU {base_dg:.4f} | Indian IoU {base_ind:.4f} | "
           f"encoder {'FROZEN' if frozen else f'lr×{cfg.encoder_lr_scale}'} | "
           f"train {len(train_pairs)} (anchor incl.) | val dg {len(deepglobe_val)}/ind {len(indian_val)}")
 
+    loader_generator = torch.Generator()
+    loader_generator.manual_seed(cfg.seed)
+    if resume_state and resume_state.get("loader_rng_state") is not None:
+        loader_generator.set_state(resume_state["loader_rng_state"].cpu())
     train_ds = RoadTileDataset(train_pairs, build_train_transform(cfg.image_size, occlusion=cfg.occlusion,
                                                                   grayscale_p=cfg.grayscale_p),
                                crops_per_image=cfg.crops_per_image,
                                foreground_bias=cfg.foreground_bias)
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True,
-                              num_workers=cfg.num_workers)
+                              num_workers=cfg.num_workers, generator=loader_generator)
     loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=cfg.cldice_weight,
                        sdt_bce_weight=cfg.sdt_bce_weight)
     optimizer = _build_optimizer(model, cfg)
@@ -221,46 +278,85 @@ def finetune(cfg: FineTuneConfig) -> dict:
         best_score, best_row = resume_state["best_score"], resume_state["best_row"]
         history = list(resume_state["history"])
         torch.set_rng_state(resume_state["rng_state"].cpu())
+        if resume_state.get("python_rng_state") is not None:
+            py_state = resume_state["python_rng_state"]
+            random.setstate((int(py_state[0]), tuple(py_state[1]), py_state[2]))
+        if resume_state.get("numpy_rng_state") is not None:
+            np_state = resume_state["numpy_rng_state"]
+            np.random.set_state((
+                np_state["name"],
+                np.asarray(np_state["keys"], dtype=np.uint32),
+                int(np_state["pos"]),
+                int(np_state["has_gauss"]),
+                float(np_state["cached_gaussian"]),
+            ))
+        if torch.cuda.is_available() and resume_state.get("cuda_rng_states") is not None:
+            torch.cuda.set_rng_state_all(resume_state["cuda_rng_states"])
         start_epoch = resume_state["epoch"] + 1
         print(f"resumed from {cfg.resume} @ epoch {resume_state['epoch']} -> starting epoch {start_epoch}",
               flush=True)
-    keep_floor = (base_dg - cfg.deepglobe_iou_tolerance) if deepglobe_val else -1.0
     for epoch in range(start_epoch, cfg.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, cfg.device, scaler)
-        ind_iou = _iou_on_pairs(model, indian_val, cfg.image_size, cfg.device, thr)
-        dg_iou = _iou_on_pairs(model, deepglobe_val, cfg.image_size, cfg.device, thr)
+        selected_thr, ind_iou = _select_threshold(
+            model, indian_val, cfg.image_size, cfg.device, cfg.selection_thresholds
+        )
+        dg_scores = _iou_scores_on_pairs(
+            model, deepglobe_val, cfg.image_size, cfg.device, selected_thr
+        )
+        dg_iou = float(np.mean(dg_scores))
         # A24: track the Cartosat-PAN (grayscale) gap on the Indian val each epoch.
-        gray_iou = (_iou_on_pairs(model, indian_val, cfg.image_size, cfg.device, thr, grayscale=True)
+        gray_iou = (_iou_on_pairs(model, indian_val, cfg.image_size, cfg.device, selected_thr, grayscale=True)
                     if cfg.grayscale_p > 0 else float("nan"))
-        keeps_dg = (not deepglobe_val) or (dg_iou >= keep_floor)
+        from src.pipeline.p1_segment.stats import paired_bootstrap_ci
+
+        dg_ci = paired_bootstrap_ci(base_dg_scores, dg_scores, seed=cfg.seed + epoch)
+        keeps_dg = dg_ci.ci_low >= -cfg.deepglobe_iou_tolerance
         score = ind_iou if keeps_dg else -1e9
-        row = {"epoch": epoch, "train_loss": train_loss, "indian_iou": ind_iou,
-               "deepglobe_iou": dg_iou, "indian_gray_iou": gray_iou, "keeps_deepglobe": keeps_dg}
+        row = {"epoch": epoch, "train_loss": train_loss, "threshold": selected_thr,
+               "indian_iou": ind_iou,
+               "deepglobe_iou": dg_iou, "deepglobe_delta_ci_low": dg_ci.ci_low,
+               "deepglobe_delta_ci_high": dg_ci.ci_high,
+               "indian_gray_iou": gray_iou, "keeps_deepglobe": keeps_dg}
         history.append(row)
         gap = (f" | grey {gray_iou:.4f} ({(gray_iou-ind_iou)/(ind_iou or 1.0)*100:+.0f}%)"
                if cfg.grayscale_p > 0 else "")  # `or 1.0`: ind_iou can be 0.0 early — don't crash the run
-        print(f"epoch {epoch:02d} | loss {train_loss:.4f} | Indian {ind_iou:.4f} "
+        print(f"epoch {epoch:02d} | loss {train_loss:.4f} | Indian {ind_iou:.4f} @ {selected_thr:.2f} "
               f"(v1 {base_ind:.4f}) | DeepGlobe {dg_iou:.4f} (v1 {base_dg:.4f}){gap} | "
+              f"DG delta CI [{dg_ci.ci_low:+.4f},{dg_ci.ci_high:+.4f}] | "
               f"{'KEEPS dg' if keeps_dg else 'regresses dg'}")
         if score > best_score:
             best_score, best_row = score, row
             save_checkpoint(model, out, meta={
-                **{k: meta.get(k) for k in ("encoder", "arch", "decoder_attention_type", "image_size", "threshold")},
+                **{k: meta.get(k) for k in ("encoder", "arch", "decoder_attention_type", "image_size")},
+                "threshold": selected_thr,
                 "finetuned_from": str(cfg.init_checkpoint), "encoder_frozen": frozen,
                 "indian_val_iou": float(ind_iou), "deepglobe_val_iou": float(dg_iou),
                 "indian_gray_val_iou": float(gray_iou),  # A24: Cartosat-PAN proxy
                 "v1_indian_val_iou": float(base_ind), "v1_deepglobe_val_iou": float(base_dg),
+                "deepglobe_delta_ci_low": dg_ci.ci_low,
+                "deepglobe_delta_ci_high": dg_ci.ci_high,
                 "epoch": epoch,
             })
             print(f"  saved new best -> {out} (Indian {ind_iou:.4f}, DeepGlobe {dg_iou:.4f})")
         # A19: rolling full-state checkpoint so a kill mid-run can --resume from here.
         save_checkpoint(model, last, meta={
-            **{k: meta.get(k) for k in ("encoder", "arch", "decoder_attention_type", "image_size", "threshold")},
-            "epoch": epoch,
+            **{k: meta.get(k) for k in ("encoder", "arch", "decoder_attention_type", "image_size")},
+            "threshold": selected_thr, "epoch": epoch,
         }, train_state={
             "optimizer": optimizer.state_dict(), "scaler": scaler.state_dict(), "epoch": epoch,
             "best_score": best_score, "best_row": best_row, "history": history,
             "rng_state": torch.get_rng_state(), "v1_deepglobe": base_dg, "v1_indian": base_ind,
+            "v1_deepglobe_scores": base_dg_scores,
+            "loader_rng_state": loader_generator.get_state(),
+            "python_rng_state": list(random.getstate()),
+            "numpy_rng_state": {
+                "name": np.random.get_state()[0],
+                "keys": np.random.get_state()[1].tolist(),
+                "pos": int(np.random.get_state()[2]),
+                "has_gauss": int(np.random.get_state()[3]),
+                "cached_gaussian": float(np.random.get_state()[4]),
+            },
+            "cuda_rng_states": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
         })
 
     if best_row is None:
@@ -295,6 +391,9 @@ def main() -> None:
     p.add_argument("--occlusion", choices=["standard", "heavy", "none"], default="standard",
                    help="occlusion augmentation strength (A8: 'heavy')")
     p.add_argument("--deepglobe-tol", type=float, default=0.005, help="max allowed DeepGlobe IoU drop vs v1")
+    p.add_argument("--selection-thresholds", type=float, nargs="+",
+                   default=list(FineTuneConfig.selection_thresholds),
+                   help="candidate thresholds calibrated on Indian validation each epoch")
     p.add_argument("--grayscale-p", type=float, default=0.0, help="A24: random desaturation for Cartosat-PAN robustness")
     p.add_argument("--cldice-weight", type=float, default=0.1, help="0 avoids the 8 GB clDice OOM (A12)")
     p.add_argument("--sdt-bce", type=float, default=0.0,
@@ -328,6 +427,7 @@ def main() -> None:
         occlusion=occlusion, grayscale_p=args.grayscale_p,
         cldice_weight=args.cldice_weight, sdt_bce_weight=args.sdt_bce, num_workers=args.num_workers,
         deepglobe_iou_tolerance=args.deepglobe_tol, device=args.device, resume=args.resume,
+        selection_thresholds=tuple(args.selection_thresholds),
     ))
 
 

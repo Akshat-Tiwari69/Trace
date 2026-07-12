@@ -77,10 +77,30 @@ def _densify(graph, interval_m: float):
             continue
         ux, uy = graph.nodes[u]["x"], graph.nodes[u]["y"]
         vx, vy = graph.nodes[v]["x"], graph.nodes[v]["y"]
+        geometry = [list(map(float, point)) for point in
+                    (d.get("geometry") or [[ux, uy], [vx, vy]])]
+        if ((geometry[0][0] - vx) ** 2 + (geometry[0][1] - vy) ** 2 <
+                (geometry[0][0] - ux) ** 2 + (geometry[0][1] - uy) ** 2):
+            geometry.reverse()
+        cumulative = [0.0]
+        for p, q in zip(geometry, geometry[1:]):
+            cumulative.append(cumulative[-1] + math.hypot(q[0] - p[0], q[1] - p[1]))
+
+        def point_at_fraction(fraction: float) -> tuple[float, float]:
+            target = fraction * cumulative[-1]
+            for j in range(1, len(cumulative)):
+                if cumulative[j] >= target:
+                    span = cumulative[j] - cumulative[j - 1]
+                    local = 0.0 if span == 0 else (target - cumulative[j - 1]) / span
+                    p, q = geometry[j - 1], geometry[j]
+                    return p[0] + (q[0] - p[0]) * local, p[1] + (q[1] - p[1]) * local
+            return geometry[-1][0], geometry[-1][1]
+
         seg, prev = length / k, u
         for i in range(1, k):
             t = i / k
-            dense.add_node(nid, x=ux + (vx - ux) * t, y=uy + (vy - uy) * t)
+            x, y = point_at_fraction(t)
+            dense.add_node(nid, x=x, y=y)
             dense.add_edge(prev, nid, length_m=seg)
             prev, nid = nid, nid + 1
         dense.add_edge(prev, v, length_m=seg)
@@ -126,9 +146,11 @@ def _apls_oneway(src, dst, snap: dict, n_samples: int, weight: str, seed: int) -
             length_src = nx.shortest_path_length(src, a, b, weight=weight)
         except nx.NetworkXNoPath:
             skipped += 1
-            continue  # unreachable in src → not a routing claim, skip
+            contribs.append(0.0)  # fragmentation is a routing failure
+            continue
         if length_src <= 0:
             skipped += 1
+            contribs.append(0.0)
             continue
         a2, b2 = snap.get(a), snap.get(b)
         if a2 is None or b2 is None or a2 == b2:
@@ -140,17 +162,22 @@ def _apls_oneway(src, dst, snap: dict, n_samples: int, weight: str, seed: int) -
             contribs.append(0.0)
             continue
         contribs.append(max(0.0, 1.0 - abs(length_src - length_dst) / length_src))
-    if not contribs:
-        # Every sampled pair was unreachable — a severely fragmented graph, which
-        # is exactly the failure APLS exists to catch. A perfect-score fallback
-        # here would report 1.0 for a graph that can't route anything.
-        print(f"[apls] WARNING: all {n_samples} sampled pairs unreachable "
-              "(insufficient_reachable_pairs) — scoring 0.0, not 1.0")
-        return 0.0
     if skipped > n_samples // 2:
         print(f"[apls] WARNING: {skipped}/{n_samples} sampled pairs unreachable — "
               "effective sample is small; treat this score with caution")
-    return sum(contribs) / len(contribs)
+    return sum(contribs) / n_samples
+
+
+def _reachable_pair_fraction(graph) -> float:
+    """Fraction of ordered node pairs connected by any path."""
+    import networkx as nx
+
+    n = graph.number_of_nodes()
+    if n < 2:
+        return 0.0
+    reachable = sum(len(component) * (len(component) - 1)
+                    for component in nx.connected_components(graph))
+    return reachable / (n * (n - 1))
 
 
 def apls(
@@ -170,7 +197,9 @@ def apls(
     """
     if gt.number_of_nodes() == 0:
         return {"apls": 0.0, "apls_gt_to_prop": 0.0, "apls_prop_to_gt": 0.0,
-                "n_samples": n_samples, "snap_tol_m": tol_m}
+                "n_samples": n_samples, "snap_tol_m": tol_m,
+                "reachable_pair_fraction_gt": 0.0,
+                "reachable_pair_fraction_prop": _reachable_pair_fraction(prop)}
 
     gt = _densify(gt, interval_m)
     prop = _densify(prop, interval_m)
@@ -188,6 +217,8 @@ def apls(
         "apls_prop_to_gt": round(b, 4),
         "n_samples": n_samples,
         "snap_tol_m": tol_m,
+        "reachable_pair_fraction_gt": round(_reachable_pair_fraction(gt), 4),
+        "reachable_pair_fraction_prop": round(_reachable_pair_fraction(prop), 4),
     }
 
 

@@ -55,3 +55,25 @@ def test_walking_skeleton_flows_p1_to_p4(tmp_path):
 def test_dashboard_contract_columns_are_stable():
     # guard against a silent drift of the P4 contract
     assert DASHBOARD_CRITICALITY_COLUMNS == ["node_id", "betweenness", "rank", "is_critical", "x", "y"]
+
+
+def test_pipeline_signature_invalidates_p1_on_config_change(tmp_path):
+    calls = []
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs.get("threshold"))
+        return _fake_segment(*args, **kwargs)
+
+    common = dict(
+        image_path="unused.jpg", checkpoint="unused.pt", aoi="signature",
+        interim_dir=tmp_path / "interim", processed_dir=tmp_path / "processed",
+        curve_steps=2, segment_fn=counted,
+    )
+    run(**common, threshold=0.4)
+    changed = run(**common, threshold=0.5)
+    unchanged = run(**common, threshold=0.5)
+
+    assert calls == [0.4, 0.5]
+    assert changed["stages"][0]["ran"] is True
+    assert unchanged["stages"][0]["ran"] is False
+    assert unchanged["stages"][0]["reason"] == "signature-match"

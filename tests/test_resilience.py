@@ -107,6 +107,16 @@ def test_resilience_index_unchanged_input_graph():
     assert g.number_of_nodes() == n_before  # operated on a copy
 
 
+def test_resilience_index_uses_baseline_node_universe():
+    g = nx.Graph()
+    g.add_edge(0, 1, length_m=1.0)
+    g.add_node(2)  # removing this isolate used to shrink N and produce RI=3
+    result = resilience_index(g, removed_nodes=[2])
+    assert result["resilience_index"] == pytest.approx(1.0)
+    assert result["travel_time_delta_pct"] == pytest.approx(0.0)
+    assert 0.0 <= result["resilience_index"] <= 1.0
+
+
 def test_targeted_removal_hurts_more_than_peripheral():
     """Removing a high-betweenness chokepoint must drop resilience further than
     removing a peripheral node — the betweenness sanity check."""
@@ -126,8 +136,25 @@ def test_largest_cc_fraction_reported():
     bc = compute_betweenness(g)
     chokepoint = max(bc, key=bc.get)
     result = resilience_index(g, [chokepoint])
-    # removing the bridge splits 6 nodes into 3 + 2 → largest CC = 3/5
-    assert result["largest_cc_fraction"] == pytest.approx(3 / 5)
+    # failed node remains an isolate in the baseline universe: largest CC = 3/6
+    assert result["largest_cc_fraction"] == pytest.approx(3 / 6)
+
+
+def test_sampled_ablation_reuses_fixed_sources(monkeypatch):
+    calls = []
+    real = global_efficiency
+
+    def spy(graph, weight="length_m", k=None, seed=42, sources=None):
+        calls.append(None if sources is None else tuple(sources))
+        return real(graph, weight, k=k, seed=seed, sources=sources)
+
+    monkeypatch.setattr("src.pipeline.p3_analysis.resilience.global_efficiency", spy)
+    g = nx.path_graph(8)
+    nx.set_edge_attributes(g, 1.0, "length_m")
+    ablation_curve(g, sequence=[7, 6], k=3, seed=9)
+    assert calls[0] is not None
+    assert set(calls[1]).issubset(calls[0])
+    assert set(calls[2]).issubset(calls[1])
 
 
 def test_targeted_ablation_requires_betweenness():

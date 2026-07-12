@@ -130,12 +130,19 @@ def run_inference(
     out = Path(interim_dir) / f"{aoi}_mask.png"
     save_binary_png(mask, out)
 
+    # Replace the AOI sidecar set as one logical generation. Remove artifacts
+    # that this mode cannot reproduce so a non-blended/non-georeferenced rerun
+    # never inherits an old prob map or transform.
+    sidecar_dir = Path(interim_dir) / aoi
+    for stale in (sidecar_dir / "prob.png", sidecar_dir / "manifest.json"):
+        stale.unlink(missing_ok=True)
+
     # Persist the P1 probability map (bugs.md §4): the blended path computes it
     # then used to discard it after thresholding. P2's healing needs it to tell
     # a sub-threshold occluded road from terrain with no road signal at all.
     prob_path = None
     if prob is not None:
-        prob_path = Path(interim_dir) / aoi / "prob.png"
+        prob_path = sidecar_dir / "prob.png"
         save_prob_png(prob, prob_path)
 
     manifest = write_manifest(aoi, interim_dir, transform, crs, prob_png=prob_path is not None)  # A26: georef for P2

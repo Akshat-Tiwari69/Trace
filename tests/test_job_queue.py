@@ -9,6 +9,7 @@ data/outputs/upload_jobs/.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import os
 
 import numpy as np
 import pytest
@@ -46,6 +47,14 @@ def test_submit_process_done_roundtrip():
     result = job_queue.result(job_id)
     assert result.n_nodes > 0
     assert result.n_edges > 0
+    assert result.graph.is_multigraph()
+    assert result.graph.number_of_nodes() == result.n_nodes
+    assert result.graph.number_of_edges() == result.n_edges
+    assert {"node_id", "betweenness"}.issubset(result.criticality.columns)
+    result_path = job_queue._result_path(job_id)
+    assert result_path.suffix == ".json"
+    assert '"schema_version":1' in result_path.read_text()
+    assert not job_queue._legacy_result_path(job_id).exists()
 
     # Queue is empty now.
     assert job_queue._process_one() is False
@@ -98,6 +107,68 @@ def test_recover_stale_running_requeues():
     # And it's processable again afterwards.
     assert job_queue._process_one() is True
     assert job_queue.status(job_id)["status"] == "done"
+
+
+def test_live_lease_is_not_recovered_or_double_claimed():
+    job_id = job_queue.submit(_grid_mask(), resolution_m=0.5)
+    state = job_queue.status(job_id)
+    state.update({
+        "status": "running",
+        "started_utc": job_queue._now(),
+        "owner_pid": os.getpid(),
+        "lease_expires_utc": (
+            datetime.now(timezone.utc) + timedelta(minutes=5)
+        ).isoformat(timespec="seconds"),
+    })
+    job_queue._write_state(job_id, state)
+    job_queue._claim_path(job_id).touch()
+
+    assert job_queue._recover_stale_running() == 0
+    assert job_queue.status(job_id)["status"] == "running"
+    assert job_queue._process_one() is False
+
+
+def test_live_owner_is_not_recovered_after_fixed_lease_expires():
+    job_id = job_queue.submit(_grid_mask(), resolution_m=0.5)
+    state = job_queue.status(job_id)
+    state.update({
+        "status": "running",
+        "started_utc": job_queue._now(),
+        "owner_pid": os.getpid(),
+        "lease_expires_utc": (
+            datetime.now(timezone.utc) - timedelta(minutes=5)
+        ).isoformat(timespec="seconds"),
+    })
+    job_queue._write_state(job_id, state)
+    job_queue._claim_path(job_id).touch()
+
+    assert job_queue._recover_stale_running() == 0
+    assert job_queue.status(job_id)["status"] == "running"
+    assert job_queue._process_one() is False
+
+
+def test_stale_sequence_lock_is_recovered(monkeypatch):
+    job_queue.JOBS_DIR.mkdir(parents=True)
+    lock = job_queue.JOBS_DIR / "sequence.lock"
+    lock.touch()
+    old = datetime.now(timezone.utc).timestamp() - 60
+    import os
+    os.utime(lock, (old, old))
+    monkeypatch.setattr(job_queue, "SEQUENCE_LOCK_STALE_SECONDS", 0.01)
+    assert job_queue._next_seq() == 0
+    assert not lock.exists()
+
+
+def test_invalid_lease_timestamp_with_dead_owner_is_recovered(monkeypatch):
+    job_id = job_queue.submit(_grid_mask(), resolution_m=0.5)
+    state = job_queue.status(job_id)
+    state.update({"status": "running", "owner_pid": os.getpid(),
+                  "lease_expires_utc": "not-an-iso-date"})
+    job_queue._write_state(job_id, state)
+    job_queue._claim_path(job_id).touch()
+    monkeypatch.setattr(job_queue, "_pid_alive", lambda _pid: False)
+    assert job_queue._recover_stale_running() == 1
+    assert job_queue.status(job_id)["status"] == "queued"
 
 
 def test_cleanup_removes_old_files():

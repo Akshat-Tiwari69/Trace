@@ -68,7 +68,7 @@ def _rasterize_roads_metric(roads, transform, width: int, height: int, crs, buff
 
 def convert_spacenet(img_dir: str | Path, label_dir: str | Path, out_dir: str | Path,
                      buffer_m: float = 6.0, scale: float = 0.6, tile_size: int = 512,
-                     min_road_fraction: float = 0.005, max_tiles: int | None = None,
+                     min_road_fraction: float = 0.0, max_tiles: int | None = None,
                      prefix: str = "sn5mum") -> int:
     """Tile + scale-match SpaceNet road chips into DeepGlobe-format pairs. Returns #kept."""
     import cv2
@@ -117,7 +117,7 @@ def convert_spacenet(img_dir: str | Path, label_dir: str | Path, out_dir: str | 
                 print(f"[spacenet] reached max_tiles={max_tiles} -> {out}")
                 return kept
 
-    print(f"[spacenet] {kept} road-bearing pairs -> {out}")
+    print(f"[spacenet] {kept} pairs (min road fraction {min_road_fraction}) -> {out}")
     return kept
 
 
@@ -131,7 +131,9 @@ def main() -> None:
     p.add_argument("--buffer-m", type=float, default=6.0, help="painted road width in metres")
     p.add_argument("--scale", type=float, default=0.6, help="0.6 = 0.3m→0.5m scale-match to DeepGlobe")
     p.add_argument("--tile-size", type=int, default=512)
-    p.add_argument("--min-road-fraction", type=float, default=0.005)
+    p.add_argument("--min-road-fraction", type=float, default=0.0,
+                   help="keep 0 for honest evaluation including negative tiles; "
+                        "training filters road-bearing pairs separately")
     p.add_argument("--max-tiles", type=int, default=None)
     args = p.parse_args()
     src = Path(args.src)

@@ -17,6 +17,7 @@ import torch
 
 from src.pipeline.p1_segment.apls_eval import compare_checkpoints_apls, tile_apls
 from src.pipeline.p1_segment.eval_spacenet import (
+    _evaluate_with_chip_stats,
     _write_report as write_spacenet_report,
     split_heldout_chips,
 )
@@ -127,6 +128,20 @@ def test_evaluate_global_iou_is_exact_on_known_masks():
     # inter=4, pred=4, target=8 → IoU 4/8=0.5, Dice 8/12≈0.6667
     assert m["iou"] == pytest.approx(0.5, abs=1e-4)
     assert m["dice"] == pytest.approx(2 / 3, abs=1e-4)
+
+
+def test_chip_clustered_iou_aggregates_sibling_tiles():
+    masks = torch.zeros(2, 1, 2, 2)
+    masks[0, 0, 0, :] = 1
+    masks[1, 0, 1, :] = 1
+    logits = torch.full((2, 1, 2, 2), -5.0)
+    logits[0, 0, 0, :] = 5.0  # first tile perfect; second tile misses roads
+    loader = [(torch.zeros(2, 3, 2, 2), masks)]
+    pairs = [(Path("x_chip7_r0_sat.jpg"), Path("a")),
+             (Path("x_chip7_r1_sat.jpg"), Path("b"))]
+    result = _evaluate_with_chip_stats(_FixedLogits(logits), loader, pairs, "cpu", 0.5)
+    assert result["iou"] == pytest.approx(0.5)
+    assert result["per_chip_iou"]["chip7"] == pytest.approx(0.5)
 
 
 # --------------------------------------------------------------------------- #

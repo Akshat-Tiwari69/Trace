@@ -52,14 +52,20 @@ def mask_to_apls_graph(mask01: np.ndarray, gsd_m: float = GSD_M):
     return g
 
 
-def tile_apls(pred01: np.ndarray, gt01: np.ndarray, n_samples: int = 200, tol_m: float = 15.0) -> float:
+def tile_apls(
+    pred01: np.ndarray,
+    gt01: np.ndarray,
+    n_samples: int = 200,
+    tol_m: float = 15.0,
+    gsd_m: float = GSD_M,
+) -> float:
     """APLS between one predicted and one GT mask (1.0 = identical routing)."""
     from src.pipeline.p3_analysis.apls import apls
 
     if gt01.sum() == 0:
         return float("nan")             # no GT roads on this tile -> undefined, skip
-    gt_g = mask_to_apls_graph(gt01)
-    pred_g = mask_to_apls_graph(pred01)
+    gt_g = mask_to_apls_graph(gt01, gsd_m=gsd_m)
+    pred_g = mask_to_apls_graph(pred01, gsd_m=gsd_m)
     if gt_g.number_of_nodes() < 2:
         return float("nan")             # GT skeletonised to ~nothing -> skip
     if pred_g.number_of_nodes() < 2:
@@ -68,7 +74,8 @@ def tile_apls(pred01: np.ndarray, gt01: np.ndarray, n_samples: int = 200, tol_m:
 
 
 def apls_on_heldout(checkpoint: Path, n_tiles: int | None = 80, threshold: float | None = None,
-                    device: str = "cpu", seed: int = 7, per_tile: bool = False) -> dict:
+                    device: str = "cpu", seed: int = 7, per_tile: bool = False,
+                    gsd_m: float = GSD_M) -> dict:
     """Mean per-tile APLS of a checkpoint on the held-out SpaceNet-Mumbai tiles.
 
     ``threshold=None`` (default) uses the checkpoint's own deployed ``meta``
@@ -95,12 +102,13 @@ def apls_on_heldout(checkpoint: Path, n_tiles: int | None = 80, threshold: float
         image = imread_rgb(sat)
         gt = (imread_gray(mask_path) > 127).astype(np.uint8)
         pred = predict_mask(model, image, device=device, threshold=thr)
-        s = tile_apls(pred, gt)
+        s = tile_apls(pred, gt, gsd_m=gsd_m)
         if not np.isnan(s):
             scores.append(s)
             per_tile_scores[sat.name] = float(s)
     out = {"checkpoint": Path(checkpoint).name, "n_scored": len(scores),
-           "apls_mean": float(np.mean(scores)) if scores else 0.0, "threshold": thr}
+           "apls_mean": float(np.mean(scores)) if scores else 0.0,
+           "threshold": thr, "gsd_m": gsd_m}
     if per_tile:
         out["per_tile"] = per_tile_scores
     return out
@@ -109,6 +117,7 @@ def apls_on_heldout(checkpoint: Path, n_tiles: int | None = 80, threshold: float
 def compare_checkpoints_apls(
     checkpoint_a: Path, checkpoint_b: Path, n_tiles: int | None = 80,
     threshold: float | None = None, device: str = "cpu", seed: int = 7,
+    gsd_m: float = GSD_M,
 ) -> dict:
     """Paired-bootstrap comparison of two checkpoints' APLS (bugs.md §3).
 
@@ -120,9 +129,9 @@ def compare_checkpoints_apls(
     from src.pipeline.p1_segment.stats import paired_bootstrap_ci
 
     a = apls_on_heldout(checkpoint_a, n_tiles=n_tiles, threshold=threshold,
-                        device=device, seed=seed, per_tile=True)
+                        device=device, seed=seed, per_tile=True, gsd_m=gsd_m)
     b = apls_on_heldout(checkpoint_b, n_tiles=n_tiles, threshold=threshold,
-                        device=device, seed=seed, per_tile=True)
+                        device=device, seed=seed, per_tile=True, gsd_m=gsd_m)
     # Pair only on tiles both checkpoints scored (a NaN tile for either drops out).
     common = [t for t in a["per_tile"] if t in b["per_tile"]]
     scores_a = [a["per_tile"][t] for t in common]
@@ -154,6 +163,8 @@ def main() -> None:
     p.add_argument("--threshold", type=float, default=None,
                    help="shared override; default = each checkpoint's deployed meta threshold")
     p.add_argument("--device", default="cpu")
+    p.add_argument("--gsd-m", type=float, default=GSD_M,
+                   help="ground sampling distance of the evaluation masks in metres/pixel")
     p.add_argument("--compare", action="store_true",
                    help="bugs.md §3: paired-bootstrap CI on the APLS delta between the first two checkpoints")
     p.add_argument("--out", default="data/sample/spacenet_mumbai_apls.json")
@@ -163,12 +174,14 @@ def main() -> None:
         if len(args.checkpoints) < 2:
             raise SystemExit("--compare needs at least two --checkpoints (a then b)")
         rep = compare_checkpoints_apls(Path(args.checkpoints[0]), Path(args.checkpoints[1]),
-                                       n_tiles=args.n_tiles, threshold=args.threshold, device=args.device)
+                                       n_tiles=args.n_tiles, threshold=args.threshold,
+                                       device=args.device, gsd_m=args.gsd_m)
         _write_report(args.out, rep); print(f"-> {args.out}"); return
 
     results = []
     for ckpt in args.checkpoints:
-        r = apls_on_heldout(Path(ckpt), n_tiles=args.n_tiles, threshold=args.threshold, device=args.device)
+        r = apls_on_heldout(Path(ckpt), n_tiles=args.n_tiles, threshold=args.threshold,
+                            device=args.device, gsd_m=args.gsd_m)
         results.append(r)
         print(f"  {r['checkpoint']:42s} APLS {r['apls_mean']:.4f}  (n={r['n_scored']})", flush=True)
     _write_report(args.out, {"n_tiles": args.n_tiles, "models": results})

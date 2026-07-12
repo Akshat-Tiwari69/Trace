@@ -2,7 +2,8 @@
 
 Runs the deployed SegFormer MiT-B3 + SCSE checkpoint (`road_pan.pt`, release
 a4-roadseg-v3.2) on a T4 that scales to zero. The dashboard POSTs a base64 image
-+ a shared key and gets back a base64 binary road-mask PNG. Only `model.py` is
+with the shared key in an HTTP header and gets back a base64 binary road-mask
+PNG. Only `model.py` is
 vendored (torch/smp/numpy only), so none of the repo's heavy geo `__init__` chain
 is pulled in. The auth key lives in a Modal Secret (`roadseg-key`, env
 `ROADSEG_KEY`) — never in the repo.
@@ -12,6 +13,7 @@ Deploy (from repo root, Modal authed):  modal deploy deploy/modal_app.py
 from __future__ import annotations
 
 import modal
+from fastapi import Request
 
 MODEL_URL = (
     "https://github.com/Akshat-Tiwari69/Trace/releases/download/"
@@ -23,8 +25,10 @@ MODEL_URL = (
 MODEL_SHA256 = "0ebedf973c0ffe0b1148d3de38382d17ac88398c6a55f4550d661a6b1e9eed1d"
 MODEL_PATH = "/model/road_pan.pt"
 
-# Payload guardrails for the public endpoint.
-MAX_B64_LEN = 15 * 1024 * 1024  # reject bodies before the base64 decode
+# Payload guardrails for the public endpoint. The UI enforces the same original-
+# byte limit; derive the base64 ceiling so transport expansion cannot disagree.
+MAX_SOURCE_BYTES = 11 * 1024 * 1024
+MAX_B64_LEN = 4 * ((MAX_SOURCE_BYTES + 2) // 3)
 MAX_IMAGE_PIXELS = 4096 * 4096  # PIL decompression-bomb ceiling
 
 
@@ -64,7 +68,7 @@ image = (
         "segmentation-models-pytorch==0.3.4",
         "numpy==1.26.4",
         "pillow==10.4.0",
-        "fastapi[standard]",
+        "fastapi[standard]==0.115.14",
     )
     .add_local_file("src/pipeline/p1_segment/model.py", "/root/model.py", copy=True)
     .run_function(_bake_checkpoint)
@@ -129,8 +133,8 @@ class Segmenter:
         return out.getvalue()
 
     @modal.fastapi_endpoint(method="POST", docs=True)
-    def segment(self, item: dict):
-        """POST {"image_b64","key"} -> {"mask_png_b64","threshold"}.
+    async def segment(self, request: Request):
+        """POST {"image_b64"} with X-API-Key -> mask response.
 
         Real HTTP errors: 401 bad key, 400 missing/invalid image, 413 oversized.
         """
@@ -142,10 +146,18 @@ class Segmenter:
         from fastapi import HTTPException
 
         # Auth FIRST (constant-time), before any decode/parse work on the body.
-        if not hmac.compare_digest(
-            str(item.get("key", "")), os.environ.get("ROADSEG_KEY", "")
-        ):
+        expected_key = os.environ.get("ROADSEG_KEY", "")
+        if not expected_key:
+            raise HTTPException(status_code=503, detail="endpoint auth is not configured")
+        if not hmac.compare_digest(request.headers.get("x-api-key", ""), expected_key):
             raise HTTPException(status_code=401, detail="unauthorized")
+
+        try:
+            item = await request.json()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail="invalid JSON") from exc
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=400, detail="invalid JSON object")
 
         img_b64 = item.get("image_b64")
         if not img_b64 or not isinstance(img_b64, str):
@@ -156,6 +168,8 @@ class Segmenter:
             image_bytes = base64.b64decode(img_b64, validate=True)
         except (binascii.Error, ValueError):
             raise HTTPException(status_code=400, detail="invalid image")
+        if len(image_bytes) > MAX_SOURCE_BYTES:
+            raise HTTPException(status_code=413, detail="image too large")
         try:
             png = self._infer_png(image_bytes)
         except ValueError:

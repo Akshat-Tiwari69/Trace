@@ -4,7 +4,7 @@
 # in app.py only has to layer polish on top instead of fighting a light base.
 [server]
 # Cap uploads at 20 MB (the live-detection uploader also enforces this in-app).
-maxUploadSize = 20
+maxUploadSize = 11
 
 [theme]
 base = "dark"

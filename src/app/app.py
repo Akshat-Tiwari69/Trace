@@ -1,6 +1,5 @@
 """Interactive Streamlit dashboard for road-network resilience."""
 
-import base64
 from dataclasses import dataclass
 import hashlib
 import io
@@ -10,10 +9,8 @@ import logging
 from math import inf, isfinite
 import os
 from pathlib import Path
-import threading
 import time
 import urllib.error
-import urllib.request
 
 import branca.colormap as cm
 import folium
@@ -28,6 +25,11 @@ matplotlib.use("Agg")
 from matplotlib.figure import Figure
 from PIL import Image
 
+from src.app.modal_client import (
+    MODAL_SEG_URL,
+    EndpointBusyError,
+    call as _call_modal_seg,
+)
 from src.pipeline.p3_analysis.resilience import resilience_index
 
 # Refuse to decode anything above 4096x4096 px (PIL decompression-bomb guard
@@ -62,7 +64,7 @@ TOKENS: dict[str, str] = {
 }
 
 SINGLE_MODE = "Single junction"
-FLOOD_MODE = "Flood area (draw on map)"
+FLOOD_MODE = "Flood area / junction set"
 
 
 def find_repo_root() -> Path:
@@ -1045,16 +1047,55 @@ def render_scenario_tab(
         on_change=_on_failure_mode_change,
         horizontal=True,
     )
+    current_closures = st.session_state.get("disabled_nodes", ())
+    if failure_mode == FLOOD_MODE:
+        st.caption(
+            "Draw an area on the map, or use the keyboard-accessible junction "
+            "list below. Both paths run the same multi-junction failure analysis."
+        )
+        all_ids = criticality.sort_values("rank")["node_id"].astype(int).tolist()
+        manual_nodes = st.multiselect(
+            "Junctions inside the failed area",
+            all_ids,
+            default=(
+                list(current_closures)
+                if st.session_state.get("ablation_source") == "flood"
+                else []
+            ),
+            key="manual_flood_nodes",
+            format_func=lambda node: (
+                f"#{int(ranks[node])} · Junction {node} · score {scores[node]:.3f}"
+            ),
+        )
+        apply_col, clear_col = st.columns(2)
+        if apply_col.button(
+            "Apply junction set",
+            type="primary",
+            use_container_width=True,
+            disabled=not manual_nodes,
+        ):
+            st.session_state["disabled_nodes"] = tuple(sorted(map(int, manual_nodes)))
+            st.session_state["ablation_source"] = "flood"
+            log_event("simulate_flood_nodes", n_closed=len(manual_nodes))
+            st.rerun()
+        if clear_col.button("Clear area failure", use_container_width=True):
+            _reset_simulation()
+
     selected = st.selectbox(
         "Junction to disable",
         critical_ids,
         key="selected_node",
         on_change=_clear_last_map_click,
+        disabled=failure_mode == FLOOD_MODE,
         format_func=lambda node: (
             f"#{int(ranks[node])} · Junction {node} · score {scores[node]:.3f}"
         ),
     )
-    st.caption("Click a critical junction on the map or choose one above.")
+    st.caption(
+        "Click a critical junction on the map or choose one above."
+        if failure_mode == SINGLE_MODE
+        else "Single-junction selection is disabled while area failure is active."
+    )
     # Selected-junction details as text, so the info doesn't live only in
     # hover tooltips (screen readers / touch devices).
     selected_row = criticality.loc[criticality["node_id"] == selected]
@@ -1075,7 +1116,6 @@ def render_scenario_tab(
             )
         )
 
-    current_closures = st.session_state.get("disabled_nodes", ())
     single_active = current_closures and st.session_state.get("ablation_source") == "single"
     add_more = bool(single_active)  # once one junction is down, the button accumulates
 
@@ -1087,6 +1127,7 @@ def render_scenario_tab(
         help=("Add the selected junction to the active closures (compound disaster)."
               if add_more else
               "Disable the selected junction and recompute routes and resilience."),
+        disabled=failure_mode == FLOOD_MODE,
     ):
         # Accumulate closures so users can model a compound disaster (§2D).
         base = set(current_closures) if add_more else set()
@@ -1313,11 +1354,11 @@ def apply_design_theme() -> None:
 
           /* The Folium map iframe becomes a framed panel. Scoped to st_folium only
              (Streamlit injects hidden utility iframes that must stay unstyled), and
-             height-clamped: streamlit-folium's bidirectional frontend inflates the
-             iframe height attribute (observed 3068px for a 760px map), which was
-             stretching the page with dead space below the map and panel. */
+             wrapper-relative: streamlit-folium's bidirectional frontend can inflate
+             the iframe height attribute, so 100% follows each component's requested
+             wrapper height (420px Briefing, 640px Analysis) without global forcing. */
           iframe[title="streamlit_folium.st_folium"] {
-            height: 640px !important;
+            height: 100% !important;
             border-radius: 14px;
             border: 1px solid var(--rr-border) !important;
             box-shadow: 0 10px 30px rgba(2,6,17,.45);
@@ -1364,97 +1405,20 @@ def log_event(event: str, **fields: object) -> None:
     log.info("%s %s", event, extra)
 
 
-MODAL_SEG_URL = os.environ.get("MODAL_SEG_URL")
-MAX_UPLOAD_MB = 20  # keep in sync with [server] maxUploadSize in .streamlit/config.toml
+MAX_UPLOAD_MB = 11  # source bytes; base64 transport expands this to ~14.7 MiB
 UPLOAD_GUIDANCE = (
     "Runs the deployed SegFormer model on a serverless T4 (Modal). The first "
     "call after idle takes ~30 s to warm up; subsequent calls are near-instant. "
     "**Best results at ~0.5 m/pixel** (Google-Earth neighbourhood zoom, roads "
     "4–10 px wide) — heavily zoomed-in or zoomed-out captures degrade extraction."
 )
-
-
-# Bound concurrent GPU calls so a burst of uploads can't pin every Streamlit
-# worker thread on a 120 s blocking request (bugs.md §5C). A cache hit never
-# reaches here, so only genuine inference calls consume a slot.
-_MODAL_MAX_INFLIGHT = 2
-_modal_semaphore = threading.BoundedSemaphore(_MODAL_MAX_INFLIGHT)
-
-
-class EndpointBusyError(RuntimeError):
-    """Raised when all in-flight GPU slots are taken (surface a 'retry' message)."""
-
-
-def _post_modal_once(body: bytes) -> dict:
-    """One POST to the Modal endpoint → parsed JSON (raises on transport/HTTP errors)."""
-    req = urllib.request.Request(
-        MODAL_SEG_URL, data=body, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        status = getattr(resp, "status", 200)
-        if status != 200:
-            raise RuntimeError(f"endpoint returned HTTP {status}")
-        raw = resp.read()
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as error:
-        raise RuntimeError("endpoint returned a non-JSON response") from error
-
-
-def _is_retryable(error: Exception) -> bool:
-    """Cold-start / transient failures are worth a retry; 4xx client errors are not."""
-    if isinstance(error, urllib.error.HTTPError):
-        return error.code >= 500  # 5xx transient; 401/413/etc. won't fix themselves
-    if isinstance(error, urllib.error.URLError):  # incl. socket timeout
-        return True
-    return False
-
-
-def _call_modal_seg(image_bytes: bytes, retries: int = 2) -> tuple[bytes, float | None]:
-    """POST an image to the Modal GPU endpoint; return (mask PNG bytes, threshold).
-
-    Retries transient/cold-start failures with a short backoff (a scaled-to-zero
-    container may 5xx or time out on the first hit), but never retries a 4xx —
-    those are deterministic (bad key, oversized image). Concurrency-bounded so
-    simultaneous uploads queue rather than starve the app (bugs.md §5C/§6).
-    """
-    body = json.dumps(
-        {
-            "image_b64": base64.b64encode(image_bytes).decode(),
-            "key": os.environ.get("MODAL_SEG_KEY", ""),
-        }
-    ).encode()
-
-    if not _modal_semaphore.acquire(blocking=False):
-        raise EndpointBusyError(
-            "The GPU endpoint is busy with other requests — please retry in a moment."
-        )
-    try:
-        last: Exception | None = None
-        for attempt in range(retries + 1):
-            try:
-                out = _post_modal_once(body)
-                break
-            except Exception as error:  # noqa: BLE001 — classify, then retry or raise
-                last = error
-                if attempt < retries and _is_retryable(error):
-                    time.sleep(1.5 * (attempt + 1))  # linear backoff for a warming GPU
-                    continue
-                raise
-        else:  # pragma: no cover - loop always breaks or raises
-            raise last  # type: ignore[misc]
-    finally:
-        _modal_semaphore.release()
-
-    if "mask_png_b64" not in out:
-        raise RuntimeError(out.get("error", "unexpected response from endpoint"))
-    try:
-        mask_png = base64.b64decode(out["mask_png_b64"], validate=True)
-    except ValueError as error:  # binascii.Error subclasses ValueError
-        raise RuntimeError("endpoint returned an undecodable mask") from error
-    if not mask_png:
-        raise RuntimeError("endpoint returned an empty mask")
-    return mask_png, out.get("threshold")
+UPLOAD_DISCLOSURE = (
+    "Your original image bytes leave this server and are sent to Modal's GPU "
+    "infrastructure solely for road-mask inference. Platform/request logs may "
+    "exist; this project does not offer a contractual retention guarantee. Do "
+    "not upload classified, restricted, personal, or otherwise sensitive "
+    "imagery. For those datasets, run the local pipeline instead."
+)
 
 
 @st.cache_data(show_spinner=False, ttl=3600)
@@ -1500,6 +1464,7 @@ def render_live_detection() -> None:
     hosted demo instead of hiding entirely.
     """
     st.subheader("Analyze your own imagery")
+    st.warning(UPLOAD_DISCLOSURE)
     if not MODAL_SEG_URL:
         st.info(
             "GPU inference is not configured on this instance — try the hosted "
@@ -1513,10 +1478,15 @@ def render_live_detection() -> None:
         )
         st.caption(UPLOAD_GUIDANCE)
         return
+    consent = st.checkbox(
+        "I am authorized to send this image to Modal for processing",
+        key="modal_upload_consent",
+    )
     upload = st.file_uploader(
         "Upload a satellite / aerial image to extract its road network",
         type=["png", "jpg", "jpeg"],
         key="live_detection_upload",
+        disabled=not consent,
     )
     st.caption(UPLOAD_GUIDANCE)
     if upload is None:
