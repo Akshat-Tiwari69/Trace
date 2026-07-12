@@ -120,6 +120,29 @@ def test_live_lease_is_not_recovered_or_double_claimed():
     assert job_queue._process_one() is False
 
 
+def test_stale_sequence_lock_is_recovered(monkeypatch):
+    job_queue.JOBS_DIR.mkdir(parents=True)
+    lock = job_queue.JOBS_DIR / "sequence.lock"
+    lock.touch()
+    old = datetime.now(timezone.utc).timestamp() - 60
+    import os
+    os.utime(lock, (old, old))
+    monkeypatch.setattr(job_queue, "SEQUENCE_LOCK_STALE_SECONDS", 0.01)
+    assert job_queue._next_seq() == 0
+    assert not lock.exists()
+
+
+def test_invalid_lease_timestamp_is_treated_as_expired():
+    job_id = job_queue.submit(_grid_mask(), resolution_m=0.5)
+    state = job_queue.status(job_id)
+    state.update({"status": "running", "owner_pid": os.getpid(),
+                  "lease_expires_utc": "not-an-iso-date"})
+    job_queue._write_state(job_id, state)
+    job_queue._claim_path(job_id).touch()
+    assert job_queue._recover_stale_running() == 1
+    assert job_queue.status(job_id)["status"] == "queued"
+
+
 def test_cleanup_removes_old_files():
     job_id = job_queue.submit(_grid_mask(), resolution_m=0.5)
     state = job_queue.status(job_id)

@@ -38,6 +38,7 @@ JOBS_DIR = Path(__file__).resolve().parents[2] / "data" / "outputs" / "upload_jo
 # (readable in the state file) and several jobs can land in the same second,
 # so ordering by it alone isn't stable. A simple incrementing counter is.
 LEASE_SECONDS = 30 * 60
+SEQUENCE_LOCK_STALE_SECONDS = 30.0
 
 
 def _now() -> str:
@@ -67,12 +68,22 @@ def _next_seq() -> int:
     """Allocate a persistent FIFO sequence under a cross-process lock."""
     counter = JOBS_DIR / "sequence.counter"
     lock = JOBS_DIR / "sequence.lock"
+    wait_started = time.monotonic()
     while True:
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.close(fd)
             break
         except FileExistsError:
+            try:
+                age = time.time() - lock.stat().st_mtime
+                if age > SEQUENCE_LOCK_STALE_SECONDS:
+                    lock.unlink(missing_ok=True)
+                    continue
+            except FileNotFoundError:
+                continue
+            if time.monotonic() - wait_started > SEQUENCE_LOCK_STALE_SECONDS + 5:
+                raise RuntimeError("timed out acquiring persistent queue sequence lock")
             time.sleep(0.005)
     try:
         try:
@@ -281,7 +292,10 @@ def _recover_stale_running() -> int:
         if state is None or state["status"] != "running":
             continue
         expiry_text = state.get("lease_expires_utc")
-        expiry = datetime.fromisoformat(expiry_text) if expiry_text else None
+        try:
+            expiry = datetime.fromisoformat(expiry_text) if expiry_text else None
+        except (TypeError, ValueError):
+            expiry = None  # legacy/corrupt lease is expired, never fatal to recovery
         if _pid_alive(state.get("owner_pid")) and expiry and expiry > datetime.now(timezone.utc):
             continue
         _claim_path(job_id).unlink(missing_ok=True)

@@ -226,7 +226,11 @@ def load_geojson_graph(path: Path) -> "nx.MultiGraph":
                 attrs["width_m"] = float(props["width_m"])
             if props.get("confidence") is not None:  # optional mean prob (A37)
                 attrs["confidence"] = float(props["confidence"])
-            graph.add_edge(int(props["u"]), int(props["v"]),
-                           key=int(props.get("edge_key", 0)), **attrs)
+            edge_key = props.get("edge_key")
+            if edge_key is None:
+                graph.add_edge(int(props["u"]), int(props["v"]), **attrs)
+            else:
+                graph.add_edge(int(props["u"]), int(props["v"]),
+                               key=int(edge_key), **attrs)
     _validate_edge_lengths(graph, Path(path))
     return graph
