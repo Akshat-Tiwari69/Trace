@@ -49,7 +49,7 @@ class GraphConfig:
     angle_penalty_factor: float = 2.0  # how hard a turn is penalised vs. a straight run
     min_edge_len_m: float = 1.0        # drop degenerate sub-pixel edges below this
 
-    # --- healing: probability-map corridor check (bugs.md §4) -----------------
+    # --- healing: probability-map corridor check -------------------------------
     # Distance/angle alone can't distinguish a real gap from a frontage road
     # running parallel to a highway broken by the same occlusion. When P1's
     # prob.png is present, a candidate bridge is also rejected if the mean P1
@@ -100,7 +100,7 @@ class GraphConfig:
 
     @property
     def prob_path(self) -> Path:
-        """Optional P1 probability map (bugs.md §4), co-located with the manifest.
+        """Optional P1 probability map, co-located with the manifest.
 
         Present only when P1 ran the blended (Hann-window) inference path; a
         mask-only input (upload, OSM spike, old artifact) has no such file, and

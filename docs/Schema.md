@@ -103,7 +103,7 @@ Required columns:
 
 `n_removed,targeted_efficiency,targeted_resilience_index,targeted_largest_cc_fraction,random_efficiency,random_resilience_index,random_largest_cc_fraction`
 
-The product contract requires resilience to use the baseline node universe and remain in `[0, 1]`. The single-scenario path satisfies this; the current multi-step `ablation_curve` removes nodes and therefore has a known shrinking-denominator defect queued for A45. Existing curve artifacts must be regenerated after that fix.
+The product contract requires resilience to use the baseline node universe and remain in `[0, 1]`. Both the single-scenario path and multi-step `ablation_curve` satisfy it: failed nodes remain as isolates and sampled source IDs are fixed across the curve. Current committed curve artifacts were regenerated after this correction and are fingerprinted by the sample evidence manifest.
 
 ### Successful run summary
 

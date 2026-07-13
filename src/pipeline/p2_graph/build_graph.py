@@ -22,20 +22,13 @@ from pathlib import Path
 import numpy as np
 
 from src.pipeline.p2_graph.config import GraphConfig
+from src.pipeline.p2_graph.construction import construct_graph
 from src.pipeline.p2_graph.graph_io import save_geojson, save_graphml
-from src.pipeline.p2_graph.healing import HealReport, heal_graph, sample_prob_along_polyline
-from src.pipeline.p2_graph.simplify import (
-    consolidate_graph,
-    simplify_graph,
-    simplify_polylines,
-)
+from src.pipeline.p2_graph.healing import HealReport, sample_prob_along_polyline
 from src.pipeline.p2_graph.skeleton_graph import (
     build_metric_to_pixel,
     ensure_metric_transform,
-    mask_to_skeleton_with_distance,
-    prune_degenerate_edges,
     reproject_graph_to_wgs84,
-    skeleton_to_graph,
 )
 
 
@@ -53,7 +46,7 @@ def _load_mask(path: Path) -> np.ndarray:
 
 
 def _load_prob(path: Path) -> np.ndarray | None:
-    """Load P1's probability map (bugs.md §4) as a float [0,1] array, or ``None``.
+    """Load P1's probability map as a float [0,1] array, or ``None``.
 
     Present only when P1 ran the blended inference path; a mask-only input
     (upload, OSM spike, old artifact) has no such file — healing then falls back
@@ -93,12 +86,7 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
               "--resolution-m matches the imagery's real GSD")
     transform, crs = ensure_metric_transform(transform, crs, mask.shape[1], mask.shape[0])
 
-    skeleton, distance = mask_to_skeleton_with_distance(mask)
-    graph = skeleton_to_graph(skeleton, transform=transform, resolution_m=cfg.resolution_m,
-                              distance=distance)
-    prune_degenerate_edges(graph, cfg.min_edge_len_m)  # drop sub-pixel/self-loop edges
-
-    # Probability-map corridor check (bugs.md §4): loaded only when P1's blended
+    # The probability-map corridor check is active only when P1's blended
     # path persisted one; mask-only input (upload/OSM spike/old artifact) heals
     # exactly as before. Loudly log which mode is active — silent behaviour
     # change here would be a nasty surprise for a resilience number.
@@ -113,15 +101,12 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
               "— distance/angle/crossing only")
     metric_to_pixel = build_metric_to_pixel(transform, cfg.resolution_m) if prob is not None else None
 
-    graph, report = heal_graph(
-        graph,
-        gap_max_m=cfg.gap_max_m,
-        angle_max_deg=cfg.angle_max_deg,
-        angle_penalty_factor=cfg.angle_penalty_factor,
+    graph, report, simplify_report, consolidate_report, polyline_report = construct_graph(
+        mask,
+        cfg,
+        transform=transform,
         prob=prob,
         metric_to_pixel=metric_to_pixel,
-        min_corridor_support=cfg.min_corridor_support,
-        corridor_samples=cfg.corridor_samples,
     )
 
     # Stash the authoritative healing stats (measured now, pre-simplification) so
@@ -136,15 +121,13 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
     }
 
     # Carry the P1 provenance (checkpoint/threshold/commit) into the graph so the
-    # graphml/geojson name the exact model that produced this network (§5A).
+    # GraphML/GeoJSON name the exact model that produced this network (A36).
     from src.pipeline.p1_segment.provenance import read_provenance
     provenance = read_provenance(cfg.provenance_path)
     if provenance is not None:
         graph.graph["provenance"] = provenance
 
-    simplify_report = None
-    if cfg.simplify:
-        simplify_report = simplify_graph(graph, min_stub_len_m=cfg.min_stub_len_m)
+    if simplify_report is not None:
         graph.graph["simplify"] = {
             "nodes_before": simplify_report.nodes_before,
             "nodes_after": simplify_report.nodes_after,
@@ -153,25 +136,21 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
             "nodes_collapsed": simplify_report.nodes_collapsed,
         }
 
-    consolidate_report = None
-    if cfg.consolidate:
-        consolidate_report = consolidate_graph(graph, tol_m=cfg.consolidate_tol_m)
+    if consolidate_report is not None:
         graph.graph["consolidate"] = {
             "nodes_before": consolidate_report.nodes_before,
             "nodes_after": consolidate_report.nodes_after,
             "nodes_merged": consolidate_report.nodes_merged,
         }
 
-    polyline_report = None
-    if cfg.simplify_geom:  # Douglas-Peucker in metric space, before reprojection
-        polyline_report = simplify_polylines(graph, tol_m=cfg.geom_tol_m)
+    if polyline_report is not None:
         graph.graph["polyline"] = {
             "vertices_before": polyline_report.vertices_before,
             "vertices_after": polyline_report.vertices_after,
             "vertex_reduction_pct": round(polyline_report.vertex_reduction_pct, 1),
         }
 
-    # Per-edge confidence (bugs.md §9.3): mean P1 probability sampled along each
+    # Per-edge confidence is the mean P1 probability sampled along each
     # *final* edge's own geometry — the same corridor-support sampling healing
     # uses for candidate bridges, applied here to every surviving edge (bridged
     # edges too: their corridor support already stood in for confidence, so
@@ -179,7 +158,7 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
     # after simplify/consolidate/polyline-simplification settle the final
     # geometry, and before reprojection (metric_to_pixel expects the source
     # metric CRS, not lon/lat). No prob map -> no attribute at all (mask-only
-    # input keeps producing the pre-§9.3 artifact, byte-for-byte).
+    # input keeps producing the mask-only artifact without this attribute).
     if prob is not None:
         for _, _, data in graph.edges(data=True):
             data["confidence"] = round(
@@ -234,7 +213,7 @@ def main() -> None:
     p.add_argument("--resolution-m", type=float, default=1.0, help="m/px (no-manifest fallback)")
     p.add_argument("--min-corridor-support", type=float, default=0.3,
                    help="reject a bridge if mean P1 prob-map support along it is below this "
-                        "(0 disables; needs prob.png, bugs.md §4)")
+                        "(0 disables; needs prob.png)")
     args = p.parse_args()
 
     cfg = GraphConfig(

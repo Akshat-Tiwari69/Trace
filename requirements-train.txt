@@ -1,0 +1,10 @@
+# Model training, data preparation, and evaluation. Install Torch separately.
+
+-r requirements-core.txt
+
+rasterio==1.3.10
+osmnx==1.9.3
+opencv-python-headless==4.10.0.84
+segmentation-models-pytorch==0.3.4
+albumentations==2.0.8
+albucore==0.0.24

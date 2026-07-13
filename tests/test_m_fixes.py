@@ -1,8 +1,7 @@
-"""Regression tests for the A36 M-effort fixes (bugs.md).
+"""Regression tests for shared graph, provenance and orchestration contracts.
 
-Backend M-items: road-width recovery, false-bridge (edge-crossing) rejection,
-auto k-sampling + bounded betweenness cache, and the provenance/orchestration
-helpers.
+Covers road-width recovery, false-bridge rejection, bounded centrality work,
+and the provenance/orchestration helpers.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ import pytest
 
 
 # --------------------------------------------------------------------------- #
-# §4 — road width from the distance transform
+# Road width from the distance transform
 # --------------------------------------------------------------------------- #
 def test_skeleton_graph_records_width_from_distance():
     from src.pipeline.p2_graph.skeleton_graph import (
@@ -41,7 +40,7 @@ def test_skeleton_graph_omits_width_without_distance():
 
 
 # --------------------------------------------------------------------------- #
-# §4 — false-bridge rejection (a bridge crossing a real road is dropped)
+# False-bridge rejection (a bridge crossing a real road is dropped)
 # --------------------------------------------------------------------------- #
 def test_healing_rejects_bridge_that_crosses_a_road():
     import networkx as nx
@@ -86,7 +85,7 @@ def test_healing_allows_clear_gap():
 
 
 # --------------------------------------------------------------------------- #
-# §4 — auto k-sampling + bounded cache
+# Auto k-sampling + bounded cache
 # --------------------------------------------------------------------------- #
 def test_auto_k_thresholds():
     import networkx as nx
@@ -119,7 +118,7 @@ def test_betweenness_cache_is_bounded():
 
 
 # --------------------------------------------------------------------------- #
-# §5A — provenance round-trip
+# Provenance round-trip
 # --------------------------------------------------------------------------- #
 def test_provenance_build_and_roundtrip(tmp_path):
     from src.pipeline.p1_segment.provenance import (
@@ -143,7 +142,7 @@ def test_provenance_build_and_roundtrip(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# §5B — PipelineConfig as the single source of truth
+# PipelineConfig as the single source of truth
 # --------------------------------------------------------------------------- #
 def test_pipeline_config_from_json_and_graph_config(tmp_path):
     import json
@@ -166,7 +165,7 @@ def test_pipeline_config_from_json_and_graph_config(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# §5A — orchestrator idempotency + run.json summary
+# Orchestrator idempotency + run.json summary
 # --------------------------------------------------------------------------- #
 def _synthetic_segment(image_path, checkpoint, aoi, interim_dir, tile_size=None, threshold=None,
                        device="cpu", tta=False, blend=True, postprocess=False,

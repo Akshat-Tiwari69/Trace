@@ -35,8 +35,7 @@ def test_nodes_in_polygon_selects_enclosed():
 
 def test_nodes_in_polygon_matches_brute_force_contains():
     """STRtree-accelerated selection must match a naive per-node ``covers`` loop
-    (bugs.md §4 — the O(V) contains() loop was replaced with an STRtree query;
-    behavior must stay identical)."""
+    after replacing the O(V) loop with a spatial-index query."""
     import random
 
     from shapely.geometry import Point, Polygon

@@ -59,7 +59,7 @@ def raster_dimensions(path: str | Path) -> tuple[int, int]:
     """Return ``(height, width)`` from image metadata **without loading pixels**.
 
     Used to decide whether an AOI is large enough to need the windowed inference
-    path (bugs.md §5H) before we ever allocate a full-resolution array.
+    path (A36) before we ever allocate a full-resolution array.
     """
     path = Path(path)
     if path.suffix.lower() in _GEO_SUFFIXES:
@@ -77,7 +77,7 @@ def raster_dimensions(path: str | Path) -> tuple[int, int]:
 def raster_georef(path: str | Path) -> tuple[object, str | None]:
     """Return ``(transform, crs)`` from metadata without loading pixels.
 
-    Lets the windowed inference path (bugs.md §5H) write the same alignment
+    Lets the A36 windowed inference path write the same alignment
     manifest as the whole-image path, without ever materialising the raster.
     """
     path = Path(path)
@@ -97,7 +97,7 @@ def iter_windows(
     Reads one ``window_px`` tile at a time — GeoTIFFs via rasterio windowed reads
     (never materialising the whole image), other formats via a PIL crop — so a
     100 km² AOI streams through inference instead of OOMing the reader
-    (bugs.md §5H). Yields ``(rgb_uint8 HxWx3, row_off, col_off)``; the caller
+    (A36). Yields ``(rgb_uint8 HxWx3, row_off, col_off)``; the caller
     stitches them into the full-size (binary, 1-byte/px) output mask. Windows
     overlap by ``overlap_px`` so the per-window Hann blending seams are absorbed.
     """
@@ -167,7 +167,7 @@ def write_manifest(aoi: str, interim_dir: str | Path, transform, crs, *, prob_pn
 
     ``transform`` is a rasterio/affine ``Affine`` (its first 6 params are stored,
     which P2 rebuilds via ``Affine(*meta["transform"])``). ``prob_png=True`` adds
-    a ``"prob_png": true`` marker (bugs.md §4) recording that the blended
+    an A39 ``"prob_png": true`` marker recording that the blended
     inference's probability map was persisted alongside this AOI's mask, for
     corridor-aware healing. P2 doesn't actually need this flag to find the file —
     it checks ``prob.png`` directly — this is provenance, not a load-bearing path.

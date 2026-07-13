@@ -1,4 +1,4 @@
-"""Regression tests for the A37 MultiGraph migration (bugs.md §4).
+"""Regression tests for the A37 MultiGraph migration.
 
 The P2 graph moved from ``nx.Graph`` to ``nx.MultiGraph`` so parallel roads —
 loops, dual carriageways — survive instead of being silently collapsed by
@@ -119,7 +119,7 @@ def test_legacy_geojson_without_keys_keeps_parallel_edges(tmp_path):
 
 # --------------------------------------------------------------------------- #
 # End-to-end: a parallel branch survives skeleton -> simplify -> criticality
-# -> resilience without breaking the pipeline (bugs.md §4 / A37).
+# -> resilience without breaking the A37 pipeline contract.
 # --------------------------------------------------------------------------- #
 def _parallel_branch_skeleton() -> np.ndarray:
     """Two junctions joined by a straight chord + a longer diagonal detour
@@ -175,7 +175,7 @@ def test_parallel_branch_survives_full_analysis_pipeline():
 
 # --------------------------------------------------------------------------- #
 # app.py: graph_from_features builds a MultiGraph, path_length uses the shorter
-# of a parallel pair (bugs.md §4 / A37).
+# of a parallel pair (A37).
 # --------------------------------------------------------------------------- #
 def _two_parallel_edge_features():
     import geopandas as gpd

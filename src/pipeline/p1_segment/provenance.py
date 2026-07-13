@@ -1,4 +1,4 @@
-"""Artifact provenance — answer "which checkpoint produced this?" (bugs.md §5A).
+"""Artifact provenance: answer "which checkpoint produced this?".
 
 Schema.md defines ``RoadMask.model_version`` / ``threshold`` but nothing ever
 persisted them: a mask PNG was an anonymous bitmap and the graph/CSV carried no
@@ -40,17 +40,24 @@ def git_commit() -> str | None:
 
 
 def build_provenance(
-    checkpoint: str | Path, meta: dict, threshold: float, *, hash_checkpoint: bool = True
+    checkpoint: str | Path,
+    meta: dict,
+    threshold: float,
+    *,
+    hash_checkpoint: bool = True,
+    checkpoint_sha256: str | None = None,
 ) -> dict:
     """Assemble the provenance record for a P1 inference run.
 
-    ``hash_checkpoint`` can be disabled in tests/hot loops where the SHA-256 of a
-    large ``.pt`` isn't worth recomputing.
+    A caller that already scanned the checkpoint can supply ``checkpoint_sha256``.
+    Otherwise ``hash_checkpoint`` controls whether this function scans it.
     """
     checkpoint = Path(checkpoint)
     record = {
         "checkpoint": checkpoint.name,
-        "model_sha256": sha256_file(checkpoint) if (hash_checkpoint and checkpoint.is_file()) else None,
+        "model_sha256": checkpoint_sha256 or (
+            sha256_file(checkpoint) if (hash_checkpoint and checkpoint.is_file()) else None
+        ),
         "encoder": meta.get("encoder"),
         "arch": meta.get("arch"),
         "threshold": float(threshold),

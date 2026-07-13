@@ -17,12 +17,13 @@ first"):
   key safeguard from the topology-aware UDA papers.
 - Confidence-gated: only train consistency where the teacher is confident.
 
-GPU step; the orchestration is CPU-smoke-tested. Validate on a held-out Indian
-split + DeepGlobe; release only if it beats v2 (same honest bar).
+GPU step; the orchestration is CPU-smoke-tested. Validate on an Indian
+development split + DeepGlobe; release only if it beats v2 on the same benchmark.
 
 .. warning::
     **A12 was run and REJECTED (2026-06-28)** — both configs peaked at epoch 1
-    and lost to v1 on the honest held-out TEST (see `docs/Tracker.md` §6 A12 +
+    and lost to v1 on the frozen Indian development benchmark (see
+    `docs/Tracker.md` §6 A12 +
     §10). Kept as a negative-result artifact per CLAUDE.md; do **not** use for
     production training. The productive path became A23 (supervised SpaceNet
     fine-tune → v3/v3.2).
@@ -164,7 +165,7 @@ def consistency_loss(student_logits: torch.Tensor, pseudo: torch.Tensor,
 class SelfTrainConfig:
     labeled_dirs: list[str]              # real labels (DeepGlobe + SpaceNet-5 Mumbai)
     unlabeled_dirs: list[str]            # Indian OSM corpus (images only)
-    val_dirs: list[str]                  # held-out split for selection (NOT the final test)
+    val_dirs: list[str]                  # development split used for model selection
     init_checkpoint: str | None = None   # warm-start (v1/v2); None = ImageNet encoder
     out_path: str | Path = "models/road_selftrain.pt"
     encoder: str = "mit_b3"
@@ -307,7 +308,8 @@ def main() -> None:
     p = argparse.ArgumentParser(description="A12 topology-aware self-training on the Indian corpus.")
     p.add_argument("--labeled-dirs", nargs="+", required=True, help="real-label dirs (DeepGlobe + SpaceNet)")
     p.add_argument("--unlabeled-dirs", nargs="+", required=True, help="Indian OSM corpus dirs (images)")
-    p.add_argument("--val-dirs", nargs="+", required=True, help="held-out split for selection (NOT final test)")
+    p.add_argument("--val-dirs", nargs="+", required=True,
+                   help="development split used for model selection")
     p.add_argument("--init-checkpoint", default=None, help="warm-start checkpoint (v1/v2)")
     p.add_argument("--out", default="models/road_selftrain.pt")
     p.add_argument("--encoder", default="mit_b3")

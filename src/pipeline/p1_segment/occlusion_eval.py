@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.pipeline.p1_segment.model import predict_large
+from src.pipeline.p1_segment.model import VALIDATION_INFERENCE_PROTOCOL, predict_large_prob
 
 
 def occlude(image: np.ndarray, rng: np.random.Generator,
@@ -50,12 +50,12 @@ def evaluate_occlusion_recall(model, pairs: list[tuple[Path, Path]], device: str
         gt = imread_gray(mask_path) > 127
 
         occ_img, occ = occlude(img, rng)
-        pred_occ = predict_large(model, occ_img, tile_size=tile_size, device=device, threshold=threshold) > 0
+        pred_occ = predict_large_prob(model, occ_img, tile_size=tile_size, device=device) >= threshold
         hidden = gt & occ.astype(bool)
         hidden_road += int(hidden.sum())
         recovered += int((pred_occ & hidden).sum())
 
-        pred_clean = predict_large(model, img, tile_size=tile_size, device=device, threshold=threshold) > 0
+        pred_clean = predict_large_prob(model, img, tile_size=tile_size, device=device) >= threshold
         inter += int(np.logical_and(pred_clean, gt).sum())
         union += int(np.logical_or(pred_clean, gt).sum())
 
@@ -63,4 +63,5 @@ def evaluate_occlusion_recall(model, pairs: list[tuple[Path, Path]], device: str
         "occlusion_recall": recovered / max(hidden_road, 1),
         "clean_iou": inter / max(union, 1),
         "n_pairs": len(pairs),
+        "inference_protocol": VALIDATION_INFERENCE_PROTOCOL,
     }

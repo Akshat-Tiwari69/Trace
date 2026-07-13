@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import random
+
 import networkx as nx
 import pytest
 
-from src.pipeline.p3_analysis.apls import _densify, apls
+from src.pipeline.p3_analysis.apls import _apls_oneway, _densify, apls
 
 SPACING_DEG = 0.001          # ~111 m at the equator
 SEG_M = SPACING_DEG * 111_320.0
@@ -75,3 +77,25 @@ def test_densify_follows_curved_edge_geometry():
     assert len(inserted) == 1
     assert inserted[0]["x"] == pytest.approx(0.001)
     assert inserted[0]["y"] == pytest.approx(0.001)
+
+
+def test_apls_oneway_reuses_shortest_paths_by_source(monkeypatch):
+    graph = _line_graph(20)
+    snap = {node: node for node in graph}
+    seed, n_samples = 42, 100
+    rng = random.Random(seed)
+    pairs = [rng.sample(list(graph), 2) for _ in range(n_samples)]
+    expected_calls = 2 * len({a for a, _ in pairs})
+
+    original = nx.single_source_dijkstra_path_length
+    calls = 0
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(nx, "single_source_dijkstra_path_length", counted)
+
+    assert _apls_oneway(graph, graph, snap, n_samples, "length_m", seed) == 1.0
+    assert calls == expected_calls

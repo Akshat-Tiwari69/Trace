@@ -1,4 +1,4 @@
-"""Statistical rigor for model-promotion decisions (bugs.md §3).
+"""Statistical rigor for A17 model-promotion decisions.
 
 Every "v_next beats v_prev" call in this project has ridden on single point
 estimates of IoU/APLS over a fixed held-out set — several past gaps (A17's

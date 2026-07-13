@@ -1,7 +1,7 @@
-"""Regression tests for the A36 L-effort fixes (bugs.md).
+"""Regression tests for the A36 L-effort fixes.
 
-Covers the pre-tiling / windowed-inference stage (§5H) and the upload-to-graph
-analysis loop (§2B). Both run on synthetic inputs — no GPU, no checkpoint.
+Covers the A36 pre-tiling/windowed-inference stage and the A39 upload-to-graph
+analysis loop. Both run on synthetic inputs — no GPU, no checkpoint.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ def test_modal_client_sends_auth_header_outside_json(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# §5H — windowed reading + streamed inference for large rasters
+# A36 — windowed reading + streamed inference for large rasters
 # --------------------------------------------------------------------------- #
 def _write_png(path, arr: np.ndarray) -> None:
     from PIL import Image
@@ -116,7 +116,7 @@ def test_predict_large_raster_recovers_road_pattern(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# §2B — upload → graph → resilience analysis (the "close the loop" feature)
+# A39 upload → graph → resilience analysis
 # --------------------------------------------------------------------------- #
 def test_analyze_mask_produces_graph_and_criticality():
     from src.app.upload_analysis import analyze_mask
@@ -149,8 +149,7 @@ def test_analyze_mask_rejects_empty_mask():
 
 # --------------------------------------------------------------------------- #
 # A37 follow-up — upload-analysis concurrency guard + mask-size ceiling
-# (bugs.md §5H "no concurrency/queueing guard" applied to the in-process
-# CPU pipeline, not just the ARM-box-level deploy concern).
+# applied to the in-process CPU pipeline, not just the host-level deploy concern.
 # --------------------------------------------------------------------------- #
 def test_analyze_mask_rejects_oversized_mask(monkeypatch):
     import pytest
@@ -201,7 +200,7 @@ def test_analyze_mask_busy_when_semaphore_saturated(monkeypatch):
 
 # --------------------------------------------------------------------------- #
 # A37 follow-up — vectorized edge-style computation for the single GeoJson
-# road layer (bugs.md §2C P2, replacing the per-edge folium.PolyLine loop).
+# road layer, replacing the per-edge folium.PolyLine loop.
 # Pure pandas/numpy: importable and callable without a Streamlit runtime.
 # --------------------------------------------------------------------------- #
 def _tiny_edge_gdf():
@@ -265,7 +264,7 @@ def test_compute_edge_styles_matches_original_precedence():
 
 
 def test_compute_edge_styles_maps_confidence_to_opacity():
-    """A ``confidence`` column (bugs.md §9.3) fades low-confidence edges, clipped
+    """A ``confidence`` column fades low-confidence edges, clipped
     to [0.35, 1.0] so nothing goes fully invisible; disabled/spof keep their own
     fixed opacity regardless of confidence."""
     import geopandas as gpd

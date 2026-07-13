@@ -137,7 +137,9 @@ def evaluate(
 
     ranked = sorted(bc, key=lambda n: bc[n], reverse=True)
     top_nodes = [{"node_id": int(n), "betweenness": round(bc[n], 4)} for n in ranked[:top_n]]
-    n_bridged = healing["bridges_added"]
+    n_bridged = sum(
+        bool(data.get("is_bridged")) for _, _, data in graph.edges(data=True)
+    )
 
     report = {
         "aoi": aoi,

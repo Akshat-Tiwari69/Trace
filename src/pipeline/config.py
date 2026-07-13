@@ -1,4 +1,4 @@
-"""One config object for an end-to-end pipeline run (bugs.md §5B).
+"""One config object for an end-to-end pipeline run.
 
 The tunables for a run were duplicated across ``run()``'s long parameter list,
 ``GraphConfig``, and three separate argparse blocks — with independent defaults,
@@ -57,7 +57,7 @@ class PipelineConfig:
     consolidate_tol_m: float = 10.0
     simplify_geom: bool = True
     geom_tol_m: float = 1.5
-    min_corridor_support: float = 0.3  # P1 prob-map corridor check (bugs.md §4); 0 disables
+    min_corridor_support: float = 0.3  # A39 P1 probability-corridor check; 0 disables
     corridor_samples: int = 16
 
     # --- P3: analysis ---------------------------------------------------------

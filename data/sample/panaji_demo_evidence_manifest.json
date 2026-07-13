@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "input": {
+    "path": "panaji_demo_graph.geojson",
+    "sha256": "cde6543f97e790c3e1f78cabb11c1a3c269c9fea9c1df67ebc9f43ea70560d85"
+  },
+  "artifacts": {
+    "panaji_demo_flood_curve.png": {
+      "sha256": "96f11be89c143e1d284e185ee6cd4b05bd11358486bf9270a3ba9ea8b736891b",
+      "command": "python -m src.pipeline.p3_analysis.flood --aoi panaji_demo --sample-dir data/sample --processed-dir data/processed"
+    },
+    "panaji_demo_graph_eval.json": {
+      "sha256": "fac65919b2b9dac9bce788271639e32c84383129530ba01eaca1388a5d9c4ad1",
+      "command": "python -m src.pipeline.p3_analysis.evaluate --aoi panaji_demo --sample-dir data/sample --curve-steps 40 --top-n 5"
+    },
+    "panaji_demo_percolation.json": {
+      "sha256": "6adcbe345076f270da4983c2fbde597743c55db12fc140107f5e1022f1ce376e",
+      "command": "python -m src.pipeline.p3_analysis.percolation --aoi panaji_demo --sample-dir data/sample --corner se --top-n 10"
+    },
+    "panaji_demo_resilience.csv": {
+      "sha256": "f0c12a8bee5447b3135bae64519c3894fbf2c5f6ec793fa1cdc194513c768465",
+      "command": "python -m src.pipeline.p3_analysis.analyze --aoi panaji_demo --critical-fraction 0.10 --curve-steps 25",
+      "copy_from": "data/processed/panaji_demo_resilience.csv"
+    },
+    "panaji_demo_resilience_curve.png": {
+      "sha256": "62444c37e267ad527b77f76b4d67d0117b0046d4e4b151ed5598097ad30e594d",
+      "command": "python -m src.pipeline.p3_analysis.evaluate --aoi panaji_demo --sample-dir data/sample --curve-steps 40 --top-n 5"
+    }
+  }
+}

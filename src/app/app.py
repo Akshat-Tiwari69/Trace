@@ -147,7 +147,18 @@ def load_resilience_curve() -> pd.DataFrame | None:
     """Load the resilience degradation curve (P3 contract) if available."""
     path = REPO_ROOT / "data" / "sample" / "panaji_demo_resilience.csv"
     if path.is_file():
-        return pd.read_csv(path)
+        curve = pd.read_csv(path)
+        ri_columns = {"targeted_resilience_index", "random_resilience_index"}
+        if not ri_columns.issubset(curve.columns):
+            return None
+        values = curve[list(ri_columns)].apply(pd.to_numeric, errors="coerce")
+        if (
+            not np.isfinite(values.to_numpy()).all()
+            or not values.ge(0).all().all()
+            or not values.le(1).all().all()
+        ):
+            return None
+        return curve
     return None
 
 
@@ -175,7 +186,7 @@ def graph_from_features(fingerprint: str, _features: gpd.GeoDataFrame) -> nx.Mul
     MultiGraph (not Graph): the sample GeoJSON can carry parallel edges between
     the same (u, v) — loops, dual carriageways — and ``add_edge`` on a plain
     Graph silently overwrites them, collapsing the redundancy the resilience
-    metric is meant to reward (bugs.md §4 / A37).
+    metric is meant to reward (A37 MultiGraph contract).
     """
     nodes, edges = split_features(_features)
     graph = nx.MultiGraph()
@@ -211,7 +222,7 @@ def _min_edge_data(graph: nx.MultiGraph, u: int, v: int) -> dict:
     edge between a pair of nodes, so anything reconstructing that route's length
     or geometry must agree on the *same* edge — otherwise a longer/shorter
     parallel twin (loop, dual carriageway) would silently mismatch the path
-    Dijkstra actually chose (bugs.md §4 / A37).
+    Dijkstra actually chose (A37 MultiGraph contract).
     """
     return min(graph[u][v].values(), key=lambda data: float(data["length_m"]))
 
@@ -317,7 +328,7 @@ def simulate_ablation(graph_fingerprint: str, _graph: nx.MultiGraph, nodes: tupl
 def semantic_legend() -> folium.Element:
     """Create a labelled map legend for semantic route states.
 
-    Folds the criticality ramp in as a CSS gradient bar (bugs.md §2C P2
+    Folds the criticality ramp in as a CSS gradient bar (A39 vector-layer
     cosmetic) so the encoding lives in one place instead of this HTML legend
     plus a separate branca colormap bar plastered on the map corner.
     """
@@ -377,7 +388,7 @@ def compute_edge_styles(
 ) -> gpd.GeoDataFrame:
     """Vectorized per-edge style columns for the single GeoJson road layer.
 
-    Replaces the old per-edge ``folium.PolyLine`` loop (bugs.md §2C P2): what
+    Replaces the old per-edge ``folium.PolyLine`` loop (A39 vector-layer optimization): what
     actually dominated rerun time at scale was instantiating ~500 individual
     Folium objects (each its own Jinja template + id), not the score→colour
     lookup — so this builds one styled GeoDataFrame via pandas/numpy ops
@@ -435,7 +446,7 @@ def compute_edge_styles(
         [5, 4],
         default=3,
     )
-    # Per-edge confidence (bugs.md §9.3, only present when P1 persisted a prob
+    # Per-edge confidence (A39, only present when P1 persisted a probability
     # map): a low-confidence edge is drawn fainter so an occluded/uncertain
     # road doesn't read as equally "observed" as a clean detection. Clipped to
     # [0.35, 1.0] — never fully invisible, since a faint road is still real
@@ -500,9 +511,9 @@ def build_map(
 
     ``center``/``zoom`` (when both given) restore the user's last viewport so the
     map doesn't snap back to the whole-network bounds on every rerun — the
-    canonical streamlit-folium round-trip (bugs.md §2C).
+    canonical streamlit-folium round-trip (A39 viewport persistence).
 
-    ``minimal`` (bugs.md §9.1, Briefing tab): a cheaper, chrome-less variant —
+    ``minimal`` (A39 Briefing tab): a cheaper, chrome-less variant —
     single tile layer, no layer control, no draw tool, no full legend (ramp
     only), and only critical + disabled junctions as dots (ignores the
     show_critical/show_spof toggles and selected_node, which the Briefing tab
@@ -529,7 +540,7 @@ def build_map(
         control_scale=True,
     )
     # Only auto-fit to the whole network when we have no remembered viewport —
-    # otherwise honour the user's last pan/zoom (bugs.md §2C).
+    # otherwise honour the user's last pan/zoom (A39 viewport persistence).
     if center is None or zoom is None:
         min_x, min_y, max_x, max_y = (float(value) for value in nodes.total_bounds)
         if all(isfinite(value) for value in (min_x, min_y, max_x, max_y)) and (
@@ -560,7 +571,7 @@ def build_map(
             edit_options={'poly': {'allowIntersection': False}}
         ).add_to(road_map)
 
-    # Single vectorized GeoJson layer (bugs.md §2C P2) replaces one
+    # Single vectorized GeoJson layer (A39) replaces one
     # folium.PolyLine per edge — style columns are recomputed from the live
     # simulation/toggle state on every call (see compute_edge_styles), so
     # disabled/rerouted state never goes stale.
@@ -630,13 +641,13 @@ def build_map(
     else:
         folium.LayerControl(position="topright").add_to(road_map)
         # The criticality ramp is now folded into semantic_legend() as a CSS
-        # gradient bar (bugs.md §2C P2 cosmetic) — no separate branca bar.
+        # gradient bar (A39) — no separate branca bar.
         road_map.get_root().html.add_child(semantic_legend())
     return road_map
 
 
 def ramp_legend() -> folium.Element:
-    """Chrome-less legend for the Briefing tab (bugs.md §9.1): ramp only, no
+    """Chrome-less legend for the A39 Briefing tab: ramp only, no
     network-states list — the Briefing map has no disabled/reroute toggles to
     explain beyond what the single "Simulate the worst failure" button does."""
     ramp_css = ", ".join(TOKENS[f"ramp_{i}"] for i in range(4))
@@ -802,7 +813,7 @@ def _clear_last_map_click() -> None:
 
 
 def _run_top_chokepoint_demo(critical_nodes: pd.DataFrame) -> None:
-    """Shared demo-CTA logic (bugs.md §9.1): disable the #1-ranked chokepoint.
+    """Shared A39 demo-CTA logic: disable the #1-ranked chokepoint.
 
     Used by both the Briefing tab's "Simulate the worst failure" button and the
     Analysis tab's "Run demo" button so the ablation itself lives in one place.
@@ -813,7 +824,7 @@ def _run_top_chokepoint_demo(critical_nodes: pd.DataFrame) -> None:
 
 
 def _reset_simulation() -> None:
-    """Shared reset logic (bugs.md §9.1), used by both the Analysis and Briefing tabs."""
+    """Reset state shared by the Analysis and Briefing tabs (A39)."""
     st.session_state["disabled_nodes"] = ()
     st.session_state["ablation_source"] = None
     st.session_state["reset_counter"] = st.session_state.get("reset_counter", 0) + 1
@@ -823,7 +834,7 @@ def _reset_simulation() -> None:
 
 
 def _explain_failure(simulation: SimulationResult) -> str:
-    """One-sentence plain-language explanation of an ablation (Briefing tab, bugs.md §9.1)."""
+    """One-sentence plain-language explanation of an ablation (A39 Briefing tab)."""
     node = simulation.disabled_nodes[0]
     efficiency_loss = (1.0 - simulation.resilience_index) * 100
     if simulation.largest_cc_fraction < 0.99:
@@ -846,7 +857,7 @@ def render_briefing(
     graph: nx.MultiGraph,
     simulation: SimulationResult | None,
 ) -> None:
-    """Briefing tab (bugs.md §9.1): the judge/demo persona's one-screen pitch.
+    """A39 Briefing tab: the judge/demo persona's one-screen pitch.
 
     Full-width hero, chrome-less map (build_map(minimal=True)), three headline
     metrics, and a single button that reuses the Analysis tab's demo-CTA logic
@@ -919,7 +930,7 @@ def render_export_controls(
     critical_nodes: pd.DataFrame,
     resilience_curve: pd.DataFrame | None,
 ) -> None:
-    """Export downloads (bugs.md §9.1) — moved from the flat panel into a popover."""
+    """A39 export downloads, moved from the flat panel into a popover."""
     export_col1, export_col2 = st.columns(2)
     with export_col1:
         geojson_data = generate_geojson_export(
@@ -951,7 +962,7 @@ def render_panel(
     simulation: SimulationResult | None,
     resilience_curve: pd.DataFrame | None = None,
 ) -> None:
-    """Analysis tab's panel (bugs.md §9.1): metrics + export popover, then
+    """A39 Analysis panel: metrics + export popover, then
     Scenario/Rankings/Curves sub-tabs. Reorganized from one flat panel — the
     logic in each sub-tab is unchanged, just relocated."""
     nodes, edges = split_features(features)
@@ -1030,7 +1041,7 @@ def render_scenario_tab(
     simulation: SimulationResult | None,
     route: RouteResult | None,
 ) -> None:
-    """Scenario sub-tab (bugs.md §9.1): failure-mode picker, closures, toggles, status."""
+    """A39 scenario tab: failure-mode picker, closures, toggles and status."""
     if st.button(
         "Run demo: disable the #1 chokepoint",
         type="primary",
@@ -1129,7 +1140,7 @@ def render_scenario_tab(
               "Disable the selected junction and recompute routes and resilience."),
         disabled=failure_mode == FLOOD_MODE,
     ):
-        # Accumulate closures so users can model a compound disaster (§2D).
+        # Accumulate closures so users can model a compound disaster (A39).
         base = set(current_closures) if add_more else set()
         st.session_state["disabled_nodes"] = tuple(sorted(base | {int(selected)}))
         st.session_state["ablation_source"] = "single"
@@ -1179,7 +1190,7 @@ def render_scenario_tab(
 
 
 def render_curves_tab(resilience_curve: pd.DataFrame | None) -> None:
-    """Curves sub-tab (bugs.md §9.1): the resilience degradation chart."""
+    """A39 curves tab: the resilience degradation chart."""
     if resilience_curve is None:
         st.info("Resilience curve not available for this dataset.")
         return
@@ -1202,10 +1213,10 @@ def render_curves_tab(resilience_curve: pd.DataFrame | None) -> None:
 def render_rankings_tab(
     critical_nodes: pd.DataFrame, nodes: gpd.GeoDataFrame, edges: gpd.GeoDataFrame
 ) -> None:
-    """Rankings sub-tab (bugs.md §9.1): the selectable chokepoint leaderboard."""
+    """A39 rankings tab: the selectable chokepoint leaderboard."""
     st.subheader("Top critical junctions")
     # Numeric scores (not stringified) so sorting is true-numeric and the score
-    # bar renders; clicking a row selects that junction and recentres the map (§2D).
+    # bar renders; clicking a row selects that junction and recentres the map (A39).
     ranked = critical_nodes[["rank", "node_id", "betweenness"]].copy()
     max_bw = max(float(ranked["betweenness"].max()), 1e-9)
     table_event = st.dataframe(
@@ -1388,7 +1399,7 @@ def apply_design_theme() -> None:
     )
 
 
-# Minimal-viable observability (bugs.md §5F): structured logs to stderr (picked up
+# A36 minimal observability: structured logs to stderr (picked up
 # by journald on the deployed box) + a lightweight usage counter, so "how many
 # people used it / how many uploads failed" is answerable without extra infra.
 log = logging.getLogger("trace.app")
@@ -1554,7 +1565,7 @@ def render_live_detection() -> None:
 
 @st.cache_resource
 def _ensure_upload_worker() -> None:
-    """Start the filesystem job-queue worker once per process (bugs.md §5H).
+    """Start the A39 filesystem job-queue worker once per process.
 
     `ensure_worker()` is already idempotent on its own (module flag + lock,
     src/app/job_queue.py) — this cache_resource wrapper is a second belt so a
@@ -1566,7 +1577,7 @@ def _ensure_upload_worker() -> None:
 
 
 def _render_upload_analysis(orig_rgb: np.ndarray, mask_gray: np.ndarray) -> None:
-    """Close the loop (bugs.md §2B/§5H/§9.4): mask → queued analysis → resilience.
+    """A39 upload loop: mask → queued analysis → resilience.
 
     Submits the mask to the filesystem job queue rather than calling
     analyze_mask() synchronously in the request thread: a queued job survives
@@ -1686,7 +1697,7 @@ def main() -> None:
     # Computed once per rerun and shared by the Briefing and Analysis tabs
     # (both need the current ablation's metrics) rather than re-simulating —
     # simulate_ablation is cache_data-keyed on disabled_nodes anyway, but this
-    # avoids even the cache-lookup duplication (bugs.md §9.1).
+    # avoids even the cache-lookup duplication (A39).
     if disabled_nodes:
         with st.spinner("Simulating failure…"):
             simulation = simulate_ablation(DATA_FINGERPRINT, graph, disabled_nodes)
@@ -1737,7 +1748,7 @@ def main() -> None:
 
 
 def render_methodology() -> None:
-    """Credibility tab (bugs.md §2A): what the metrics mean + shipped eval numbers.
+    """Methodology tab: metric definitions and committed evidence (A45-C6).
 
     Surfaces the eval artifacts already committed under ``data/sample/`` (IoU,
     APLS, graph quality) that otherwise live only in docs a judge never opens.
@@ -1760,10 +1771,10 @@ def render_methodology() -> None:
         "average path length."
     )
 
-    st.subheader("Model & network quality (held-out evaluation)")
+    st.subheader("Model & network quality (committed evaluation evidence)")
     sample_dir = SAMPLE_GEOJSON.parent
     reports = {
-        "Segmentation (SpaceNet-Mumbai held-out)": "segmentation_eval.json",
+        "Segmentation (DeepGlobe v1 historical holdout)": "segmentation_eval.json",
         "Routing similarity — APLS": "panaji_demo_apls.json",
         "Graph quality": "panaji_demo_graph_eval.json",
     }
@@ -1799,7 +1810,7 @@ def render_methodology() -> None:
 def render_dashboard_view(
     features, criticality, graph, resilience_curve, critical_ids, simulation
 ) -> None:
-    """The Analysis tab (bugs.md §9.1): the planner's full tooling — network map
+    """The A39 Analysis tab: the planner's full tooling — network map
     + control panel. ``simulation`` is computed once in main() and shared with
     the Briefing tab rather than re-simulated here."""
     show_critical = st.session_state.get("show_critical", True)
@@ -1807,7 +1818,7 @@ def render_dashboard_view(
     show_spof = st.session_state.get("show_spof", True)
     failure_mode = st.session_state.get("failure_mode", SINGLE_MODE)
 
-    # Remembered viewport (bugs.md §2C): fed into every map so pan/zoom survives
+    # Remembered viewport (A39): fed into every map so pan/zoom survives
     # reruns. Reset clears it (via reset_counter) so the map reframes deliberately.
     map_center = st.session_state.get("map_center")
     map_zoom = st.session_state.get("map_zoom")
@@ -1833,7 +1844,7 @@ def render_dashboard_view(
     reset_n = st.session_state.get("reset_counter", 0)
     with map_column:
         # Side-by-side baseline/simulation comparison mode was removed
-        # (bugs.md §2C P2): the two panes never synced pan/zoom, doubled the
+        # (A39): the two panes never synced pan/zoom, doubled the
         # chrome, and streamlit-folium's own docs flag DualMap as flaky —
         # the orange reroute + dimmed disabled edges already show the
         # before/after story in this one map.

@@ -1,19 +1,19 @@
 # bugs.md — Current Open Issues
 
-> Historical review findings and their original section numbers are preserved in [`docs/ProductionReadinessAudit-2026-07.md`](docs/ProductionReadinessAudit-2026-07.md). Older code comments that say `bugs.md §…` refer to that archive until A45 replaces them with durable rationale/task references.
+> Historical review findings and their original section numbers are preserved in [`docs/ProductionReadinessAudit-2026-07.md`](docs/ProductionReadinessAudit-2026-07.md). Current code uses durable task/contract references rather than depending on those archived section numbers.
 
-**Last reconciled:** 2026-07-13 · **Active program:** A44 → A45/A46 → F9/O1
+**Last reconciled:** 2026-07-14 · **Active program:** A46 → web replacement/O1
 
 ## Correctness and evidence
 
-- [ ] **A45-C1 — Preserve the baseline node universe in multi-step ablation.** `ablation_curve()` removes nodes and recomputes efficiency with a smaller denominator, so RI can exceed 1 and historical resilience/flood curve absolutes are invalid. Isolate failed nodes or otherwise keep the baseline universe, add regression tests, then regenerate sample curves/plots/evaluation prose.
-- [ ] **A45-C2 — Correct graph-evaluator bridge labeling.** The current Panaji build added five healed bridges but four survive in final GeoJSON. `graph_eval.json` reports the build-time count as final `bridged_edges`; report both concepts explicitly.
-- [ ] **A45-C3 — Unify model-selection inference.** Threshold selection uses Hann-blended probabilities while forget/gray/per-tile scoring still uses the legacy hard-tiled path. Select thresholds and report/gate metrics from one shared probability protocol, then transparently re-baseline affected evidence.
-- [ ] **A45-C4 — Regenerate current derived sample evidence.** A44 refreshed graph/APLS JSON, but percolation and resilience/flood artifacts still require regeneration after C1; ensure every committed report names the graph/input fingerprint.
-- [ ] **A45-C5 — Enforce immutable deployment refs.** `update.sh` currently accepts `DEPLOY_REF=dev` because it resolves `origin/$DEPLOY_REF`; reject moving branches and accept only an approved tag or full commit SHA.
-- [ ] **A45-C6 — Correct public Methodology evidence.** It currently labels the historical DeepGlobe `segmentation_eval.json` as SpaceNet-Mumbai held-out evidence and exposes the provisional graph-eval resilience subsection. Point it to correctly labeled development evidence and suppress/flag curve RI until C1 regeneration.
-- [ ] **A45-C7 — Make CLI help Windows-console safe.** `python -m src.pipeline.run_pipeline --help` currently raises a cp1252 `UnicodeEncodeError` on the Unicode arrow in argparse text; use ASCII help text or an explicit UTF-8-safe console path.
-- [ ] **A45-C8 — Make `run_pipeline --config` behavior match help.** The CLI claims flags override config fields, but with `--config` only image/checkpoint/AOI are applied; resolution/tile/threshold/device and other flags are ignored. Define explicit precedence and test it; also replace the stale “A5 walking skeleton” description.
+- [x] **A45-C1 — Preserve the baseline node universe in every resilience path.** Multi-step and uploaded-image failure paths now isolate failed nodes/use the shared metric contract; fixed-source regression tests keep RI comparable and bounded.
+- [x] **A45-C2 — Correct graph-evaluator bridge labeling.** Reports now distinguish five build-time healing additions from four final surviving `is_bridged` edges.
+- [x] **A45-C3 — Unify model-selection inference.** Selection, clean/gray/forget gates and occlusion evaluation use labeled `hann_blended_probability_v1`; incompatible resume histories fail closed.
+- [x] **A45-C4 — Regenerate current derived sample evidence.** Resilience, flood, percolation, graph evaluation and plots were regenerated; the manifest records the source graph, artifact hashes and commands.
+- [x] **A45-C5 — Enforce immutable deployment refs.** `update.sh` accepts only an exact full SHA or application release tag and rejects branches, abbreviations and model tags.
+- [x] **A45-C6 — Correct public Methodology evidence.** DeepGlobe evidence is labeled historical, and the corrected current graph/resilience report is exposed.
+- [x] **A45-C7 — Make CLI help Windows-console safe.** Current ASCII help succeeds under cp1252.
+- [x] **A45-C8 — Make `run_pipeline --config` behavior match help.** Explicit CLI fields override config; unspecified fields retain file/default values.
 
 ## Model and data
 
@@ -35,16 +35,16 @@
 
 ## Repository and product hygiene
 
-- [ ] **A45-R1 — Separate clean dependency roles.** The mixed local GPU environment has package conflicts even though tests pass; create/test app/graph, training and dev/test environments while retaining a compatible aggregate path.
-- [ ] **A45-R2 — Make the notebook a thin launcher.** Consolidate duplicated training/evaluation logic in modules before further model experiments.
-- [ ] **A45-R3 — Replace archived `bugs.md §…` code comments** with task IDs or explanatory comments that survive document cleanup.
+- [x] **A45-R1 — Separate clean dependency roles.** Core, hosted-app, training and additive dev roles now compose into the CI/full-development aggregate.
+- [x] **A45-R2 — Make the notebook a thin launcher.** The notebook calls maintained training code; a structural test prevents local trainer definitions from returning.
+- [x] **A45-R3 — Replace archived `bugs.md §…` code comments.** Current code/tests use durable task/contract references or self-contained rationale.
 - [ ] **O1-R1 — Reconcile the public/default branch and application release.** GitHub `main` remains far behind `dev`; decide the human stage-gate update and create an approved application ref before claiming the public repository/release is current.
 - [ ] **A46-R1 — Track A18/A46 configs and result artifacts** in a license-safe reproducible form.
 - [ ] **LEGAL-1 — Choose a repository code license.** No top-level `LICENSE` currently grants reuse rights; dataset/provider licenses are separate and must not be treated as the code license.
-- [ ] **F9 — UI/UX overhaul** after A45/A46, with browser, responsive and accessibility gates from `Design.md`.
+- [ ] **F9 — Replace Streamlit/Folium with the authorized researched web experience** after A45/A46, with visual, browser, responsive, accessibility and performance-budget gates from `Design.md`.
 
 ## Recently closed
 
 - [x] First production-readiness batch: metric/geospatial corrections, content/config stage signatures, queue claims/leases/JSON results, auth-before-decode, dependency smoke, rollback tooling and architecture/docs corrections (PR #125).
 - [x] Graph-label coordinate invariant and upstream-license warning recorded for A18 (PR #126).
-- [x] Current Panaji graph evaluation and APLS JSON regenerated during A44; remaining curve/percolation artifacts are explicitly queued above.
+- [x] Current Panaji graph/APLS evidence was refreshed during A44; A45 then regenerated resilience, flood and percolation artifacts and added the evidence manifest.

@@ -1,4 +1,4 @@
-"""Read/write the healed graph in the §4 contract formats.
+"""Read/write the healed graph in the Tracker §4 contract formats.
 
 The graph is the central hand-off artifact (``docs/Tracker.md`` §4): P3 and P4
 both consume it. We persist it two ways:
@@ -81,7 +81,7 @@ def load_graphml(path: Path) -> "nx.Graph":
     when this particular file has no parallel edges — otherwise nx.read_graphml
     infers plain Graph/MultiGraph from the file's own ``<graph edgedefault>``
     tag, and callers branching on ``is_multigraph()`` would silently see a
-    different type per-file (bugs.md §4 / A37).
+    different type per file, violating the A37 MultiGraph contract.
     """
     import networkx as nx
 
@@ -103,7 +103,7 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
     Each feature carries ``feature_type`` ("node"/"edge") so the dashboard can
     style junctions and roads separately; node features expose ``betweenness`` /
     ``is_critical`` for the criticality heatmap, edges expose ``is_bridged`` so
-    healed roads can be drawn distinctly (``docs/Design.md`` §1, honesty).
+    healed roads can be drawn distinctly, preserving the design honesty rule.
 
     On a MultiGraph each keyed edge becomes its own LineString feature carrying
     an ``edge_key`` property, so parallel branches (loops, dual carriageways)
@@ -154,9 +154,9 @@ def graph_to_geojson(graph: "nx.Graph") -> dict:
             "is_bridge": bool(data.get("is_bridge", False)),
             "edge_betweenness": float(data.get("edge_betweenness", 0.0)),
         }
-        if data.get("width_m") is not None:  # optional road width (bugs.md §4)
+        if data.get("width_m") is not None:  # optional road width
             props["width_m"] = round(float(data["width_m"]), 3)
-        if data.get("confidence") is not None:  # optional mean prob (bugs.md §4, A37)
+        if data.get("confidence") is not None:  # optional mean probability
             props["confidence"] = round(float(data["confidence"]), 3)
         features.append(
             {
@@ -222,7 +222,7 @@ def load_geojson_graph(path: Path) -> "nx.MultiGraph":
                 is_bridge=bool(props.get("is_bridge", False)),
                 edge_betweenness=float(props.get("edge_betweenness", 0.0)),
             )
-            if props.get("width_m") is not None:  # optional road width (bugs.md §4)
+            if props.get("width_m") is not None:  # optional road width
                 attrs["width_m"] = float(props["width_m"])
             if props.get("confidence") is not None:  # optional mean prob (A37)
                 attrs["confidence"] = float(props["confidence"])

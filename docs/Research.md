@@ -157,4 +157,4 @@ The supported policy is simple:
 
 ## Resilience research note
 
-Betweenness is a useful chokepoint heuristic, not a resilience metric by itself. Product evidence comes from the global-efficiency response to failures. The intended RI preserves the baseline node universe; the current multi-step `ablation_curve` normalization defect is documented in `Evaluation.md` and queued for A45 before curve claims are regenerated.
+Betweenness is a useful chokepoint heuristic, not a resilience metric by itself. Product evidence comes from the global-efficiency response to failures. A45 aligned both resilience paths on one contract: failed nodes remain in the baseline universe as isolates, the sampled-source set stays fixed across a curve, and RI remains bounded in `[0, 1]`. The corrected Panaji curve/flood evidence and its source fingerprint are recorded in `Evaluation.md` and `data/sample/panaji_demo_evidence_manifest.json`.

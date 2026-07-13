@@ -40,7 +40,7 @@ def run(
 ) -> dict:
     """Build the healed graph from the predicted mask, then run criticality + resilience.
 
-    Returns the ``analyze`` summary dict. Output artifacts land at the §4
+    Returns the ``analyze`` summary dict. Output artifacts land at the Tracker §4
     ``data/processed/`` paths via the existing ``build_graph`` / ``analyze``.
     """
     georef = "georeferenced (lon/lat)" if cfg.manifest_path.exists() else "pixel-space (no manifest)"

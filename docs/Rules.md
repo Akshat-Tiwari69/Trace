@@ -14,10 +14,10 @@
 
 ## Architecture
 
-- Stable phase seam: P1 mask/probability/provenance → P2 MultiGraph → P3 criticality/resilience → P4 presentation.
-- The batch pipeline communicates through §4 file artifacts. The hosted upload path may call the authenticated Modal P1 endpoint and run P2/P3 in-process.
-- No database, user-login system, separate REST backend or JavaScript SPA in this release.
-- Streamlit + Folium remains the frontend stack.
+- Stable domain seam: P1 mask/probability/provenance → P2 MultiGraph → P3 criticality/resilience → presentation/API adapters.
+- The batch pipeline communicates through §4 file artifacts. The hosted upload path may call the authenticated Modal P1 endpoint and run P2/P3 on the CPU host.
+- Streamlit/Folium remains only the current deployed presentation until F9 replaces it. Akshat authorized a modern web frontend and a thin Python application API; the migration must preserve domain logic and artifact contracts instead of reimplementing them in the client.
+- No database or user-login product is added without a separate requirement and recorded contract/security decision.
 - The resilience metric is baseline-normalized global efficiency and must preserve the baseline node universe so it remains finite and in `[0, 1]`. Any path that shrinks the denominator is a correctness defect.
 - CPU is the deployment target for P2/P3/dashboard; GPU is optional for local inference and required only for training/remote P1.
 
@@ -62,6 +62,6 @@
 
 - PyTorch and pretrained fine-tuning only; no training from scratch.
 - Global-efficiency Resilience Index, never raw average-path-length ratio.
-- Pure-Python Streamlit/Folium product; no database or auth/login product scope.
+- Python/PyTorch ML and graph core with a performance-budgeted web presentation; no database or auth/login product scope unless separately authorized.
 - Hardware-agnostic training path; no remote access to a teammate’s machine.
 - Neutral, public-safe repository with honest, reproducible evidence.

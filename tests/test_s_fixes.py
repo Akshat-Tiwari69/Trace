@@ -1,4 +1,4 @@
-"""Regression tests for the A36 S-effort fixes (bugs.md).
+"""Regression tests for the A36 S-effort fixes.
 
 Grouped in one module because each fix is a few lines in a different file:
 fail-loud guards (analyze/resilience/APLS/rank_table/load_checkpoint), the
@@ -16,7 +16,7 @@ from src.pipeline.p2_graph.graph_io import atomic_write, load_graphml, save_grap
 
 
 # --------------------------------------------------------------------------- #
-# AOI sanitization (bugs.md §5A)
+# A36 AOI sanitization
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("bad", ["../../evil", "", "UPPER", "a b", "x" * 65, "a/b"])
 def test_sanitize_aoi_rejects_unsafe_ids(bad):
@@ -34,7 +34,7 @@ def test_graphconfig_rejects_traversal_aoi(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Atomic writes + zero-length-edge invariant (bugs.md §5A / §4)
+# A36 atomic writes + zero-length-edge invariant
 # --------------------------------------------------------------------------- #
 def test_atomic_write_failure_leaves_target_untouched(tmp_path):
     target = tmp_path / "artifact.json"
@@ -65,7 +65,7 @@ def test_loader_rejects_zero_length_edges(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Fail-loud P3 guards (bugs.md §7)
+# A36 fail-loud P3 guards
 # --------------------------------------------------------------------------- #
 def test_analyze_refuses_degenerate_graph(tmp_path):
     import networkx as nx
@@ -114,7 +114,7 @@ def test_rank_table_requires_annotation_first():
 
 
 # --------------------------------------------------------------------------- #
-# Parallel-branch preservation under MultiGraph (bugs.md §4 — A37 migration)
+# Parallel-branch preservation under the A37 MultiGraph contract
 # --------------------------------------------------------------------------- #
 def test_skeleton_parallel_branches_preserved(capsys):
     from src.pipeline.p2_graph.skeleton_graph import skeleton_to_graph
@@ -144,7 +144,7 @@ def test_skeleton_parallel_branches_preserved(capsys):
 
 
 # --------------------------------------------------------------------------- #
-# Checkpoint meta guard (bugs.md §7)
+# A36 checkpoint metadata guard
 # --------------------------------------------------------------------------- #
 def test_load_checkpoint_refuses_missing_meta(tmp_path):
     import torch
@@ -158,7 +158,7 @@ def test_load_checkpoint_refuses_missing_meta(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Foreground-biased crop (bugs.md §3)
+# A36 foreground-biased crop
 # --------------------------------------------------------------------------- #
 def _write_sparse_pair(tmp_path):
     from PIL import Image

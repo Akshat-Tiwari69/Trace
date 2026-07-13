@@ -1,7 +1,7 @@
 """CLI: run the trained segmentation model on imagery → road mask (P1 inference).
 
 The inference half of P1: load a fine-tuned checkpoint, predict a binary road
-mask for an image, and write it at the §4 contract path
+mask for an image, and write it at the P1 artifact-contract path
 ``data/interim/{aoi}_mask.png`` that P2 (Shaivi) consumes.
 
 :func:`run_inference` is the single shared path (A36) — both this CLI and
@@ -36,7 +36,7 @@ from src.pipeline.p1_segment.postprocess import add_postprocess_args, postproces
 _AOI_RE = re.compile(r"^[a-z0-9_-]{1,64}$")
 
 # Above this size (either dimension), stream the raster in windows rather than
-# loading it whole — the whole-RGB-float image is the OOM risk at pilot scale (§5H).
+# loading it whole — the full RGB float image is the pilot-scale OOM risk.
 WINDOWED_THRESHOLD_PX = 4096
 
 
@@ -69,6 +69,7 @@ def run_inference(
     fill_holes: int = 0,
     windowed: bool | None = None,
     window_px: int = 2048,
+    checkpoint_sha256: str | None = None,
 ) -> tuple[Path, float]:
     """Shared P1 inference: image + checkpoint → ``data/interim/{aoi}_mask.png``.
 
@@ -79,7 +80,7 @@ def run_inference(
     ``postprocess`` runs the A10 cleanup before writing.
 
     ``windowed`` streams a large raster off disk in ``window_px`` tiles instead
-    of loading it whole (bugs.md §5H) — the only full-size array held is the
+    of loading it whole to bound memory — the only full-size array held is the
     binary mask. ``None`` (default) auto-enables it once the raster exceeds
     ``WINDOWED_THRESHOLD_PX`` in either dimension. Returns
     ``(mask_path, road_pixel_fraction)``.
@@ -103,8 +104,8 @@ def run_inference(
     prob = None  # only the whole-image blended path below ever fills this in
     if windowed:
         # Stream windows off disk — never materialise the full RGB image. Each
-        # window's prob map is thresholded and discarded immediately (§5H's
-        # memory bound), so there is no full-size prob array to persist here.
+        # window's prob map is thresholded and discarded immediately, so there
+        # is no second full-size probability array to persist here.
         transform, crs = raster_georef(image_path)
         mask = predict_large_raster(model, image_path, tile_size=tile_size, threshold=threshold,
                                     device=device, tta=tta, window_px=window_px)
@@ -137,9 +138,9 @@ def run_inference(
     for stale in (sidecar_dir / "prob.png", sidecar_dir / "manifest.json"):
         stale.unlink(missing_ok=True)
 
-    # Persist the P1 probability map (bugs.md §4): the blended path computes it
-    # then used to discard it after thresholding. P2's healing needs it to tell
-    # a sub-threshold occluded road from terrain with no road signal at all.
+    # Persist the blended P1 probability map: P2 corridor-support healing needs
+    # it to distinguish a sub-threshold occluded road from terrain with no road
+    # signal at all.
     prob_path = None
     if prob is not None:
         prob_path = sidecar_dir / "prob.png"
@@ -147,10 +148,10 @@ def run_inference(
 
     manifest = write_manifest(aoi, interim_dir, transform, crs, prob_png=prob_path is not None)  # A26: georef for P2
 
-    # Provenance (bugs.md §5A): record which checkpoint/threshold/commit made this
-    # mask, alongside it, so P2/P3 can carry the lineage into every artifact.
+    # Record the checkpoint, threshold and commit beside the mask so P2/P3 can
+    # carry the lineage into every downstream artifact.
     from src.pipeline.p1_segment.provenance import build_provenance, write_provenance
-    prov = build_provenance(checkpoint, meta, threshold)
+    prov = build_provenance(checkpoint, meta, threshold, checkpoint_sha256=checkpoint_sha256)
     write_provenance(Path(interim_dir) / aoi / "provenance.json", prov)
 
     geo = f" · georeferenced ({crs}) -> {manifest}" if manifest else " · pixel-space (no CRS)"
@@ -174,7 +175,7 @@ def main() -> None:
     p.add_argument("--blend", action="store_true", help=argparse.SUPPRESS)  # legacy no-op: blend is the default
     p.add_argument("--stride", type=int, default=None, help="blend window stride (default 75%% overlap)")
     p.add_argument("--windowed", dest="windowed", action="store_true", default=None,
-                   help=f"stream the raster in windows (auto-enabled above {WINDOWED_THRESHOLD_PX}px, §5H)")
+                   help=f"stream the raster in windows (auto-enabled above {WINDOWED_THRESHOLD_PX}px)")
     p.add_argument("--no-windowed", dest="windowed", action="store_false",
                    help="force whole-image inference even for a large raster")
     p.add_argument("--window-px", type=int, default=2048, help="window size for --windowed inference")

@@ -11,6 +11,7 @@ def test_app_renders_and_exposes_keyboard_flood_controls():
     assert {"Briefing", "Analysis", "Your imagery", "Methodology"}.issubset(
         {tab.label for tab in app.tabs}
     )
+    assert any("DeepGlobe" in expander.label for expander in app.expander)
 
     failure_mode = next(radio for radio in app.radio if radio.label == "Failure mode")
     failure_mode.set_value(FLOOD_MODE).run(timeout=45)

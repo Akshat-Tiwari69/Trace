@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-07-13 · **Phase:** A44 documentation complete; A45 correctness/refactor next · **Overall:** core product working; consolidation in progress
+**Last updated:** 2026-07-14 · **Phase:** A45 complete; A46 next · **Overall:** core product working; model improvement and authorized web replacement remain
 
 ---
 
@@ -14,11 +14,11 @@ At the beginning of a session, identify the team member you are working for. If 
 
 | Team member | Default ownership | Current next task |
 |---|---|---|
-| **Akshat** | `src/pipeline/p1_segment/`, data tooling, notebooks, integration, shared configuration and coordination | **A45** correctness, simplification and performance |
-| **Shaivi** | `src/pipeline/p2_graph/`, `src/pipeline/p3_analysis/` | Support **A45** graph/analysis simplification and performance audit |
-| **Saanvi** | `src/app/`, `docs/Design.md` | **F9** UI/UX overhaul after A45/A46 |
+| **Akshat** | `src/pipeline/p1_segment/`, data tooling, notebooks, integration, shared configuration and coordination | **A46** graph-first model improvement |
+| **Shaivi** | `src/pipeline/p2_graph/`, `src/pipeline/p3_analysis/` | Support **A46** routing-based selection and calibration |
+| **Saanvi** | current `src/app/`, product design and future web frontend | **F9** web-experience replacement after A45/A46 |
 
-**Current coordinator authorization:** on 2026-07-13 Akshat explicitly authorized the active agent to work across **all three lanes** for A44–A46 and the later F9 overhaul. Keep cross-lane changes reviewable and record them here; this authorization does not remove code review or artifact-contract checks.
+**Current coordinator authorization:** Akshat authorized the active agent to work across **the whole project/all three lanes**. On 2026-07-14 he explicitly superseded the Streamlit/Folium stack lock and authorized selection of a replacement web stack for F9. Keep cross-lane and architecture changes reviewable and record them here; this authorization does not remove code review or artifact-contract checks.
 
 ---
 
@@ -47,11 +47,11 @@ For each still-open PR, inspect both reviews and inline review comments. Address
 
 ## §2 · Ground Rules
 
-- **Product stack:** Streamlit + Folium, pure Python. No JavaScript SPA, database, or user-login system in this release.
-- **Deployed exception:** uploaded imagery is sent to the authenticated Modal segmentation endpoint; P2/P3 and simulations remain in-process on the Streamlit host.
+- **Product stack:** the deployed baseline remains Streamlit/Folium until F9 reaches verified parity. F9 is authorized to replace it with a performance-budgeted web frontend and thin Python API while preserving the Python ML/graph core and §4 contracts. A database/login product remains out of scope unless separately justified and recorded.
+- **GPU boundary:** uploaded imagery is sent to the authenticated Modal segmentation endpoint; P2/P3 and simulations remain CPU-capable on the application host.
 - **ML:** fine-tune pretrained models only; PyTorch only. Training may use Colab, Kaggle, or an optional local NVIDIA GPU.
 - **Runtime:** graph analysis and the dashboard must remain CPU-capable. Committed `data/sample/` artifacts keep the demo runnable without a checkpoint.
-- **Metric:** Resilience Index is the ratio of global efficiency to the baseline graph. It must remain finite and bounded in `[0, 1]`; never substitute raw average path length. The single-scenario path preserves the baseline node universe, but the current multi-step `ablation_curve` still shrinks the denominator and is an A45 correctness fix.
+- **Metric:** Resilience Index is the ratio of global efficiency to the baseline graph. It must remain finite and bounded in `[0, 1]`; never substitute raw average path length. Single-scenario and multi-step paths preserve the baseline node universe; failed nodes remain as isolates.
 - **Evidence:** do not invent metrics, citations, deployment state, or generalization claims. Negative results are first-class results.
 - **Benchmark honesty:** SpaceNet-5 Mumbai is a repeatedly consulted **development benchmark**, not an untouched final test set.
 - **Repository hygiene:** no secrets, raw/restricted datasets, or model checkpoints in Git. Preserve licenses and public-safe wording.
@@ -77,6 +77,8 @@ Current release state:
 - Repository/intended production segmentation model: `a4-roadseg-v3.2` (`road_pan.pt`, threshold `0.52`); O1 must verify the live Modal checksum
 - Current research direction: graph-first SAM-Road++/A18, validated by a common-unit chip APLS gate but not deploy-ready
 - Test state at A44 start: 284 local tests passed; remote `dev` CI green
+
+Approved target direction: F9 will replace only the presentation/application boundary after A45/A46. The current app remains the parity oracle until the new browser flows, upload recovery, accessibility, performance and deployment checks pass; then the Streamlit/Folium presentation is removed rather than maintained in parallel.
 
 ---
 
@@ -127,10 +129,10 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | ID | Status | Task | Owner | Depends on | Done when |
 |---|---|---|---|---|---|
 | **A44** | ✅ | Reconcile and simplify all documentation | Akshat/coordinator | — | Current docs agree with code/evidence, historical audit archived, sample graph/APLS evidence refreshed, links/JSON/mirrors checked, 284 tests green; PR opened into `dev` |
-| **A45** | ⏳ | Repository-wide correctness, simplification and performance refactor | Coordinator across all lanes | A44 | Fix ablation-curve node-universe normalization and inference-protocol drift; remove duplicated/dead logic; reduce code where justified; focused benchmarks show no regression and material improvement; full suite green |
+| **A45** | ✅ | Repository-wide correctness, simplification and performance refactor | Coordinator across all lanes | A44 | Baseline-universe resilience, one probability inference protocol, evaluator labels, immutable deploy refs and CLI precedence corrected; duplicated/dead logic reduced; focused benchmarks improved; 318 tests green |
 | **A46** | ⏳ | Graph-first model improvement program | Akshat | A44; use A45 foundations where relevant | Reproducible/license-safe run contract; existing-checkpoint APLS selection and threshold/radius calibration first; deterministic LoRA capacity study only if needed; 102-chip selection and one pre-registered 127-chip comparison; no promotion without material paired/absolute gains and deployment checks |
 | **O1** | ⏳ | Close production operator checklist | Akshat | approved release ref | Modal/app redeployed from an immutable ref; port 8501 closed; service/Caddy/journald config installed; live upload smoke passes; rate limiting decision recorded |
-| **F9** | 🔒 | Full UI/UX overhaul | Saanvi/coordinator | A45 and A46 | Current behavior preserved; information architecture, responsive layout, accessibility, visual system, and real browser flows redesigned and verified |
+| **F9** | 🔒 | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; bundle/payload/Web-Vitals/map budgets pass; old presentation removed |
 | **X1** | 🔒 | Final backup demo capture | All | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
@@ -159,7 +161,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 flowchart LR
     A44["A44 docs"] --> A45["A45 code cleanup"]
     A44 --> A46["A46 graph-first model"]
-    A45 --> F9["F9 UI/UX overhaul"]
+    A45 --> F9["F9 web replacement"]
     A46 --> F9
     A45 --> O1["O1 deploy closure"]
     A46 --> O1
@@ -170,7 +172,7 @@ flowchart LR
 - A44 may document code problems but does not silently refactor them.
 - A45 establishes a smaller, measured codebase before more model or UI complexity is added.
 - A46 may run research in parallel with later A45 work, but deployment integration waits for A45 contracts to settle.
-- F9 is intentionally last: redesign the stable product, not a moving architecture.
+- F9 is intentionally last: replace the presentation around stable domain/model outputs, using the current app as a temporary parity oracle.
 - O1 requires access to the live services; repository work alone cannot prove it complete.
 
 ---
@@ -179,8 +181,8 @@ flowchart LR
 
 | Decision | Status | Rationale |
 |---|---|---|
-| Resilience Index = baseline-normalized **global efficiency** | 🔒 | Finite under disconnection; all paths must preserve the baseline node universe (the remaining `ablation_curve` defect is queued in A45) |
-| Streamlit + Folium, pure Python | 🔒 | Matches team skills and CPU deployment; no JS SPA in this release |
+| Resilience Index = baseline-normalized **global efficiency** | 🔒 | Finite under disconnection; all paths preserve the baseline node universe, including corrected multi-step ablation |
+| Streamlit + Folium as permanent stack | superseded 2026-07-14 | Akshat authorized a full web replacement; preserve domain contracts and CPU deployment while selecting the new presentation/API stack through research and measured budgets |
 | File artifacts, no database/login | 🔒 | Small-team reproducibility and simple operations |
 | Modal is the sole remote inference boundary | 🔒 | GPU work stays off the ARM host; P2/P3 remain in-process |
 | v3.2 remains deployed | 🔒 until a gate win | Best current deployable mask model; later pixel-only candidates did not improve routing safely |
@@ -194,15 +196,23 @@ flowchart LR
 ## §9 · Status Snapshot
 
 - **Product:** end-to-end batch and hosted-upload paths exist; sample dashboard and CPU analysis are runnable.
-- **Quality:** 284 local tests passed at A44 start; CI covers the full suite and the production dependency smoke.
+- **Quality:** 318 local tests pass after A45; CI covers the full suite and the production dependency smoke.
 - **Deployment:** public dashboard responds, but the repository cannot prove the operator checklist or latest Modal/app rollout is complete.
 - **Model:** v3.2 deployed; A18-LoRA is a strong research result, not a release candidate.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** A45 correctness/refactor, then A46; F9/O1 follow before X1.
+- **Immediate work:** execute A46; researched web replacement F9 and O1 follow before X1.
 
 ---
 
 ## §10 · Daily Log
+
+**2026-07-14 (Akshat/coordinator — A45 complete)**
+
+- Corrected multi-step resilience to preserve the baseline node universe, fixed bridge-label semantics, and regenerated the Panaji graph/resilience/flood/percolation evidence with a source-and-artifact hash manifest. The upload path now uses the same resilience contract; its corrected sample RI is 0.313810 rather than the shrinking-universe 0.470715.
+- Unified training, validation, occlusion and threshold selection on Hann-blended probability inference with protocol provenance. Streaming large-image prediction is bitwise-equivalent on checked 512–4096 px inputs and reduced peak allocation proxies by 16.6–63.8% without claiming a CPU speedup.
+- Reused one mask-to-graph constructor across batch and upload paths; made APLS source routing 2.86× faster on the recorded synthetic benchmark, curved-edge densification 12.9× faster, and the training-loss microbenchmark about 46.8% faster while preserving outputs.
+- Enforced immutable deployment refs, corrected CLI/config precedence and portable help text, cached repeated file hashing per run, split dependencies by app/train/dev role, and reduced the training notebook from 40,981 to 4,432 bytes by delegating to maintained experiment code.
+- Final verification: **318 passed, 2 upstream warnings**; Python compilation, CLI help, dashboard import, dependency parsing, Bash syntax, documentation/link/mirror checks and sample-evidence hashes passed.
 
 **2026-07-13 (Akshat/coordinator — A44 started)**
 

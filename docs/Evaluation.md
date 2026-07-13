@@ -31,7 +31,7 @@
 - **Resilience Index:** post-failure efficiency divided by intact efficiency while preserving the baseline node universe.
 - **Connectivity/healing:** component count plus routing evidence before/after healing; a lower component count alone does not prove bridges are correct.
 
-Known correctness gap: the single-scenario `resilience_index()` preserves the baseline node universe, but the current multi-step `ablation_curve()` physically removes nodes and changes the denominator. Its RI may exceed 1 and old curve/flood absolutes are **provisional/invalid for headline use** until A45 fixes the implementation and regenerates those artifacts.
+The single-scenario and multi-step paths now use the same node-universe contract. `ablation_curve()` isolates failed nodes by removing their incident edges, keeps every baseline node in the denominator and reuses one fixed sampled-source set. RI is validated as finite and bounded in `[0, 1]`. Curve artifacts committed before A45 remain superseded; the current sample set was regenerated from the corrected implementation and is fingerprinted by `panaji_demo_evidence_manifest.json`.
 
 ## Segmentation evidence
 
@@ -110,9 +110,9 @@ Reproducibility limitation: the inspected upstream snapshot lacks a clear licens
 
 ## Current Panaji sample evidence
 
-The sample graph/evidence was regenerated during A44 so the public Methodology tab no longer shows the pre-A32 graph.
+The sample graph/evidence was regenerated during A45 after the resilience-normalization correction.
 
-Sources: `panaji_demo_graph.geojson`, regenerated `panaji_demo_graph_eval.json`, and regenerated `panaji_demo_apls.json`.
+Sources: `panaji_demo_graph.geojson`, `panaji_demo_graph_eval.json`, `panaji_demo_apls.json`, `panaji_demo_resilience.csv`, `panaji_demo_percolation.json`, the two current curve plots and `panaji_demo_evidence_manifest.json`. The manifest records the source-graph SHA-256, artifact hashes and exact regeneration commands.
 
 | Property | Current value |
 |---|---:|
@@ -126,8 +126,27 @@ Sources: `panaji_demo_graph.geojson`, regenerated `panaji_demo_graph_eval.json`,
 | APLS vs cached OSM truth | **0.5369** |
 | APLS directions | GT→proposal `0.4709`; proposal→GT `0.6242` |
 | Reachable pair fraction | GT `0.9769`; proposal `0.9774` |
+| 40-step targeted RI mean / end | `0.6800` / `0.4477` |
+| 40-step random RI mean / end | `0.8105` / `0.6135` |
+| 25-removal targeted / random RI | `0.576689` / `0.770555` |
 
-The `graph_eval.json` field currently labels the five build-time additions as `bridged_edges`; only four survive in the final graph. A45 will correct that evaluator label. Its resilience subsection is also provisional because of the ablation denominator defect above.
+`graph_eval.json` now separates the five bridges added during build-time healing from the four final edges that still carry `is_bridged`; it does not conflate construction history with final graph state. Targeted failures degrade this sample faster than the seeded random baseline. These are demonstration-graph results, not a citywide generalization claim.
+
+## A45 correctness and performance evidence
+
+All timings below are local focused benchmarks, not production-SLA claims. Each optimized path retained characterization tests and exact outputs where stated.
+
+| Path | Before | After | Result |
+|---|---:|---:|---|
+| APLS one-way, 20×20 synthetic grid / 1,000 sampled pairs | `1.0144 s` median | `0.3544 s` median | **2.86× faster**, same score |
+| Curved-edge densification locator | `45.25 ms` | `3.51 ms` | **12.9× faster**, same geometry |
+| 4,096² blended-inference Python allocation proxy | `378.1 MiB` | `137.0 MiB` | **63.8% lower**; output SHA-256 unchanged |
+| 181.4 MiB checkpoint identity, three repeat lookups in one run | three full scans | one scan + `0.0018 s` cached lookups | checkpoint scans **3→1** |
+| Synthetic training evaluator | `0.0410 s` median | `0.0218 s` median | **46.8% faster**, exact metrics |
+
+The blended-inference change streams batches instead of retaining every window and probability. Its measured CPU time was effectively flat across 512²–4,096² inputs (worst observed change `+6.8%`), so the supported claim is lower memory, not higher throughput.
+
+Fine-tune threshold selection, clean/gray checks, forget gates and synthetic-occlusion evaluation now share the labeled `hann_blended_probability_v1` probability protocol. Resume rejects histories without that label, preventing a mixed-protocol run. Historical A6–A41 training histories predate the label and remain historical evidence; they are not silently reinterpreted. A46 must establish its own baseline and candidate under the labeled protocol.
 
 ## Experiment ledger
 
@@ -155,11 +174,7 @@ The `graph_eval.json` field currently labels the five build-time additions as `b
 8. Validate a later candidate on an untouched geography/sensor before final generalization language.
 9. Before deployment: license, dependency lock, deterministic run manifest, checkpoint provenance/checksum, runtime/memory, Modal/local compatibility, rollback and live smoke.
 
-## Evidence work queued in A45/A46
+## Evidence work queued in A46
 
-- Fix `ablation_curve` to preserve the baseline node universe, then regenerate resilience/flood curves and their plots.
-- Correct graph evaluator `bridged_edges` to distinguish build-time additions from surviving final edges.
-- Regenerate the demand/percolation report against the current sample graph.
-- Unify threshold selection, forget checks and reported IoU on one inference protocol.
 - Track exact A18/A46 configs/results in a license-safe reproducible artifact set.
 - Add a genuinely untouched geography/sensor evaluation set.

@@ -62,3 +62,20 @@ def test_evaluate_writes_report_and_plot(tmp_path):
     assert report["resilience"]["targeted_degrades_faster"] is True
     on_disk = json.loads((tmp_path / "tiny_graph_eval.json").read_text())
     assert on_disk["healing"]["connectivity_ratio_pct"] == 100.0
+
+
+def test_evaluate_distinguishes_added_bridges_from_surviving_edges(tmp_path):
+    graph = _bridged_graph()
+    graph.graph["heal"] = {
+        "bridges_added": 2,
+        "components_before": 3,
+        "components_after": 1,
+        "connectivity_ratio_pct": 100.0,
+    }
+    save_geojson(graph, tmp_path / "tiny_graph.geojson")
+
+    report = evaluate("tiny", sample_dir=tmp_path, curve_steps=1, top_n=1)
+
+    assert report["healing"]["bridges_added"] == 2
+    assert report["graph"]["bridged_edges"] == 1
+    assert report["graph"]["bridged_pct"] == 14.29

@@ -1,8 +1,8 @@
-"""Tests for A39 — P1 persisting its probability map for corridor-aware healing.
+"""Tests for persisted P1 probability maps and corridor-aware healing.
 
 The blended (Hann-window) inference path already computes a per-pixel road
-probability before thresholding it into the binary mask; bugs.md §4 asks that
-it be persisted (not discarded) so P2's healing can tell an occluded real road
+probability before thresholding it into the binary mask. Corridor-support
+healing needs that map persisted so it can distinguish an occluded real road
 from open ground the model never thought looked like a road. These tests use
 a tiny, untrained (``encoder_weights=None``) model — same pattern as
 ``test_model.py`` — so no checkpoint download and no GPU is needed.
@@ -101,6 +101,6 @@ def test_build_graph_picks_up_persisted_prob_map(tmp_path, capsys):
     assert "corridor check ON" in out
     assert cfg.graphml_path.exists()
     assert "bridges_rejected_corridor" in graph.graph["heal"]
-    # §9.3: with a prob map present, every final edge carries a confidence in [0, 1]
+    # With a probability map present, every final edge carries confidence in [0, 1].
     confidences = [d.get("confidence") for _, _, d in graph.edges(data=True)]
     assert confidences and all(c is not None and 0.0 <= c <= 1.0 for c in confidences)

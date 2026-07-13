@@ -31,6 +31,14 @@ Upgrade the installer consistently with CI:
 python -m pip install --upgrade pip==24.2
 ```
 
+Choose the smallest dependency role that matches the work:
+
+- `requirements-core.txt` — shared CPU geospatial, graph and image-processing runtime.
+- `deploy/requirements-app.txt` — core plus the hosted dashboard only; no Torch or training stack.
+- `requirements-train.txt` — core plus raster/model training and evaluation packages; install Torch separately first.
+- `requirements-dev.txt` — additive test/notebook tooling; install it alongside a runtime role, or use the aggregate.
+- `requirements.txt` — aggregate app + training + development environment used by CI and full-repository work.
+
 ## Path A — Sample dashboard and CPU upload analysis
 
 Use this when you need the app, sample graph or P2/P3 upload-analysis path but not P1 inference/training:
@@ -73,7 +81,7 @@ As of July 2026, the project’s working local research environment used PyTorch
 After installing Torch/Torchvision from the chosen official index:
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-train.txt
 python -m pip check
 python -c "import torch; print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else '-')"
 ```
@@ -85,12 +93,12 @@ Do not proceed with a GPU experiment unless `torch.cuda.is_available()` is true 
 Cloud GPU is the hardware-agnostic training path. Accelerator names, quotas and default images change, so verify them in the provider UI rather than relying on a fixed promise here.
 
 1. Start a GPU notebook/session and clone the reviewed branch/commit.
-2. Install the Torch build compatible with that runtime, then `requirements.txt`.
+2. Install the Torch build compatible with that runtime, then `requirements-train.txt` (plus `requirements-dev.txt` when tests or notebook tooling are needed).
 3. Run the module/CLI recipe from `src/pipeline/p1_segment/`; notebooks should remain thin launchers over those modules.
 4. Save checkpoints, configs and result JSON outside ephemeral session storage.
 5. Record the exact runtime/package versions and source commit.
 
-`notebooks/train_segmentation.ipynb` preserves the historical v1 training path. Current v3.x fine-tuning uses `src.pipeline.p1_segment.finetune`; A46 graph-first experiments have their own tracked protocol in `Research.md`/`Evaluation.md`.
+`notebooks/train_segmentation.ipynb` is a thin launcher over the maintained combined trainer and records which old notebook-only knobs are archival rather than silently reimplemented; a fresh run does not reproduce the exact A4 artifact. Current v3.x adaptation uses `src.pipeline.p1_segment.finetune`; A46 graph-first experiments have their own tracked protocol in `Research.md`/`Evaluation.md`.
 
 ## Data and checkpoints
 

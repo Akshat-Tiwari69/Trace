@@ -1,0 +1,4 @@
+# Development, tests, and notebook tooling.
+
+pytest==8.3.2
+jupyter==1.0.0

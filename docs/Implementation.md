@@ -30,7 +30,7 @@ Akshat authorized repository-wide coordinator changes for the A44–A46/F9 progr
 flowchart LR
     A44["A44: truthful docs"] --> A45["A45: simpler/faster code"]
     A44 --> A46["A46: graph-first model"]
-    A45 --> F9["F9: UI/UX overhaul"]
+    A45 --> F9["F9: web replacement"]
     A46 --> F9
     A45 --> O1["O1: production closure"]
     A46 --> O1
@@ -75,9 +75,9 @@ Required gates:
 - New geography/sensor evidence is kept separate from the repeatedly consulted Mumbai development benchmark.
 - A deploy candidate must also pass runtime, checkpoint compatibility, provenance and rollback checks.
 
-### F9 — UI/UX overhaul
+### F9 — web experience replacement
 
-The overhaul happens after architecture and model outputs settle. It may reorganize presentation and interaction but must retain the pure-Python Streamlit/Folium constraint and all working analysis capabilities.
+The overhaul happens after architecture and model outputs settle. Akshat explicitly superseded the Streamlit/Folium stack lock: F9 will replace it with a researched, performance-budgeted web frontend and the thinnest Python API boundary that exposes the maintained P1–P3 capabilities. The current app remains the behavioral reference until parity is verified, then its presentation code and dependencies are removed.
 
 Required gates:
 
@@ -85,6 +85,7 @@ Required gates:
 - Keyboard-accessible alternatives for map-only interactions.
 - Clear separation of sample exploration, uploaded-image jobs, method/evidence and exports.
 - No regression in job recovery, map state, scenario correctness or production dependency smoke.
+- Measured Core Web Vitals, JavaScript bundle and map-frame budgets; heavy map code loads only where needed.
 - Updated `Design.md` and `UserJourney.md` in the same PR.
 
 ### O1/X1 — Operational closeout

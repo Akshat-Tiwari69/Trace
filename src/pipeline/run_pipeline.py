@@ -1,34 +1,17 @@
-"""A5 walking skeleton: one command, P1→P2→P3→P4 on a single tile (task A5).
+"""Run P1-P3 for one AOI and verify the dashboard artifact contract.
 
-Chains the released pieces end-to-end with **no manual steps**::
-
-    imagery + checkpoint --[P1 predict]----> binary road mask
-                         --[P2 build_graph]-> healed routable graph
-                         --[P3 analyze]-----> criticality + resilience
-                         --[P4 check]-------> dashboard-ready artifacts
-
-P4 here is the *seam*, not the UI: the dashboard (Saanvi's lane) reads
-`{aoi}_graph.geojson` + `{aoi}_criticality.csv`, so the skeleton verifies those
-land with the contracted columns rather than editing the app.
-
-Orchestration hardening (A36 / bugs.md §5): structured logging with per-stage
-timings, a written ``{aoi}_run.json`` summary (status + timings + resolved
-config + provenance), idempotent reruns (``--from-stage`` / ``--force`` /
-skip-if-fresh), and a single ``PipelineConfig`` as the source of truth.
-
-Example::
-
-    python -m src.pipeline.run_pipeline --image data/raw/tile.jpg \
-        --checkpoint models/road_pan.pt --aoi mytile
+Stage signatures make reruns content-aware; the run summary records timings,
+resolved configuration, and model provenance.
 """
 
 from __future__ import annotations
 
-import json
 import hashlib
-import os
+import json
 import logging
+import os
 import time
+from dataclasses import fields
 from pathlib import Path
 from typing import Any, Callable
 
@@ -39,7 +22,7 @@ from src.pipeline.p3_analysis.analyze import analyze
 
 log = logging.getLogger("trace.pipeline")
 
-# P4 contract: the columns the dashboard reads from the criticality CSV (§4).
+# Tracker §4 P4 contract: columns the dashboard reads from the criticality CSV.
 DASHBOARD_CRITICALITY_COLUMNS = ["node_id", "betweenness", "rank", "is_critical", "x", "y"]
 
 _STAGES = ("p1", "p2", "p3")
@@ -60,7 +43,7 @@ def segment(image_path: str | Path, checkpoint: str | Path, aoi: str, interim_di
             device: str = "cpu", tta: bool = False, blend: bool = True,
             postprocess: bool = False, min_component_size: int = 50,
             pp_open_radius: int = 0, pp_close_radius: int = 0,
-            fill_holes: int = 0) -> tuple[Path, float]:
+            fill_holes: int = 0, checkpoint_sha256: str | None = None) -> tuple[Path, float]:
     """P1: predict a road mask from imagery → ``data/interim/{aoi}_mask.png``.
 
     Thin wrapper over the shared :func:`~src.pipeline.p1_segment.predict.run_inference`
@@ -73,6 +56,7 @@ def segment(image_path: str | Path, checkpoint: str | Path, aoi: str, interim_di
         tile_size=tile_size, threshold=threshold, blend=blend, tta=tta, device=device,
         postprocess=postprocess, min_component_size=min_component_size,
         pp_open_radius=pp_open_radius, pp_close_radius=pp_close_radius, fill_holes=fill_holes,
+        checkpoint_sha256=checkpoint_sha256,
     )
 
 
@@ -93,31 +77,37 @@ def verify_dashboard_ready(cfg: GraphConfig) -> dict[str, Any]:
     }
 
 
-def _fresh(output: Path, *inputs: Path) -> bool:
-    """True when ``output`` exists and is at least as new as every present input."""
-    if not output.exists():
-        return False
-    out_mtime = output.stat().st_mtime
-    return all(out_mtime >= i.stat().st_mtime for i in inputs if i.exists())
-
-
-def _file_identity(path: Path) -> dict[str, Any]:
+def _file_identity(
+    path: Path,
+    hashes: dict[tuple[str, int, int], str] | None = None,
+) -> dict[str, Any]:
     """Content identity used by stage manifests (missing files are explicit)."""
     path = Path(path)
     if not path.exists():
         return {"path": str(path), "exists": False}
-    digest = hashlib.sha256()
-    with path.open("rb") as fh:
-        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-            digest.update(chunk)
     stat = path.stat()
+    key = (str(path.resolve()), stat.st_size, stat.st_mtime_ns)
+    hexdigest = hashes.get(key) if hashes is not None else None
+    if hexdigest is None:
+        digest = hashlib.sha256()
+        with path.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                digest.update(chunk)
+        hexdigest = digest.hexdigest()
+        if hashes is not None:
+            hashes[key] = hexdigest
     return {"path": str(path), "exists": True, "size": stat.st_size,
-            "sha256": digest.hexdigest()}
+            "sha256": hexdigest}
 
 
-def _stage_signature(name: str, inputs: list[Path], settings: dict[str, Any]) -> dict:
+def _stage_signature(
+    name: str,
+    inputs: list[Path],
+    settings: dict[str, Any],
+    hashes: dict[tuple[str, int, int], str] | None = None,
+) -> dict:
     return {"version": 1, "stage": name,
-            "inputs": [_file_identity(path) for path in inputs], "settings": settings}
+            "inputs": [_file_identity(path, hashes) for path in inputs], "settings": settings}
 
 
 def _stage_manifest_path(output: Path) -> Path:
@@ -167,8 +157,9 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
     backward compatibility. ``segment_fn`` is injectable so the P2→P4
     orchestration can be tested without a real checkpoint.
 
-    Idempotent (bugs.md §5A): a stage is **skipped when its output is fresh**
-    relative to its input, unless ``force`` or ``from_stage`` requires it.
+    Idempotent: a stage is **skipped when its completed content/config
+    signature matches** the current inputs, unless ``force`` or ``from_stage``
+    requires it.
     Raises ``RuntimeError`` (fail-loud) on a degenerate graph or a violated P4
     contract — a broken run must not exit 0. Writes ``{aoi}_run.json`` with the
     per-stage timings, resolved config, and model provenance.
@@ -188,12 +179,13 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
         )
     cfg = config.graph_config()
     stages: list[dict[str, Any]] = []
+    hashes: dict[tuple[str, int, int], str] = {}
 
     def _run_stage(name: str, output: Path, inputs: list[Path],
                    settings: dict[str, Any], fn: Callable[[], Any]) -> Any:
         """Run unless output has an exact input/config content signature."""
         forced = _stage_enabled(name, from_stage, force)
-        signature = _stage_signature(name, inputs, settings)
+        signature = _stage_signature(name, inputs, settings, hashes)
         if not forced and _stage_is_current(output, signature):
             log.info("[%s] skip '%s' — %s signature matches", name.upper(), config.aoi, output.name)
             stages.append({"stage": name, "ran": False, "reason": "signature-match", "seconds": 0.0})
@@ -202,7 +194,7 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
         result = fn()
         # Recompute after the stage because upstream callbacks may create inputs
         # (notably injected test segmenters); persist only a completed run.
-        _write_stage_manifest(output, _stage_signature(name, inputs, settings))
+        _write_stage_manifest(output, _stage_signature(name, inputs, settings, hashes))
         dt = round(time.perf_counter() - t0, 3)
         log.info("[%s] done in %ss", name.upper(), dt)
         stages.append({"stage": name, "ran": True, "seconds": dt})
@@ -212,16 +204,19 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
 
     # P1 — segment imagery → mask
     mask_path = cfg.mask_path
+    p1_inputs = [Path(config.image or image_path), Path(config.checkpoint or checkpoint)]
 
     def _p1() -> tuple[Path, float]:
+        extra = {}
+        if segment_fn is segment:
+            extra["checkpoint_sha256"] = _file_identity(p1_inputs[1], hashes).get("sha256")
         return segment_fn(config.image or image_path, config.checkpoint or checkpoint, config.aoi,
                           config.interim_dir, tile_size=config.tile_size, threshold=config.threshold,
                           device=config.device, tta=config.tta, blend=config.blend,
                           postprocess=config.postprocess, min_component_size=config.min_component_size,
                           pp_open_radius=config.pp_open_radius, pp_close_radius=config.pp_close_radius,
-                          fill_holes=config.fill_holes)
+                          fill_holes=config.fill_holes, **extra)
 
-    p1_inputs = [Path(config.image or image_path), Path(config.checkpoint or checkpoint)]
     p1_settings = {key: getattr(config, key) for key in (
         "tile_size", "threshold", "device", "tta", "blend", "postprocess",
         "min_component_size", "pp_open_radius", "pp_close_radius", "fill_holes")}
@@ -278,7 +273,7 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
         "provenance": provenance,
     }
     _write_run_summary(cfg, summary)
-    log.info("A5 done '%s': %d nodes / %d edges -> %s",
+    log.info("pipeline done '%s': %d nodes / %d edges -> %s",
              config.aoi, graph.number_of_nodes(), graph.number_of_edges(), config.processed_dir)
     return summary
 
@@ -305,52 +300,48 @@ def main() -> None:
 
     from src.pipeline.p1_segment.model import DEPLOYED_RELEASE
 
-    p = argparse.ArgumentParser(description="A5 walking skeleton: P1→P2→P3→P4 on one tile.")
+    p = argparse.ArgumentParser(
+        description="Run road segmentation, graph construction, and resilience analysis for one AOI."
+    )
     p.add_argument("--image", help="RGB satellite tile (jpg/png/3-band tif)")
     p.add_argument("--checkpoint", help=f"trained .pt (deployed: Release {DEPLOYED_RELEASE})")
     p.add_argument("--aoi", help="AOI id for all artifact filenames")
     p.add_argument("--config", help="JSON/YAML PipelineConfig; CLI flags override its fields")
-    p.add_argument("--resolution-m", type=float, default=1.0, help="m/px (pixel-space masks)")
+    p.add_argument("--resolution-m", type=float, default=None, help="m/px (pixel-space masks)")
     p.add_argument("--tile-size", type=int, default=None)
     p.add_argument("--threshold", type=float, default=None, help="override; default = checkpoint meta")
-    p.add_argument("--device", default="cpu")
-    p.add_argument("--curve-steps", type=int, default=25)
-    p.add_argument("--tta", action="store_true", help="D4 test-time augmentation in P1")
-    p.add_argument("--no-blend", action="store_true", help="disable A27 Hann-blended inference")
-    p.add_argument("--postprocess", action="store_true", help="A10 mask cleanup before P2")
-    p.add_argument("--min-component-size", type=int, default=50)
-    p.add_argument("--pp-open-radius", type=int, default=0)
-    p.add_argument("--pp-close-radius", type=int, default=0)
-    p.add_argument("--fill-holes", type=int, default=0,
+    p.add_argument("--device", default=None)
+    p.add_argument("--curve-steps", type=int, default=None)
+    p.add_argument("--tta", action="store_true", default=None,
+                   help="D4 test-time augmentation in P1")
+    p.add_argument("--no-blend", dest="blend", action="store_false", default=None,
+                   help="disable A27 Hann-blended inference")
+    p.add_argument("--postprocess", action="store_true", default=None,
+                   help="A10 mask cleanup before P2")
+    p.add_argument("--min-component-size", type=int, default=None)
+    p.add_argument("--pp-open-radius", type=int, default=None)
+    p.add_argument("--pp-close-radius", type=int, default=None)
+    p.add_argument("--fill-holes", type=int, default=None,
                    help="A10 postprocess: fill holes up to this area (px); 0 = off")
-    p.add_argument("--min-corridor-support", type=float, default=0.3,
+    p.add_argument("--min-corridor-support", type=float, default=None,
                    help="reject a healing bridge if mean P1 prob-map support along it is below "
-                        "this (0 disables; needs prob.png from the blended P1 path, bugs.md §4)")
-    p.add_argument("--force", action="store_true", help="rerun every stage even if outputs are fresh")
+                        "this (0 disables; needs prob.png from the blended P1 path, A39)")
+    p.add_argument("--force", action="store_true", help="rerun every stage regardless of signatures")
     p.add_argument("--from-stage", choices=_STAGES, default=None,
-                   help="force a rerun starting at this stage (earlier stages skip if fresh)")
+                   help="force a rerun starting at this stage (earlier stages may match signatures)")
     args = p.parse_args()
 
     if args.config:
-        config = PipelineConfig.from_file(args.config)
-        # Let explicit CLI values override the file (only when the user set them).
-        if args.image:
-            config.image = args.image
-        if args.checkpoint:
-            config.checkpoint = args.checkpoint
-        if args.aoi:
-            config.aoi = args.aoi
+        values = PipelineConfig.from_file(args.config).to_dict()
     else:
         if not (args.image and args.checkpoint and args.aoi):
             p.error("--image, --checkpoint and --aoi are required unless --config is given")
-        config = PipelineConfig(
-            aoi=args.aoi, image=args.image, checkpoint=args.checkpoint,
-            resolution_m=args.resolution_m, tile_size=args.tile_size, threshold=args.threshold,
-            device=args.device, tta=args.tta, blend=not args.no_blend, postprocess=args.postprocess,
-            min_component_size=args.min_component_size, pp_open_radius=args.pp_open_radius,
-            pp_close_radius=args.pp_close_radius, fill_holes=args.fill_holes, curve_steps=args.curve_steps,
-            min_corridor_support=args.min_corridor_support,
-        )
+        values = {}
+
+    config_fields = {field.name for field in fields(PipelineConfig)}
+    values.update((name, value) for name, value in vars(args).items()
+                  if name in config_fields and value is not None)
+    config = PipelineConfig(**values)
 
     run(config.image, config.checkpoint, config.aoi, config=config,
         force=args.force, from_stage=args.from_stage)

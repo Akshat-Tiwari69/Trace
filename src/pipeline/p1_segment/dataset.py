@@ -126,7 +126,7 @@ class RoadTileDataset(Dataset):
     is actually used instead of sampling just one crop per epoch. Big data-
     efficiency win; keep it at 1 for deterministic val (centre crop).
 
-    ``foreground_bias`` (bugs.md §3): with this probability, a sampled crop is
+    ``foreground_bias``: with this probability, a sampled crop is
     required to contain at least one road pixel — road fraction is only ~5–8 %,
     so uniform crops often carry zero gradient signal. Implemented as rejection
     resampling of the whole transform (up to 50 tries, then keep the last crop),

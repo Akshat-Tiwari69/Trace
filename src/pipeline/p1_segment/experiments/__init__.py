@@ -14,7 +14,7 @@ rejected in favor of a different approach (see `docs/Tracker.md` §6 and
   ``ModelEMA``, reused by ``train_selftrain.py``).
 - ``train_selftrain.py`` (A12) — mean-teacher self-training on unlabeled
   Indian tiles. Rejected: both configs peaked at epoch 1 and lost to v1 on
-  the honest held-out test.
+  the frozen Indian development benchmark.
 
 They are kept (not deleted) so nobody re-derives and re-runs the same dead
 ends, and are still covered by CPU smoke tests. The production training path

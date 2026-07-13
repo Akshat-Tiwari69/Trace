@@ -2,7 +2,7 @@
 
 Orchestrates the Phase-0 data pipeline end to end for one AOI:
 download/cache OSM roads → build an aligned metric grid → rasterise → tile →
-QC. Writes the §4 contract artifact ``data/interim/{aoi}_mask.png`` plus tiles,
+QC. Writes the Tracker §4 artifact ``data/interim/{aoi}_mask.png`` plus tiles,
 a QC overlay, and an alignment manifest.
 
 Examples

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import pickle
 import warnings
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ import torch
 # hard-coded path, so a re-deploy is a one-line change here.
 DEPLOYED_CHECKPOINT = "models/road_pan.pt"
 DEPLOYED_RELEASE = "a4-roadseg-v3.2"
+VALIDATION_INFERENCE_PROTOCOL = "hann_blended_probability_v1"
 
 # ImageNet stats — the MiT encoders are pretrained on ImageNet, so train-time
 # augmentation and inference must normalise with the same constants.
@@ -202,7 +204,7 @@ def predict_mask(
     """Predict a binary {0,1} road mask for one RGB tile (``predict(tile)``).
 
     ``image`` is ``HxWx3`` (uint8 0–255 or float 0–1). Returns a ``uint8``
-    ``HxW`` mask of 0/1, the §4 contract shape P2 consumes. ``tta`` averages over
+    ``HxW`` mask of 0/1, the Tracker §4 contract shape P2 consumes. ``tta`` averages over
     the 8 D4 symmetries (retrain-free; ~8× compute).
     """
     net = _unwrap(model).to(device)
@@ -293,7 +295,8 @@ def predict_large_prob(
     tile's probabilities by a Hann window and normalises — so roads crossing tile
     seams don't break (A27). Threshold the returned map **once**. Reuses padding
     for edge windows. Windows run batched (A28, device-aware) rather than one
-    forward per tile — the blended map is unchanged.
+    forward per tile. Tiles and probabilities are blended one batch at a time,
+    keeping memory bounded by ``batch_size`` rather than the number of windows.
     """
     stride = stride or max(1, tile_size * 3 // 4)
     h, w = image.shape[:2]
@@ -302,10 +305,14 @@ def predict_large_prob(
     window = _hann2d(tile_size)
     ys = sorted({*range(0, max(1, h - tile_size + 1), stride), max(0, h - tile_size)})
     xs = sorted({*range(0, max(1, w - tile_size + 1), stride), max(0, w - tile_size)})
-    tiles: list[np.ndarray] = []
-    places: list[tuple[int, int, int, int]] = []  # (y0, x0, th, tw) per window
-    for y0 in ys:
-        for x0 in xs:
+    batch_size = _auto_batch(device, batch_size)
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    positions = ((y0, x0) for y0 in ys for x0 in xs)
+    while coordinates := list(islice(positions, batch_size)):
+        tiles: list[np.ndarray] = []
+        places: list[tuple[int, int, int, int]] = []
+        for y0, x0 in coordinates:
             tile = image[y0 : y0 + tile_size, x0 : x0 + tile_size]
             th, tw = tile.shape[:2]
             if th < tile_size or tw < tile_size:  # pad edge windows
@@ -314,12 +321,13 @@ def predict_large_prob(
                 tile = padded
             tiles.append(tile)
             places.append((y0, x0, th, tw))
-    probs = predict_prob_batch(model, tiles, device=device, tta=tta, batch_size=batch_size)
-    for (y0, x0, th, tw), prob in zip(places, probs):
-        win = window[:th, :tw]
-        acc[y0 : y0 + th, x0 : x0 + tw] += prob[:th, :tw] * win
-        wsum[y0 : y0 + th, x0 : x0 + tw] += win
-    return acc / np.maximum(wsum, 1e-6)
+        probs = predict_prob_batch(model, tiles, device=device, tta=tta, batch_size=batch_size)
+        for (y0, x0, th, tw), prob in zip(places, probs):
+            win = window[:th, :tw]
+            acc[y0 : y0 + th, x0 : x0 + tw] += prob[:th, :tw] * win
+            wsum[y0 : y0 + th, x0 : x0 + tw] += win
+    np.maximum(wsum, 1e-6, out=wsum)
+    return np.divide(acc, wsum, out=acc)
 
 
 @torch.no_grad()
@@ -333,7 +341,7 @@ def predict_large_raster(
     window_px: int = 2048,
     overlap_px: int = 256,
 ) -> np.ndarray:
-    """Binary road mask for a raster too large to hold in RAM (bugs.md §5H).
+    """A36 binary road mask for a raster too large to hold in RAM.
 
     Streams overlapping ``window_px`` windows off disk (rasterio/PIL windowed
     reads), runs the blended :func:`predict_large_prob` on each, thresholds it,
@@ -367,7 +375,7 @@ def predict_large(
     """Predict a binary {0,1} road mask for a whole (large) RGB image.
 
     The model only sees ``tile_size`` windows, so tile the image, predict each
-    tile, and stitch the results back to the original ``HxW`` — the §4 contract
+    tile, and stitch the results back to the original ``HxW`` — the Tracker §4 contract
     ``data/interim/{aoi}_mask.png`` that P2 consumes. Reuses A3's ``tile_array``.
     ``tta`` applies D4 test-time augmentation per tile.
     """

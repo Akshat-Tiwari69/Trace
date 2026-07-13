@@ -27,7 +27,7 @@ AUTO_K_SAMPLES = 150
 
 
 def auto_k(graph: "nx.Graph", k: int | None) -> int | None:
-    """Resolve the betweenness sample size for the interactive path (bugs.md §4).
+    """Resolve the betweenness sample size for the interactive path.
 
     Honours an explicit ``k`` if given; otherwise returns ``AUTO_K_SAMPLES`` once
     the graph exceeds ``AUTO_K_NODE_THRESHOLD`` (so city-scale graphs stay
@@ -140,7 +140,7 @@ def annotate_cut_structure(graph: "nx.Graph") -> dict:
 def rank_table(graph: "nx.Graph", bc: dict[int, float]) -> list[dict]:
     """Build the ranked per-node criticality rows for ``{aoi}_criticality.csv``.
 
-    Columns match the §4 contract: ``node_id, betweenness, rank, is_critical``
+    Columns match the Tracker §4 contract: ``node_id, betweenness, rank, is_critical``
     (plus ``is_articulation`` from :func:`annotate_cut_structure`, and ``x, y`` so
     the dashboard can place the ranked list on the map).
 
@@ -209,7 +209,7 @@ class BetweennessCache:
 
     Bounded (LRU, ``maxsize``) so a long session of distinct ablations can't grow
     the store without limit — the baseline plus a working set of recent
-    perturbations is all that's ever hot (bugs.md §4).
+    perturbations is all that's ever hot.
     """
 
     def __init__(self, maxsize: int = 64) -> None:

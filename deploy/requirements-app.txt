@@ -1,26 +1,8 @@
-# Route Resilience — SLIM dashboard-only deps for public deploy (Oracle ARM / CPU).
-# The dashboard reads precomputed artifacts and also runs the CPU mask-to-graph
-# upload analysis path. It does not load the segmentation model, but P2 requires
-# scikit-image/sknw and healing requires SciPy.
-# pyogrio bundles GDAL in its wheel -> no system GDAL/apt required, installs clean
-# on aarch64. Versions mirror the root requirements.txt where they overlap.
+# Public Streamlit app plus the CPU mask-to-graph upload path (no Torch/model).
+
+-r ../requirements-core.txt
 
 streamlit==1.38.0
 folium==0.17.0
 streamlit-folium==0.23.1
 branca==0.7.2
-# geopandas 1.0 dropped the hard fiona dependency and reads via pyogrio (which
-# bundles GDAL in its wheel) -> no system GDAL needed on aarch64. App only uses
-# gpd.read_file(), which is unchanged in 1.0.
-geopandas==1.0.1
-pyogrio==0.9.0
-shapely==2.0.5
-networkx==3.3
-pandas==2.2.2
-numpy==1.26.4
-matplotlib==3.8.2
-scikit-image==0.24.0
-sknw==0.15
-scipy==1.13.1
-# decodes untrusted uploads — keep pinned & patched (matches the Modal image pin)
-Pillow==10.4.0

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
+import torch
 from PIL import Image
 
 from src.pipeline.p1_segment.finetune import (
     FineTuneConfig,
     _build_optimizer,
+    _iou_scores_on_pairs,
+    _select_threshold,
     finetune,
     gather_pairs,
 )
@@ -28,6 +32,60 @@ def _tiny_v1_checkpoint(path):
     model = build_model(encoder_weights=None, decoder_attention_type="scse")
     save_checkpoint(model, path, meta={"encoder": "mit_b0", "arch": "unet",
                                         "decoder_attention_type": "scse", "image_size": 64, "threshold": 0.44})
+
+
+def test_model_selection_scores_share_hann_blended_probabilities(monkeypatch):
+    import src.pipeline.p1_segment.finetune as finetune_module
+
+    image = np.zeros((4, 4, 3), dtype=np.uint8)
+    ground_truth = np.zeros((4, 4), dtype=bool)
+    ground_truth[:, :2] = True
+    probability = ground_truth.astype(np.float32)
+    blended_calls = []
+
+    monkeypatch.setattr(finetune_module, "_read_val_pair", lambda *_: (image, ground_truth))
+    monkeypatch.setattr(
+        finetune_module,
+        "predict_large_prob",
+        lambda *args, **kwargs: blended_calls.append((args, kwargs)) or probability,
+    )
+    monkeypatch.setattr(
+        finetune_module,
+        "predict_large",
+        lambda *args, **kwargs: np.zeros_like(ground_truth, dtype=np.uint8),
+        raising=False,
+    )
+
+    _, selected_iou = _select_threshold(None, [("sat", "mask")], 4, "cpu", (0.5,))
+    reported_iou = _iou_scores_on_pairs(None, [("sat", "mask")], 4, "cpu", 0.5)
+
+    assert reported_iou == [selected_iou] == [1.0]
+    assert len(blended_calls) == 2
+
+
+def test_resume_rejects_scores_from_an_unlabelled_inference_protocol(monkeypatch):
+    import src.pipeline.p1_segment.finetune as finetune_module
+
+    monkeypatch.setattr(
+        finetune_module,
+        "load_checkpoint",
+        lambda *args, **kwargs: (torch.nn.Conv2d(3, 1, 1), {"threshold": 0.5}),
+    )
+    monkeypatch.setattr(
+        finetune_module,
+        "load_train_state",
+        lambda *args, **kwargs: {
+            "v1_deepglobe": 0.5,
+            "v1_indian": 0.5,
+            "v1_deepglobe_scores": [0.5],
+        },
+    )
+    pair = ("sat.jpg", "mask.png")
+    monkeypatch.setattr(finetune_module, "gather_pairs", lambda cfg: ([pair], [pair], [pair]))
+
+    cfg = FineTuneConfig(init_checkpoint="init.pt", resume="old.last.pt", deepglobe_dir="dg")
+    with pytest.raises(ValueError, match="inference protocol"):
+        finetune(cfg)
 
 
 def test_gather_pairs_3way_split_disjoint(tmp_path):
@@ -101,6 +159,8 @@ def test_finetune_selects_and_saves_releasable_checkpoint(tmp_path):
     assert meta["threshold"] == summary["best"]["threshold"]
     assert "deepglobe_delta_ci_low" in meta
     assert "deepglobe_delta_ci_high" in meta
+    assert meta["validation_inference_protocol"] == "hann_blended_probability_v1"
+    assert summary["validation_inference_protocol"] == meta["validation_inference_protocol"]
 
 
 def test_finetune_resume_continues_from_next_epoch(tmp_path):
@@ -130,7 +190,7 @@ def test_finetune_resume_continues_from_next_epoch(tmp_path):
 
 
 def test_finetune_sdt_bce_weight_runs_end_to_end(tmp_path):
-    """bugs.md §3: --sdt-bce forwards to ComboLoss and the run completes on CPU."""
+    """A41: --sdt-bce forwards to ComboLoss and the run completes on CPU."""
     ft, dg = tmp_path / "ft", tmp_path / "dg"
     for i in range(5):
         _write_pair(ft, f"c{i}")
