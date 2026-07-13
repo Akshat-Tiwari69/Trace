@@ -1,72 +1,46 @@
-# RiskRegister.md
+# RiskRegister.md — Current Risks
 
-> **Purpose.** This document lists the things that could go wrong on **Route Resilience**, how likely and how damaging each is, and the plan to prevent or absorb it. Identifying risks early is what turns "we got unlucky" into "we planned for that." Probability (P) and Impact (I) are rated **Low / Medium / High**. Update as risks open, close, or change.
+> Probability (P) and impact (I) are Low, Medium or High. Closed historical setup risks are not kept as active warnings; their evidence remains in `Tracker.md`, `Research.md` and Git history.
 
----
+## Active risks
 
-## How to read this
-
-- **P** = how likely it is to happen. **I** = how bad it is if it does.
-- **Owner** = the role responsible for watching and mitigating it (roles defined in `Implementation.md`).
-- The highest-priority risks (High×High / High×Medium) are summarized at the bottom.
-
-## Technical Risks
-
-| ID | Risk | P | I | Mitigation | Owner |
+| ID | Risk | P | I | Current mitigation / next gate | Owner |
 |---|---|---|---|---|---|
-| T-1 | Segmentation underperforms on heavy occlusion | M | H | Occlusion augmentation + clDice loss + MST healing; fall back to a simpler U-Net baseline; **fallback MVP: run Phases II–IV on an OSM-derived graph** so the resilience story still works | ML Lead |
-| T-2 | Resilience Index breaks (÷ by infinity) when the graph disconnects | L | H | **Already mitigated by design** — use global efficiency, which stays finite. Keep it; never revert to raw average-path-length ratio | Graph Lead |
-| T-3 | Betweenness centrality too slow on large city graphs | M | M | NetworkX **k-sample** approximate betweenness; precompute once; analyze a sub-region if needed | Graph Lead |
-| T-4 | Phase-to-phase integration fails late | M | H | Define file-handoff contracts up front; build the **walking skeleton in Sprint 0**; integration buffer in Sprint 2 | ML Lead |
-| T-5 | "Betweenness = resilience" critique | L | M | Pair betweenness with global-efficiency degradation under ablation; frame betweenness as a chokepoint *indicator*, not a guaranteed resilience measure (see `Research.md`) | Graph Lead |
+| **M-1** | Mumbai has been repeatedly consulted, so model decisions overfit a single-city development benchmark | H | H | Treat Mumbai as development only; reserve a new geography/sensor before final claims | Akshat |
+| **M-2** | A18-LoRA wins relatively but still captures only about 18% of achievable chip routing | H | H | A46 targets encoder adaptation, training coverage and context; require absolute and paired gains | Akshat |
+| **M-3** | Real Cartosat PAN behavior may differ from the RGB-to-gray proxy | M | H | Keep proxy claims explicit; run real-PAN QC/evaluation as soon as data is available | Akshat |
+| **M-4** | The inspected SAM-Road++ snapshot has no clear license or reproducible dependency lock | H | H | Research locally only; do not redistribute upstream code/derived weights until licensing is clarified | Akshat |
+| **G-1** | Graph simplification/healing can create plausible but false connections | M | H | Preserve probability support, crossing/angle checks, inferred-edge flags and APLS/fragmentation evaluation | Shaivi |
+| **G-2** | Exact centrality/efficiency remains expensive on city-scale graphs | M | M | Use fixed-source sampling and caches; benchmark A45 changes on large synthetic graphs | Shaivi |
+| **G-3** | Multi-step `ablation_curve` currently shrinks the node universe, so RI can exceed 1 and old curve evidence is invalid | H | H | A45 must isolate failed nodes/preserve the baseline denominator, update tests, then regenerate sample/evaluation curves | Shaivi |
+| **P-1** | Repository deploy hardening may be ahead of the live Oracle/Modal configuration | M | H | Complete O1 operator checklist and verify the upload flow from the public URL | Akshat |
+| **P-2** | Public endpoint has no verified rate limiting | M | M | Decide/install Caddy rate-limit module or document an alternative control; retain Modal concurrency/cost caps | Akshat |
+| **P-3** | Filesystem queue is appropriate for one host but not horizontal scale | L | M | Keep single-host scope explicit; preserve atomic claim/lease/JSON recovery tests | Saanvi/Akshat |
+| **C-1** | Large modules and accumulated experiment paths increase change risk | H | M | A45 characterization tests, responsibility splits and dead-path quarantine; measure complexity before/after | Coordinator |
+| **C-2** | Local GPU environment contains dependency conflicts despite passing tests | M | M | Use documented isolated environments; CI is the clean reference; avoid mixing TensorFlow/Google stacks | Akshat |
+| **U-1** | UI overhaul can regress mature analysis and recovery behavior | M | H | F9 follows A45/A46; retain browser flows, job recovery and production smoke as gates | Saanvi |
+| **D-1** | Documentation can drift faster than code and misroute agents/operators | M | H | A44 reduces duplication; Tracker holds current state, topic docs hold details, CI/docs checks added where practical | Coordinator |
 
-## Dataset Risks
+## Accepted constraints
 
-| ID | Risk | P | I | Mitigation | Owner |
-|---|---|---|---|---|---|
-| D-1 | OSM auto-labels are incomplete/misaligned (weak labels) | H | M | Buffer masks (3–5 px), visual QC, use relaxed/buffered IoU; treat metrics as indicative | ML Lead |
-| D-2 | Cartosat-3 access/format uncertain until provided | M | M | Build the pipeline format-agnostic (rasterio/GDAL); pretrain entirely on open data so we only adapt at the end | ML Lead |
-| D-3 | Domain gap — benchmarks are mostly non-Indian cities | M | M | Fine-tune on LISS-IV + OSM-labelled Indian AOIs; hold out an Indian city for the generalisation metric | ML Lead |
-| D-4 | License non-compliance (OpenSatMap non-commercial, OSM ODbL) | L | M | Record source + license per dataset; attribute imagery; **don't commit raw/restricted data**; keep usage non-commercial | All |
+- Training needs GPU access; Colab/Kaggle and optional local NVIDIA GPUs are supported. P2/P3/dashboard remain CPU-capable.
+- The public demo is a single-host research prototype, not a multi-tenant production platform.
+- No database, user accounts or JavaScript SPA are planned for this release.
+- SpaceNet/DeepGlobe/OSM/Cartosat licensing constrains data and model redistribution.
 
-## Infrastructure Risks
+## Closed or materially reduced risks
 
-| ID | Risk | P | I | Mitigation | Owner |
-|---|---|---|---|---|---|
-| I-1 | RTX 50-series (Blackwell, sm_120) not picked up by PyTorch | M | H | Primary training path is **Colab/Kaggle (hardware-agnostic)**, so this never blocks the build. For local use, install **PyTorch ≥2.7 + CUDA 12.8 (cu128)** and verify `get_device_capability()==(12,0)` — each GPU owner follows the written setup guide themselves (no remote access) | Shaivi (own machine) |
-| I-2 | 8 GB VRAM out-of-memory during training | M | M | AMP/FP16, small tiles (256/512), gradient accumulation + checkpointing; **free Colab/Kaggle (16 GB) overflow** | ML Lead |
-| I-3 | Laptop GPU thermal throttling on long runs | M | L | Cooling/airflow, performance power mode, smaller tiles, **frequent checkpoints** (lose ≤1 epoch on shutdown) | ML Lead |
-| I-4 | GDAL/rasterio install differs across machines | M | M | Validate installs in Sprint 0; pin versions / prefer conda; document the working setup | ML Lead |
-| I-5 | Free-cloud session limits + ephemeral storage | M | M | Save checkpoints off-device (Drive/Kaggle Datasets); plan runs within session caps | ML Lead |
+- Disconnected-graph arithmetic: mitigated by baseline-normalized global efficiency and tests.
+- Phase integration: the P1–P4 seam and end-to-end runner exist and fail loudly.
+- Stale stage reuse: content/config signatures replaced mtime-only checks.
+- Deployment rollback/health transaction: implemented. Immutable-ref **enforcement** is still open because `update.sh` accepts branch names; A45-C5/O1 must close it before claiming moving-branch prevention.
+- Missing production dependencies: CI installs `deploy/requirements-app.txt` and exercises mask-to-resilience.
+- Queue duplicate/recovery hazards: atomic claims, owner leases, persistent ordering and JSON results are tested for the single-host design.
 
-## Team Risks
+## Highest-priority watch list
 
-| ID | Risk | P | I | Mitigation | Owner |
-|---|---|---|---|---|---|
-| TM-1 | Uneven coding experience across the team | M | M | Training is hardware-agnostic (Colab/Kaggle), so **no one remote-accesses anyone's machine**; each person sets up their own environment from a step-by-step guide (learning by doing). Shaivi owns the approachable **classical-Python** graph half (CPU, no GPU needed) | Each member (own machine) |
-| TM-2 | Single points of knowledge (only one person understands a part) | M | M | Docs-first; shared repo; brief walkthroughs at handoffs | All |
-| TM-3 | Coordination friction across three machines | L | M | Clean file-handoff contracts; git discipline; `Tracker.md` kept current | All |
-
-## Timeline Risks
-
-| ID | Risk | P | I | Mitigation | Owner |
-|---|---|---|---|---|---|
-| TL-1 | Integration underestimated, eats the end of the build | M | H | Walking skeleton early; reserve Sprint 2 for integration; protect the core interaction over polish | ML Lead |
-| TL-2 | Scope creep from the ambitious design vision | M | M | v1 scope is fixed (map + criticality + disable-node sim); aspirational features parked (see `PRD.md`/`Design.md`) | All |
-| TL-3 | Pre-build (setup/data) not finished before the intensive window | M | H | **Front-load Sprint 0 now** — env, deps, data, OSM masks, walking skeleton done ahead of time | ML Lead |
-
-## Financial Risks
-
-| ID | Risk | P | I | Mitigation | Owner |
-|---|---|---|---|---|---|
-| F-1 | Project cost | L | L | Effectively zero — all tools free/open, free-cloud GPUs, commodity hardware. Optional small cloud-GPU buffer only if needed | ML Lead |
-
-## Top Risks to Watch
-
-The few that most deserve attention (high impact and non-trivial probability):
-
-1. **I-1 — Blackwell/CUDA setup** (M×H): verify the RTX 50-series PyTorch install *first*, before anything depends on it.
-2. **T-4 / TL-1 — integration left too late** (M×H): the walking skeleton in Sprint 0 is the single best defence.
-3. **TL-3 — pre-build not done in time** (M×H): front-load setup, data, and the OSM-graph spike now.
-4. **T-1 — segmentation underperforms on occlusion** (M×H): mitigated by the augmentation+loss+healing stack, with the OSM-graph fallback as insurance.
-5. **D-1 — weak OSM labels** (H×M): expected and manageable with buffering, QC, and relaxed metrics.
+1. New-geography/sensor evidence before any final model claim.
+2. A18 licensing before redistribution or deployment.
+3. O1 live-service reconciliation and rate limiting.
+4. A45 complexity reduction without contract or performance regressions.
+5. F9 browser/accessibility regression coverage.

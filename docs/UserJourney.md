@@ -1,97 +1,112 @@
-# UserJourney.md
+# UserJourney.md — Current User Flows
 
-> **Purpose.** This document maps how people actually move through **Route Resilience** — every entry point, the main flows, what success looks like, and what happens when things go wrong or hit an edge case. It keeps the team focused on the user's experience, not just the algorithms. The personas are summarized from `PRD.md`.
+## Users and entry points
 
----
-
-## Personas (recap)
-
-- **Meera Nair — Urban Mobility Planner.** Non-technical; wants a clickable map to show a committee what happens if a junction floods.
-- **Capt. Rohan Desai — District Disaster-Management Officer.** Needs a fast, ranked list of chokepoints and evacuation-route impact during monsoon.
-- **Dr. Aishwarya Rao — NRSC Scientist.** Evaluates whether the methodology and metrics are sound and whether Indian EO data is genuinely used.
-
-(There is also an internal **Analyst/Developer** actor who runs the pipeline to *generate* the artifacts the others view.)
-
-## Entry Points
-
-| Entry point | Who | What they see first |
+| User | Entry | Goal |
 |---|---|---|
-| Open the dashboard (local URL or hosted demo) | Meera, Rohan, Aishwarya | The criticality map of a default city, roads coloured by criticality, legend visible |
-| Run the pipeline CLI/notebook for a new area, then open the dashboard | Analyst/Developer | Console progress, then artifacts ready to load |
-| Land on the "About / Methodology" tab | Aishwarya | Plain-English explanation of the pipeline + metrics |
+| Planner/disaster analyst | Hosted or local dashboard | Understand chokepoints and compare failures |
+| Geospatial reviewer | Dashboard Methodology plus exported evidence | Inspect assumptions, inferred roads and metric limits |
+| User with imagery | **Your imagery** tab | Segment one PNG/JPEG, analyze the derived graph and inspect the result |
+| Developer/researcher | CLI/notebook | Reproduce or evaluate a pipeline/model change |
 
-## Navigation Map
+The default sample path requires no GPU, checkpoint or secret. The upload path is enabled only when the Modal URL/key are configured.
 
-A deliberately simple **single-page app** with an optional second tab.
+## Navigation
 
+The current app has four top-level tabs:
+
+```text
+Route Resilience
+├─ Briefing
+│  ├─ baseline explanation and map
+│  └─ one-click worst-junction demonstration
+├─ Analysis
+│  ├─ Scenario
+│  ├─ Rankings
+│  ├─ Curves
+│  └─ Export
+├─ Your imagery
+│  └─ consent → segmentation → queued CPU analysis → result
+└─ Methodology
+   └─ pipeline, metrics, evidence and limitations
 ```
-┌──────────────────────────────────────────────────────┐
-│  Route Resilience           [ Map ] [ About/Methods ] │
-├────────────────────────────────┬─────────────────────┤
-│                                │  Metrics             │
-│        INTERACTIVE MAP          │  Scenario selector   │
-│   (criticality heatmap;         │  Top Critical Nodes  │
-│    click a junction to disable) │  Reset               │
-│   ◐ legend                      │                      │
-└────────────────────────────────┴─────────────────────┘
-```
 
-Keeping navigation flat (no deep menus) is intentional — a planner should never feel "lost" in the tool.
+## Flow A — Understand the baseline
 
-## User Flows
+1. Open **Briefing** and read what the map and Resilience Index mean.
+2. Inspect the Panaji sample; brighter criticality colors indicate higher scores, while inferred/structural states also use labels and line styles.
+3. Trigger the worst-junction example or continue to **Analysis**.
+4. Compare the intact network with the selected failure and read the plain-language impact.
 
-### Flow A — Explore criticality (understand the city)
-1. User lands on the map; roads/junctions are coloured by criticality.
-2. User reads the legend to learn what the colours mean.
-3. User identifies the red ("Gatekeeper") corridors at a glance.
-4. User hovers/clicks a node → tooltip shows its name, betweenness score, and rank.
-5. User scans the **Top Critical Nodes** list for the ranked chokepoints.
+Success: the user can explain which junction matters and what RI `1.0` represents without reading source code.
 
-### Flow B — Stress-test a junction (the headline interaction)
-1. User optionally picks a **scenario** (flood / accident / closure) or simply chooses a junction.
-2. User **clicks a node to disable it**.
-3. The app shows a brief spinner, recomputes, and updates: the **rerouted path**, the new **Resilience Index** (global efficiency), and the **travel-time increase (%)**.
-4. User compares before/after and can disable **more nodes** to model a compound disaster (cumulative).
-5. User hits **Reset** to return to the baseline network.
+## Flow B — Analyze failures
 
-### Flow C — Capture / export (take it to a meeting or report)
-1. User exports the graph + metrics (GeoJSON/CSV) or screenshots the map.
-2. User takes the result into a committee deck, situation report, or evaluation.
+1. Open **Analysis → Scenario**.
+2. Select a junction from the accessible control or click it on the map.
+3. Optionally draw/select an affected area for a compound failure.
+4. The app recomputes global-efficiency retention, component impact and a representative route when meaningful.
+5. Use **Rankings** to move between critical nodes and **Curves** to compare targeted/random degradation.
+6. Reset to return to the baseline.
 
-## Success Flows (what "it worked" means per persona)
+Expected behavior:
 
-| Persona | Success looks like |
+- A destructive change is not presented as a positive success state.
+- A split network remains mathematically valid; unreachable routes are explained rather than divided by infinity.
+- Multi-node scenarios do not invent a single travel-time percentage when it has no clear interpretation.
+- The map viewport and current scenario survive normal Streamlit reruns.
+
+## Flow C — Upload imagery
+
+1. Open **Your imagery** and read/accept the processing disclosure.
+2. Choose a supported PNG/JPEG within the displayed decoded-size and pixel limits. Selection starts the configured Modal segmentation flow; there is no separate submit button.
+3. Wait through a possible scale-to-zero cold start. On a retryable transport failure, retry without losing the sample dashboard state.
+4. Modal returns a mask. If georeference is unavailable, choose/confirm the ground-sample-distance assumption used for metric graph lengths.
+5. The app persists the derived mask and versioned job state, displays queue position, then runs CPU P2/P3. Changing GSD submits a replacement analysis for that mask.
+6. Poll in the active browser session until the job is done, then inspect the uploaded-image graph and analysis. The filesystem queue survives normal process restarts, but there is no account/job library for recovering a result after the browser session is lost.
+
+Privacy/retention:
+
+- There is no account or permanent project library.
+- Original upload bytes are handled in memory and sent to Modal.
+- Derived mask, queue state and result files live on the host temporarily and are age-cleaned (currently about 24 hours).
+
+## Flow D — Export and communicate
+
+1. Open the Analysis export control after choosing a baseline or scenario.
+2. Download the current graph as GeoJSON and the summary as PNG.
+3. Preserve the visible assumptions/limitations when reusing the output.
+
+Pipeline CSV/JSON evidence remains available to technical users but is not presented as a dashboard download unless the UI explicitly exposes it.
+
+## Flow E — Review the method
+
+1. Open **Methodology**.
+2. Follow imagery → P1 → P2 → P3 → dashboard.
+3. Read the difference between predicted roads, healed roads, graph-theoretic bridges and resilience.
+4. Check the benchmark caveats: Mumbai is development evidence; grayscale is a PAN proxy; A18 is research-only and not deploy-ready.
+
+## Errors and recovery
+
+| Situation | Required response |
 |---|---|
-| Meera | "I clicked Junction X, the committee saw commute time jump +37%, and we approved the redundancy budget." |
-| Rohan | "I have a ranked chokepoint list and an isolation estimate for the monsoon plan in minutes." |
-| Aishwarya | "The resilience metric stayed finite when the network split, and IoU/APLS were reported honestly — the method is sound." |
+| Sample artifacts missing/corrupt | Explain the expected paths; do not show a raw traceback |
+| Modal configuration absent | Keep sample mode available and explain that upload is disabled |
+| Unsupported/oversized upload | Reject before remote inference and state the accepted limit/type |
+| Unauthorized/invalid Modal response | Fail closed, show a safe message and allow retry |
+| Cold start or queued work | Show stage/queue progress rather than a frozen page |
+| App restarts during a job | Recover queued/running state using claims/leases; do not duplicate live work |
+| Empty/degenerate mask graph | Mark the analysis failed; do not report a successful empty network |
+| Map tile provider unavailable | Keep controls/evidence usable and explain the basemap failure |
+| No nodes in a drawn area | Say that the selection affected no junctions |
 
-## Error Flows
+## F9 improvement goals
 
-| Situation | What the app does |
-|---|---|
-| No graph/artifacts loaded | Friendly message + one-line instruction on how to generate or select a dataset (never a raw stack trace) |
-| User clicks empty map area (no node) | Gentle prompt: "Click a junction (a dot) to inspect or disable it." |
-| Disabling a node **disconnects** the graph | Handle gracefully — this is expected. Global efficiency stays finite (the whole reason we use it), and the app shows "Network split — X% of nodes isolated." |
-| Recompute is slow on a very large graph | Show a spinner; fall back to **k-sample** betweenness; optionally analyze a sub-region |
-| Map tiles fail to load (offline) | Show a fallback message; the graph still renders on a plain background |
-| Corrupt/unexpected input file | Validation catches it; show "couldn't read this file" rather than crashing |
+The later UI/UX overhaul must improve this journey without changing its semantics:
 
-## Edge Cases
-
-- **Disabling an already-isolated node** → little/no change; the app states that clearly.
-- **Disabling the only bridge between two halves** → efficiency drops sharply; highlight this as a maximally critical link (also flag articulation points up front).
-- **Selecting a node with no path to the rest** → handle without divide-by-zero.
-- **Very large city graph** → performance guardrails (k-sample betweenness, precomputed centralities, optional sub-region).
-- **Multiple nodes disabled (compound scenario)** → metrics accumulate; provide a clear running state and an easy reset.
-- **Healed/bridged edges** → render distinctly (e.g. dashed) so users know which roads were inferred rather than observed — honesty about uncertainty.
-
-## Exit Points
-
-| Exit | Outcome |
-|---|---|
-| Close the tab | Session ends (no data persisted — read-only tool) |
-| Export then leave | User leaves with a GeoJSON/CSV/screenshot artifact |
-| Reset to baseline | User clears a simulation and stays in the tool |
-
-Because the dashboard is read-only and stateless between sessions, leaving never risks data loss — there is nothing to "save."
+- clearer first-run choice between sample exploration and own imagery;
+- less tab/sub-tab hunting for the primary scenario flow;
+- responsive laptop/narrow layouts;
+- keyboard and screen-reader alternatives for every essential map action;
+- more legible job progress, evidence, privacy and uncertainty;
+- browser-tested completion of Flows A–E.

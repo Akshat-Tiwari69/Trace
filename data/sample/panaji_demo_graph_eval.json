@@ -1,64 +1,64 @@
 {
   "aoi": "panaji_demo",
   "graph": {
-    "nodes": 400,
-    "edges": 474,
-    "bridged_edges": 19,
-    "bridged_pct": 4.01
+    "nodes": 364,
+    "edges": 500,
+    "bridged_edges": 5,
+    "bridged_pct": 1.0
   },
   "simplify": {
-    "nodes_before": 630,
-    "nodes_after": 489,
-    "node_reduction_pct": 22.4,
-    "stubs_pruned": 48,
-    "nodes_collapsed": 93
+    "nodes_before": 605,
+    "nodes_after": 533,
+    "node_reduction_pct": 11.9,
+    "stubs_pruned": 25,
+    "nodes_collapsed": 47
   },
   "consolidate": {
-    "nodes_before": 489,
-    "nodes_after": 400,
-    "nodes_merged": 51
+    "nodes_before": 533,
+    "nodes_after": 364,
+    "nodes_merged": 160
   },
   "healing": {
-    "bridges_added": 19,
-    "components_before_heal": 29,
-    "components_after_heal": 10,
-    "connectivity_ratio_pct": 15.08,
+    "bridges_added": 5,
+    "components_before_heal": 8,
+    "components_after_heal": 3,
+    "connectivity_ratio_pct": 8.32,
     "source": "build-time"
   },
   "criticality": {
     "top_nodes": [
       {
-        "node_id": 45,
-        "betweenness": 0.4876
+        "node_id": 278,
+        "betweenness": 0.3307
       },
       {
-        "node_id": 29,
-        "betweenness": 0.4522
+        "node_id": 261,
+        "betweenness": 0.2642
       },
       {
-        "node_id": 32,
-        "betweenness": 0.4504
+        "node_id": 86,
+        "betweenness": 0.2567
       },
       {
-        "node_id": 11,
-        "betweenness": 0.4498
+        "node_id": 199,
+        "betweenness": 0.2534
       },
       {
-        "node_id": 201,
-        "betweenness": 0.3192
+        "node_id": 274,
+        "betweenness": 0.2483
       }
     ],
-    "max_betweenness": 0.4876,
-    "mean_betweenness": 0.042653
+    "max_betweenness": 0.3307,
+    "mean_betweenness": 0.040776
   },
   "resilience": {
-    "baseline_global_efficiency": 0.001105,
+    "baseline_global_efficiency": 0.001507,
     "ablation_steps": 40,
-    "targeted_ri_end": 0.4912,
-    "random_ri_end": 0.5278,
-    "targeted_minus_random_gap": 0.0367,
-    "targeted_mean_ri": 0.6004,
-    "random_mean_ri": 0.7312,
+    "targeted_ri_end": 0.5653,
+    "random_ri_end": 0.7746,
+    "targeted_minus_random_gap": 0.2093,
+    "targeted_mean_ri": 0.7518,
+    "random_mean_ri": 0.9025,
     "targeted_degrades_faster": true
   }
 }

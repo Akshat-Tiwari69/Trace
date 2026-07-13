@@ -1,149 +1,191 @@
-# Deploying the Route Resilience dashboard (Oracle Always-Free ARM)
+# Deployment Runbook — Oracle ARM + Modal
 
-Public dashboard on the free Oracle box. It reads precomputed `data/sample/`
-artifacts and runs CPU mask-to-graph/resilience analysis for uploaded masks, so
-`requirements-app.txt` includes the minimal P2/P3 stack but not Torch or the
-segmentation model. Heavy model inference lives elsewhere (see below).
+> Repository configuration and CI are not proof of what is currently installed on the live services. Complete `Tracker.md` task O1 and record the exact deployed refs/checksums after every rollout.
 
-Target box: Ubuntu 24.04 aarch64, user `ubuntu`. Runs as a **user** systemd service
-(lingering already enabled) — no root needed except the one-time Caddy/journald setup.
+Public dashboard: `https://trace.tiwaribabu.in`
 
-## One-time bring-up (on the box)
+## Architecture
+
+- **Oracle Ubuntu ARM:** Streamlit, committed sample data, upload queue and CPU P2/P3.
+- **Modal GPU:** authenticated P1 segmentation with the checksum-pinned v3.2 checkpoint.
+- **Caddy:** public TLS/reverse proxy on 80/443.
+- **Streamlit:** loopback `127.0.0.1:8501`; it must not be publicly reachable.
+- **systemd user units:** application plus periodic ref synchronization; health/rollback run only when the ref changes.
+
+`deploy/requirements-app.txt` intentionally excludes Torch/model code and includes only the dashboard plus CPU upload-analysis stack.
+
+## Choose an approved application ref first
+
+There is currently no GitHub **application Release** containing the July hardening work; the existing GitHub Releases are model assets, and the old `v1.0` tag predates that work. Before production rollout, approve either:
+
+- a new immutable application tag created from reviewed `dev`, or
+- a reviewed full 40-character commit SHA.
+
+Call it `APP_REF` below. Do **not** use `dev`, `main` or another moving branch. The current `update.sh` still resolves branch names, so branch rejection is tracked as A45-C5; operator discipline is required until that guard lands.
+
+## One-time Oracle bring-up
+
+Run on the host:
 
 ```bash
-# 0. venv module (Ubuntu ships python3 without venv)
-sudo apt-get update && sudo apt-get install -y python3.12-venv
+export APP_REF='<approved-tag-or-40-char-sha>'
 
-# 1. clone (public repo) + pick the deployed branch
+sudo apt-get update
+sudo apt-get install -y git curl python3.12-venv
+
 git clone https://github.com/Akshat-Tiwari69/Trace.git ~/Trace
-cd ~/Trace && git checkout v1.0.0       # use the approved immutable release tag
+cd ~/Trace
+git fetch --tags origin
+git checkout --detach "$APP_REF"
 
-# 2. slim venv
-python3 -m venv .venv
-./.venv/bin/pip install -U pip
+python3.12 -m venv .venv
+./.venv/bin/pip install --upgrade pip==24.2
 ./.venv/bin/pip install -r deploy/requirements-app.txt
 
-# 3. pin the immutable release ref and install the user services
-mkdir -p ~/.config/roadresilience
-printf 'DEPLOY_REF=v1.0.0\n' > ~/.config/roadresilience/deploy.env
-mkdir -p ~/.config/systemd/user
-cp deploy/roadresilience.service          ~/.config/systemd/user/
-cp deploy/roadresilience-update.service   ~/.config/systemd/user/
-cp deploy/roadresilience-update.timer     ~/.config/systemd/user/
+mkdir -p ~/.config/roadresilience ~/.config/systemd/user
+printf 'DEPLOY_REF=%s\n' "$APP_REF" > ~/.config/roadresilience/deploy.env
+chmod 600 ~/.config/roadresilience/deploy.env
+
+cp deploy/roadresilience.service ~/.config/systemd/user/
+cp deploy/roadresilience-update.service ~/.config/systemd/user/
+cp deploy/roadresilience-update.timer ~/.config/systemd/user/
+
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 systemctl --user daemon-reload
 systemctl --user enable --now roadresilience.service
 systemctl --user enable --now roadresilience-update.timer
 ```
 
-## Network exposure — Caddy is the ONLY public entrypoint
+The checked-in update unit currently marks the deployment env file optional even though the script requires `DEPLOY_REF`. A45/O1 will make it fail earlier; until then, create and verify the file **before** enabling the timer.
 
-Streamlit binds **127.0.0.1:8501** (loopback only — enforced in
-`roadresilience.service`) and Caddy terminates TLS on **80/443** and proxies to it.
+## Application secrets
 
-- **Do NOT open port 8501** — not in the box iptables, not in the Oracle
-  Security List. Only **80 and 443** are opened (both places). If an old
-  `8501` ingress rule or `iptables ACCEPT` exists from an earlier bring-up,
-  **remove it** (Oracle console: VCN → subnet → Security List → delete the
-  8501 ingress rule; box: `sudo iptables -L INPUT --line-numbers`, delete the
-  8501 rule, `sudo netfilter-persistent save`).
-- Caddy setup: `sudo apt-get install -y caddy`, copy `deploy/Caddyfile` to
-  `/etc/caddy/Caddyfile`, `sudo systemctl restart caddy`. Cert is auto-provisioned
-  for `trace.tiwaribabu.in`.
-- The Caddyfile caps request bodies at **20MB**. **Rate limiting is NOT enabled**:
-  it requires the non-standard [caddy-ratelimit](https://github.com/mholt/caddy-ratelimit)
-  module (custom caddy build via `xcaddy`). Recommended follow-up.
+The Streamlit service needs these only for **Your imagery**:
 
-## Journald size cap (do this once, needs root)
+- `MODAL_SEG_URL`
+- `MODAL_SEG_KEY`
 
-App + update logs go to the journal; cap it so it can never fill the boot volume:
+Keep them in an environment file outside the repository and owner-readable only:
 
 ```bash
+chmod 600 ~/.config/roadresilience/env
+```
+
+The checked-in `roadresilience.service` does not yet load that file (tracked in A45/O1). Until the unit is fixed in an approved ref, install a user drop-in:
+
+```bash
+mkdir -p ~/.config/systemd/user/roadresilience.service.d
+cat > ~/.config/systemd/user/roadresilience.service.d/env.conf <<'EOF'
+[Service]
+EnvironmentFile=%h/.config/roadresilience/env
+EOF
+systemctl --user daemon-reload
+systemctl --user restart roadresilience.service
+```
+
+Sample mode works without Modal configuration.
+
+### Rotate the shared key
+
+1. Generate a new random key, for example `openssl rand -hex 32`.
+2. Update the Modal secret `roadseg-key` (`ROADSEG_KEY=<new>`).
+3. Redeploy Modal so new containers use it.
+4. Update `MODAL_SEG_KEY` on the Oracle host and keep the file mode `600`.
+5. Restart `roadresilience.service` and run an authenticated upload smoke.
+
+Expect a short 401 window if Modal and Oracle are not updated atomically.
+
+## Modal deployment
+
+Use a separate operator environment rather than the production ARM app venv. The current local deployment tooling was verified with Modal `1.5.1`; update the pin deliberately and re-smoke before changing it.
+
+```bash
+cd ~/Trace
+python3 -m venv .venv-modal
+./.venv-modal/bin/pip install --upgrade pip==24.2
+./.venv-modal/bin/pip install 'modal==1.5.1'
+./.venv-modal/bin/modal setup
+./.venv-modal/bin/modal deploy deploy/modal_app.py
+```
+
+Before deploy:
+
+- confirm `MODEL_SHA256` in `deploy/modal_app.py` matches the intended GitHub model asset;
+- verify the checkpoint loads with the pinned Modal Torch version;
+- verify the Modal secret exists and is non-empty;
+- record the application ref, Modal code ref and checkpoint SHA-256 in `Tracker.md`.
+
+The endpoint checks `X-API-Key` before app-level base64 decoding/image/model work, rejects invalid/oversized payloads and returns the binary mask plus threshold metadata expected by `src/app/modal_client.py`.
+
+## Network and Caddy
+
+Only Caddy should be public:
+
+- allow 80/443 in Oracle networking and host firewall;
+- remove any legacy 8501 ingress/iptables rule;
+- keep Streamlit bound to `127.0.0.1:8501` through `roadresilience.service`;
+- install Caddy from its official Debian/Ubuntu repository (not an assumed distro package), copy `deploy/Caddyfile`, validate it, then restart Caddy;
+- install the journald cap below.
+
+```bash
+# Follow the current official Debian/Ubuntu repository steps first:
+# https://caddyserver.com/docs/install#debian-ubuntu-raspbian
+sudo cp ~/Trace/deploy/Caddyfile /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl restart caddy
+
 sudo mkdir -p /etc/systemd/journald.conf.d
 sudo cp ~/Trace/deploy/journald-roadresilience.conf /etc/systemd/journald.conf.d/
 sudo systemctl restart systemd-journald
 ```
 
-## Secrets on the box (`MODAL_SEG_URL` / `MODAL_SEG_KEY`)
+The Caddyfile enforces the repository request-body cap. Rate limiting requires an explicit module/control decision and remains open in O1.
 
-The dashboard's upload→segment feature reads `MODAL_SEG_URL` and `MODAL_SEG_KEY`
-from the environment. Keep them in an env file the service loads (never in the
-repo), and make it owner-read-only:
+An external failed connection to `:8501` is encouraging but does not prove both the Oracle security list and host firewall are correct; inspect both.
 
-```bash
-chmod 600 <path-to-env-file>     # e.g. ~/.config/roadresilience/env
-```
+## Updates and rollback
 
-### Key-rotation runbook (`ROADSEG_KEY` / `MODAL_SEG_KEY`)
+`roadresilience-update.timer` starts `roadresilience-update.service` about every two minutes. The script resolves `DEPLOY_REF`, hard-resets the read-only checkout only when the target changes, refreshes dependencies, restarts Streamlit and polls its health endpoint. On failure it restores the previous commit and dependencies.
 
-1. Generate a new random key (e.g. `openssl rand -hex 32`).
-2. Update the Modal Secret: `modal secret create roadseg-key ROADSEG_KEY=<new>`
-   (overwrites `roadseg-key`). New Modal containers pick it up; a `modal deploy`
-   forces it immediately.
-3. Update the box env file (`MODAL_SEG_KEY=<new>`), keep it `chmod 600`.
-4. `systemctl --user restart roadresilience.service`.
-
-Note: between steps 2 and 4 there is a **brief mismatch window** where uploads
-fail with 401 — harmless for this app (retry the upload). For zero-downtime
-rotation, extend the endpoint to accept **two keys** (current + next), roll the
-box to the next key, then drop the old one.
-
-## Auto-update (code pushed to GitHub → box self-updates)
-
-`roadresilience-update.timer` runs `deploy/update.sh` every ~2 min: it `git fetch`es,
-and **only if the deploy target moved** does it `git reset --hard` to it (the deploy
-checkout is treated as read-only — no local commits), refresh deps, and restart.
-It then polls `http://127.0.0.1:8501/_stcore/health` for ~30 s; **on failure it
-rolls back** to the previous commit, reinstalls deps, restarts again, and logs
-loudly to the journal.
-
-- **`DEPLOY_REF` is required** and should name an immutable approved release tag
-  (for example `v1.0.0`). Put it in
-  `~/.config/roadresilience/deploy.env`; the updater refuses to deploy when it is
-  absent, preventing accidental raw-`dev` production releases.
-- Want *instant* deploys instead of ~2-min polling? Add a GitHub Actions job that
-  SSHes in and runs `deploy/update.sh` on push (uses the already-open port 22).
-
-## Model inference (fast path — off this box)
-
-The ARM box is too slow for the SegFormer model (seconds/tile on 1 CPU core). Serve
-inference from a **serverless GPU (Modal)** that scales to zero; the dashboard calls
-it on demand. The Modal image bakes the `road_pan.pt` GitHub Release asset at build
-time, **verified against the `MODEL_SHA256` pin in `deploy/modal_app.py`** — a new
-release means: update `MODEL_SHA256` (from the local `models/road_pan.pt` hash),
-then `modal deploy deploy/modal_app.py`.
-
-### Tested versions (checkpoint compatibility)
-
-The Modal image pins **torch 2.4.1**; training runs on **torch 2.12.1+cu126**.
-The `road_pan.pt` checkpoint must stay loadable by **both** — don't adopt
-torch-version-specific serialization features, and note the checkpoint format
-requires `weights_only=False` at load time (it stores metadata alongside the
-state dict). Re-verify a new checkpoint loads under the Modal pin before release.
-
-## Python & dependency matrix
-
-- App tested on **Python 3.11** (dev machines) and **3.12** (the box). A
-  `.python-version` at repo root now pins **3.11** for dev/CI tooling
-  (pyenv, `actions/setup-python`-style version detection) — this does **not**
-  touch the box: `roadresilience.service` and `update.sh` both invoke
-  `.venv/bin/...` directly, so neither one ever consults `.python-version`,
-  and the box keeps running its own **Python 3.12**.
-- geopandas is **aligned at 1.0.1** in both root `requirements.txt` (dev) and
-  `deploy/requirements-app.txt` (prod) as of A42 (2026-07-10). The joint test
-  that gated the flip: full suite (249 passed) under 1.0.1 in an isolated
-  dev-side venv, plus a `gpd.read_file()` smoke on `data/sample/*.geojson` on
-  the deploy box (which had already been serving on 1.0.1 in production).
-  Apply the same joint-test rule to any future major bump of the geo stack.
-
-## Useful ops
+To trigger a manual update, start the service so systemd loads `DEPLOY_REF`:
 
 ```bash
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-systemctl --user status roadresilience.service      # health
-journalctl --user -u roadresilience.service -n 50   # app logs
-journalctl --user -u roadresilience-update.service -n 50   # deploy/rollback logs
-systemctl --user list-timers roadresilience-update.timer
-~/Trace/deploy/update.sh                             # force an update now
-curl -fsS http://127.0.0.1:8501/_stcore/health       # local health probe
+systemctl --user start roadresilience-update.service
+journalctl --user -u roadresilience-update.service -n 100 --no-pager
 ```
+
+Do **not** invoke `~/Trace/deploy/update.sh` directly unless you explicitly export the same `DEPLOY_REF`; a normal shell does not load the systemd `EnvironmentFile`.
+
+An SSH-based GitHub Action should likewise start the systemd service, not call the script without its environment.
+
+## Health and verification
+
+```bash
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+systemctl --user status roadresilience.service
+systemctl --user status roadresilience-update.timer
+journalctl --user -u roadresilience.service -n 100 --no-pager
+curl -fsS http://127.0.0.1:8501/_stcore/health
+curl -fsS https://trace.tiwaribabu.in/_stcore/health
+```
+
+O1 is complete only after all of these are evidenced:
+
+1. service checkout equals the approved immutable ref;
+2. public homepage and Streamlit health return 200;
+3. public 8501 is closed and loopback health works;
+4. sample Briefing/Analysis flow works;
+5. authenticated upload covers Modal cold/warm inference, queue, CPU analysis and result;
+6. an invalid key/oversized upload fails safely;
+7. app restart/job recovery and rollback are exercised;
+8. deployed refs/checksums/timestamp are logged in `Tracker.md`.
+
+## Python/dependency matrix
+
+- Development/CI: Python 3.11.
+- Oracle app: isolated Python 3.12 venv.
+- Modal: its pinned image/runtime and Torch version in `modal_app.py`.
+- Training/local GPU: follow `SETUP.md` and the official PyTorch selector; do not reuse the Oracle app venv.
+
+Changes to geospatial pins must pass both the full development suite and a clean `deploy/requirements-app.txt` upload-analysis smoke.

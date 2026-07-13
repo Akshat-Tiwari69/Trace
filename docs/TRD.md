@@ -1,162 +1,131 @@
-# TRD.md
+# TRD.md — Technical Architecture
 
-> **Purpose.** This Technical Requirements Document defines *how* **Route Resilience** is built: the system architecture, the technology stack for each part, how data is stored and moved, the interfaces between components, and the performance, security, and deployment requirements. Where a typical web app would have a database, login system, and REST API, this project is a **file-based geospatial ML pipeline plus an interactive read-only dashboard** — so those sections are adapted honestly rather than forced. Read alongside `PRD.md` (what/why) and `Research.md` (evidence behind the choices).
+> Current architecture of Route Resilience. Artifact details are owned by `Schema.md` and coordination contracts by `Tracker.md` §4.
 
----
+## System overview
 
-## System Architecture
-
-Route Resilience is a **modular, loosely-coupled pipeline** of four processing stages followed by an interactive dashboard. Each stage hands off to the next through a **file artifact** (a saved mask, a saved graph, a metrics file), so the stages can be built, run, and debugged independently — and by different people in parallel.
-
-Plain English: think of it like an assembly line. Each station does one job and puts its output on the belt; the next station picks it up. Nobody has to wait for the whole line to be finished to work on their station.
+Route Resilience has one analysis pipeline and two ways to enter it.
 
 ```mermaid
 flowchart LR
-    A[Satellite Imagery<br/>Sentinel-2 / LISS-IV / Cartosat-3] --> B[Phase I:<br/>Segmentation]
-    OSM[OpenStreetMap vectors] -->|auto-rasterized labels| B
-    B -->|road mask| C[Phase II:<br/>Skeletonize + Heal]
-    C -->|routable graph| D[Phase III:<br/>Criticality + Resilience]
-    D -->|graph + metrics| E[Phase IV:<br/>Dashboard]
-    E -->|node-disable click| D
+    subgraph P1["P1 · GPU-capable segmentation"]
+      IMG[Imagery] --> SEG[SegFormer MiT-B3 + SCSE U-Net]
+      SEG --> MASK[Mask + optional probability + provenance]
+    end
+    subgraph CPU["CPU pipeline"]
+      MASK --> P2["P2 · skeletonize, MultiGraph, simplify, heal"]
+      P2 --> P3["P3 · criticality + global-efficiency resilience"]
+    end
+    P3 --> ART[GraphML + GeoJSON + CSV/JSON artifacts]
+    ART --> EVAL["Evaluation tooling · APLS + model gates"]
+    ART --> P4["P4 · Streamlit + Folium"]
 ```
 
-Component responsibilities:
+### Batch/local path
 
-| Component | Job | Output artifact |
-|---|---|---|
-| **Data Ingestion** | Load/clip/tile imagery; build OSM training masks | image tiles, label masks |
-| **Phase I — Segmentation** | Predict road pixels (occlusion-robust) | binary road mask |
-| **Phase II — Graph Build & Healing** | Skeletonize → graph → MST/Union-Find healing | routable weighted graph |
-| **Phase III — Network Analysis** | Betweenness, node ablation, global-efficiency Resilience Index | graph + criticality metrics |
-| **Phase IV — Dashboard** | Visualize; run interactive node-disable simulation | (interactive UI) |
+`python -m src.pipeline.run_pipeline` runs P1→P2→P3, verifies the P4 contract, records content/config signatures per stage and writes a success-only run summary. Stages may be resumed or forced.
 
-The pipeline (Phases I–III) runs **offline/batch**. The dashboard (Phase IV) is a thin **read layer** that loads the precomputed artifacts; the only thing it computes live is the cheap node-ablation simulation when a user clicks.
+### Hosted upload path
 
-## Frontend Stack
-
-The frontend is the dashboard. It is **pure Python** so the whole team can work in one language and no separate JavaScript build is needed.
-
-| Tool | Role |
-|---|---|
-| **Streamlit** | App framework — turns a Python script into a web app |
-| **Folium** (Leaflet.js under the hood) | Interactive slippy map |
-| **streamlit-folium** | Bridge that renders the map *and returns what the user clicked* (enables click-to-disable) |
-| **branca** | Colour ramps and the criticality legend/colour bar |
-| **Matplotlib / Plotly** | Side charts (e.g. resilience-vs-nodes-removed curve) |
-
-Design standards for the frontend live in `Design.md` (owned by the frontend lead).
-
-## Backend Stack
-
-"Backend" here means the **processing pipeline**, not a running server — in the prototype there is no separate backend service. It is a set of Python modules run as scripts/notebooks.
-
-| Layer | Tools |
-|---|---|
-| Language | Python 3.10+ |
-| Deep learning | PyTorch, `segmentation_models_pytorch`, HuggingFace Transformers (SegFormer) |
-| Augmentation / loss | Albumentations (incl. CoarseDropout for occlusion), clDice loss |
-| Geospatial I/O | Rasterio, GDAL, GeoPandas, OSMnx |
-| Image processing | OpenCV, scikit-image (skeletonize) |
-| Graph build & analysis | sknw (skeleton→graph), NetworkX (graph + centrality + efficiency) |
-| Numerical | NumPy, SciPy (KD-tree for healing candidates) |
-
-## Database Strategy
-
-**Decision: no traditional database in the prototype.** The data is geospatial files and a graph, used in a single-machine, batch, read-mostly way. A relational database would add setup, schema migrations, and a running service for zero benefit at this stage. Instead we use a **structured file-based artifact store** — a versioned `data/` directory tree.
-
-```
-data/
-  raw/        # downloaded imagery (GeoTIFF), OSM extracts   (git-ignored)
-  interim/    # image tiles, label masks
-  processed/  # graphs (GraphML/GeoPackage), criticality (CSV/Parquet)
-  outputs/    # exports (GeoJSON), metric reports (JSON)
-models/       # trained checkpoints                          (git-ignored)
+```mermaid
+sequenceDiagram
+    participant U as Browser
+    participant S as Streamlit on Oracle ARM
+    participant M as Modal GPU P1
+    participant Q as Filesystem job queue
+    U->>S: Upload image
+    S->>M: Authenticated, size-limited segmentation request
+    M-->>S: Binary mask + threshold metadata
+    S->>Q: Persist queued mask-analysis job
+    Q->>Q: CPU P2/P3 analysis with claim/lease recovery
+    S-->>U: Poll status, then render result
 ```
 
-Formats: **GeoTIFF** for imagery, **PNG/NPY** for masks, **GraphML or GeoPackage/GeoJSON** for the road graph, **CSV/JSON** for metrics. The full data schema is in `Schema.md`.
+The Modal endpoint is the only remote inference boundary. There is no database, user-login system or separately managed REST application backend. Queue persistence is intentionally single-host and file-based.
 
-*When a real database would be justified (future):* a multi-user, multi-city hosted service would warrant **PostGIS** (PostgreSQL + spatial extension) for storing graphs and query-by-region. Noted as a future enhancement, deliberately out of scope now.
+## Components
 
-## API Design
+### P1 — segmentation and evaluation
 
-There is **no external/REST API** in the prototype. The relevant "API" is the **contract between modules** — the function signatures and the file handoffs that let the phases stay decoupled. Defining these up front is what lets three people build in parallel.
+- PyTorch + `segmentation-models-pytorch` SegFormer MiT-B3 encoder and SCSE U-Net decoder.
+- Tiled inference with Hann blending, checkpoint-defined threshold/tile size, optional postprocessing and TTA.
+- Rasterio-backed RGB, multispectral and one-band GeoTIFF/PAN reading with CRS/transform propagation.
+- Checkpoint provenance, SHA-256 and stage signatures.
+- Development evaluation on SpaceNet-5 Mumbai plus common-unit routing evaluation against A18 graph outputs.
 
-Module contracts (illustrative):
+The deployed checkpoint remains `a4-roadseg-v3.2`/`road_pan.pt` until a candidate passes the promotion and deployment gates.
 
-| Phase | Function (contract) | In → Out |
+### P2 — graph construction and healing
+
+- Binary mask → skeleton/medial information → `sknw` → NetworkX `MultiGraph`.
+- Positive metric edge lengths, preserved LineString geometry and parallel-edge keys.
+- Stub pruning, degree-2 collapse, nearby-node consolidation and geometry simplification.
+- Gap healing based on distance, direction, crossing constraints and optional P1 probability corridor support.
+- Observed and inferred edges remain distinguishable.
+
+### P3 — analysis
+
+- Node betweenness, articulation points, graph bridges and optional percolation/demand variants.
+- Baseline-normalized global-efficiency Resilience Index under targeted, random, flood or custom failures. The single-scenario path preserves the baseline node universe; multi-step curve normalization has a known A45 defect and its old evidence must not be treated as final.
+- Exact or fixed-source sampled paths for larger graphs.
+- Analyzed GraphML/GeoJSON and tabular criticality/resilience outputs.
+
+APLS/topology utilities are housed in the P3 analysis package for reuse, but normal `analyze()`/`run_pipeline` does not execute them; they belong to the separate evaluation path shown in the diagram.
+
+### P4 — dashboard
+
+- Streamlit application with Folium maps and four top-level views: Briefing, Analysis, Your imagery and Methodology.
+- Committed Panaji sample for a no-GPU/no-checkpoint start.
+- Junction and multi-node/flood ablation, rerouting, rankings, curves and exports.
+- Persistent single-host upload job queue with JSON state/results and process claims/leases.
+- Modal transport isolated in `src/app/modal_client.py`; CPU upload analysis isolated in `src/app/upload_analysis.py`.
+
+## Runtime and deployment
+
+| Component | Runtime | Deployment |
 |---|---|---|
-| Ingestion | `tile_image(geotiff) -> [tiles]` | image → tiles |
-| Ingestion | `osm_to_mask(aoi, transform) -> mask` | AOI + grid → label mask |
-| Phase I | `predict(tile) -> mask_array` | tile → binary mask |
-| Phase II | `build_graph(mask) -> nx.Graph` | mask → raw graph |
-| Phase II | `heal(graph) -> nx.Graph` | broken graph → routable graph |
-| Phase III | `criticality(graph) -> dict` | graph → centrality scores |
-| Phase III | `simulate_ablation(graph, nodes) -> metrics` | graph + tuple of nodes → resilience metrics |
+| Training/evaluation | Python 3.11 + NVIDIA GPU when required | Local GPU, Colab or Kaggle |
+| Modal P1 | Pinned Python/PyTorch GPU image | Modal, scales to zero |
+| P2/P3/P4 | CPU, production dependency subset | Oracle Ubuntu ARM user service |
+| TLS/reverse proxy | Caddy | Public 80/443; Streamlit should bind loopback 8501 |
+| Updates | systemd timer + `deploy/update.sh` | Configured `DEPLOY_REF`, health check and rollback; branch-name rejection is still A45-C5 |
 
-**Dashboard ↔ pipeline contract:** the dashboard reads `graph.graphml` + `criticality.csv` at startup; when the user clicks a node it calls the in-process `simulate_ablation(graph, nodes)` (a **tuple** of disabled nodes — multi-node flood ablation is supported) and renders the result. This call is cheap (one shortest-path/efficiency recompute on a copy of the graph), so it needs no server.
+The repository proves deployment code and CI smokes; `Tracker.md` O1 is required to prove the current live box matches it.
 
-*Future:* a **FastAPI** service could expose `simulate_ablation` and graph queries over HTTP if the app is hosted for many users. Out of scope now.
+## Security boundaries
 
-## Authentication
+- Secrets exist only in environment/Modal secret stores.
+- Modal authentication fails closed and is checked before app-level base64 decoding, image parsing and model work.
+- Uploads are type- and size-limited before expensive processing; decoded-size limits account for base64 expansion.
+- The public host should expose Caddy only; port 8501 is loopback-only.
+- Model downloads are checksum-pinned.
+- Uploaded job artifacts are transient and cleaned by age; the product is not a permanent data store.
+- Rate limiting remains an explicit production operator item.
 
-**Decision: none required in the prototype.** It is a single-user, locally-run (or single public-demo) application that handles only **open, non-personal geospatial data** — there is nothing to protect with a login. Adding auth now would be over-engineering.
+## Configuration and provenance
 
-*Future:* if deployed as a multi-user municipal/government service, add authentication (e.g. OAuth/SSO via the hosting platform) and role-based access. Explicitly out of scope for this release so the decision is deliberate, not an oversight.
+- `PipelineConfig` is the end-to-end source for pipeline settings; `GraphConfig` owns P2/P3 parameters and paths.
+- Checkpoint metadata owns architecture, tile size and deploy threshold unless the caller explicitly overrides them.
+- Content/config signatures invalidate stale stage outputs.
+- `{aoi}_run.json` records successful stage timings, resolved configuration and available provenance.
+- Production dependency pins are separate from the ML development environment by design.
 
-## Security Architecture
+## Performance expectations
 
-Even without user accounts, basic security hygiene applies:
-
-- **Input validation.** Only accept expected formats (GeoTIFF imagery, GraphML/GeoJSON graphs); reject/guard malformed files so the dashboard can't be crashed by a bad upload.
-- **No secrets in the repo.** No API keys/credentials committed; use environment variables / a git-ignored config if any data portal keys are needed.
-- **Dependency hygiene.** Pin versions (`requirements.txt`/`environment.yml`); avoid abandoned packages.
-- **Data licensing & provenance.** Respect dataset licenses — OSM (ODbL), OpenSatMap (CC BY-NC-SA, non-commercial), SpaceNet/DeepGlobe (research terms), Cartosat-3 (restricted/on request). Record the source and license of every dataset used. Do **not** commit large or restricted raw data to git.
-- **No PII.** The system processes satellite imagery and road geometry only — no personal data — which keeps the privacy/security surface small.
-- **Safe file paths.** Sanitize any user-provided paths/filenames in the dashboard.
-
-## Infrastructure Design
-
-- **Training:** the **primary, hardware-agnostic path is free Colab/Kaggle** (16 GB T4/P100) — the same notebook runs identically for every team member regardless of their laptop, so no one is gated by local hardware and no machine is remote-accessed. Local NVIDIA GPUs (where available) are an optional faster path each owner sets up themselves; commodity 8 GB GPUs are sufficient for the realistic fine-tuning plan (see `Research.md` → Infrastructure & Hardware Feasibility).
-- **Everyone can run the repo:** the GPU part (training) runs in the cloud; the CPU parts (graph build/healing, criticality, dashboard) run locally on any machine, including 8 GB / integrated-GPU laptops. **Committed sample artifacts** (a precomputed graph + criticality file) let the dashboard and analysis run out-of-the-box with no GPU and no prior pipeline run.
-- **Graph + dashboard:** CPU-only; runs comfortably on a modest laptop, including 8 GB RAM machines when working against precomputed artifacts.
-- **Dev environment:** Python virtual environment (venv/conda), pinned dependencies, fixed random seeds for reproducibility. An optional `Dockerfile` can lock the environment exactly.
-
-## Deployment Strategy
-
-| Mode | How | Notes |
-|---|---|---|
-| **Local (primary)** | `streamlit run app.py` | The default for development and demos |
-| **Public demo** ~~(optional)~~ | ~~Streamlit Community Cloud or Hugging Face Spaces (free CPU tier)~~ | **Superseded** — v1 shipped on a self-hosted Oracle box instead; see "Deployed architecture (v1 actual)" below. (Kept for history.) |
-| **Reproducible build (optional)** | `Dockerfile` + pinned `requirements.txt` | For judges/contributors to run identically |
-
-Because the dashboard consumes precomputed outputs, CPU hosting is sufficient — no GPU is needed at serve time.
-
-### Deployed architecture (v1 actual)
-
-What actually runs in production (supersedes the "Streamlit Community Cloud / HF
-Spaces" row above; full runbook in `deploy/README.md`):
-
-- **Host:** Oracle Always-Free ARM box (Ubuntu 24.04 aarch64), dashboard as a
-  user systemd service (`deploy/roadresilience.service`), Streamlit bound to
-  loopback only.
-- **Public entrypoint:** **Caddy** on 80/443 with auto-provisioned TLS
-  (`trace.tiwaribabu.in`), reverse-proxying to 127.0.0.1:8501. Port 8501 is
-  never exposed.
-- **Auto-update:** a 2-minute systemd timer runs `deploy/update.sh` (fetch →
-  hard-sync → dep refresh → restart, with health-check + rollback).
-- **GPU inference:** a **Modal serverless T4 endpoint** (`deploy/modal_app.py`)
-  guarded by a shared secret (`ROADSEG_KEY` Modal Secret); the dashboard calls
-  it for upload→segment and everything else stays CPU-side.
-
-## Performance Requirements
-
-Tied to the non-functional requirements in `PRD.md`:
-
-| Area | Requirement |
+| Path | Expectation |
 |---|---|
-| Training memory | Fit in 8 GB VRAM: pretrained encoders only, AMP/FP16, batch 2–4 @512² (8–16 @256²) + gradient accumulation, gradient checkpointing for heavier encoders |
-| Inference | Segment + build graph + analyze one city tile within minutes on a laptop |
-| Dashboard responsiveness | Node-disable reroute should feel near-instant — sub-second to a few seconds on a city-scale graph |
-| Scaling trick | Precompute betweenness once; on each click only recompute shortest paths / global efficiency on the perturbed graph; use NetworkX **k-sample** betweenness for very large graphs |
-| Dashboard memory | Stay usable on 8 GB RAM by loading precomputed artifacts, not raw imagery |
-| Reliability | Frequent checkpointing during training so a thermal shutdown loses ≤ 1 epoch |
+| Sample dashboard load | Interactive on a modest CPU host |
+| Junction simulation | Near-interactive for the committed sample; sampled/cached algorithms for larger graphs |
+| Uploaded-image P2/P3 | Queued and bounded on the single ARM host |
+| P1 inference | Remote GPU for hosted uploads; CPU remains supported for local batch use but is slower |
+| Large imagery | Tiled/blended inference; source images still have explicit size limits |
+
+Performance claims must be measured on representative inputs. A45 owns the next profiling/refactor pass.
+
+## Deliberate non-goals
+
+- Database, accounts, multi-tenant storage or horizontal queue workers.
+- JavaScript SPA/WebGL rewrite in this release.
+- Live traffic/GPS integration.
+- National-scale graph serving.
+- Claiming final geographic/sensor generalization from the Mumbai development benchmark.

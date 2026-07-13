@@ -1,84 +1,107 @@
-# Implementation.md
+# Implementation.md — Current Execution Plan
 
-> **Purpose.** This document is the execution roadmap for **Route Resilience**: the build phases, the order they happen in, who owns what, the milestones that mark progress, and the deliverables that come out. It turns the *what* (`PRD.md`) and the *how* (`TRD.md`, `Schema.md`) into a concrete plan of action. It is a living plan — update it as reality changes, and track day-to-day status in `Tracker.md`.
+> This document describes the **current** delivery sequence. `Tracker.md` owns live status and task assignment; this file explains why the work is ordered this way and what each phase must prove.
 
----
+## Current baseline
 
-## Team Roles
+The original build is complete:
 
-Three parallel workstreams, one lead each. Leads own their workstream's code and its file outputs; integration is shared.
+- P1 segments imagery with the deployed v3.2 checkpoint and preserves georeference/provenance plus an optional probability sidecar when blended inference produces it.
+- P2 produces a healed, simplified NetworkX MultiGraph with geometry, inferred-edge annotations and confidence when a probability map is available.
+- P3 computes criticality, articulation/bridge evidence, global-efficiency resilience and failure scenarios; APLS is a separate evaluation path.
+- P4 is a deployed Streamlit/Folium application with a committed sample path and an upload path backed by Modal P1 plus queued in-process P2/P3 analysis.
+- CI runs the full test suite, dashboard import smoke and a local mask-to-resilience contract smoke under the production dependency set.
 
-| Role | Owns | Lead |
-|---|---|---|
-| **ML / Segmentation Lead** (also integration + overall coordination) | Phase 0 data pipeline, Phase I segmentation, stitching the phases together | Akshat |
-| **Graph & Analysis Lead** | Phase II graph build + healing, Phase III criticality + resilience | Shaivi |
-| **Frontend / Design Lead** | Phase IV dashboard + `Design.md` | Saanvi |
+The project is therefore in **consolidation and evidence improvement**, not initial construction.
 
-The pipeline is built so workstreams **don't block each other**: the graph/analysis half can be developed against an OpenStreetMap-derived graph before any segmentation output exists, and the dashboard can be built against mock/precomputed artifacts.
+## Team and review ownership
 
-## Project Phases
+| Area | Primary reviewer |
+|---|---|
+| ML, data, evaluation, integration, deployment coordination | Akshat |
+| Graph extraction, graph IO, APLS, criticality and resilience | Shaivi |
+| Dashboard behavior, accessibility and visual design | Saanvi |
 
-The build mirrors the pipeline, plus a foundations phase first and an integration phase last.
+Akshat authorized repository-wide coordinator changes for the A44–A46/F9 program on 2026-07-13. Primary reviewers still review their areas.
 
-| Phase | Goal | Key tasks | Depends on | Output artifact |
-|---|---|---|---|---|
-| **Phase 0 — Foundations** | A working environment + data ready | Env setup (incl. Blackwell CUDA), pinned deps, repo scaffolding, dataset download, OSM→mask script, tiling | — | runnable env, cached datasets, label masks |
-| **Phase I — Segmentation** | Occlusion-robust road masks | Fine-tune pretrained SegFormer/U-Net, occlusion augmentation, Dice+clDice loss, inference | Phase 0 | binary road masks |
-| **Phase II — Graph build + healing** | A routable, connected graph | Skeletonize → sknw graph → MST/Union-Find healing | masks (or OSM graph for early dev) | healed `graph.graphml` |
-| **Phase III — Criticality + resilience** | Critical-node + resilience analysis | Betweenness, node ablation, global-efficiency Resilience Index | Phase II | criticality CSV + resilience curve |
-| **Phase IV — Dashboard** | Interactive visualization | Map + criticality heatmap + click-to-disable simulation | precomputed artifacts | Streamlit app |
-| **Phase 5 — Integration + evaluation** | End-to-end demo + numbers | Wire phases via file handoffs, run evaluation, polish | all | working demo + metrics report |
+## Delivery sequence
 
-## Sprint Planning
+```mermaid
+flowchart LR
+    A44["A44: truthful docs"] --> A45["A45: simpler/faster code"]
+    A44 --> A46["A46: graph-first model"]
+    A45 --> F9["F9: UI/UX overhaul"]
+    A46 --> F9
+    A45 --> O1["O1: production closure"]
+    A46 --> O1
+    F9 --> X1["X1: final demo capture"]
+    O1 --> X1
+```
 
-The plan front-loads the slow, painful work (setup + data) so the intensive build is spent on the interesting parts.
+### A44 — Documentation reconciliation
 
-- **Sprint 0 — Pre-build (do now, ahead of the intensive window).** Environment on both machines, dependency shake-out (especially GDAL/rasterio and the RTX 50-series CUDA 12.8 install), dataset download/caching, the OSM→mask script, and a "walking skeleton" run of the whole pipeline on **one** sample tile. The graph/analysis workstream starts here on an OSM graph; the segmentation model is pretrained here so the intensive window only fine-tunes.
-- **Sprint 1 — Core build (the intensive window).** Three workstreams run in parallel to working state: segmentation producing real masks; healing + criticality + resilience on those masks; dashboard wired to real artifacts.
-- **Sprint 2 — Integration + polish.** Connect everything end-to-end, run the evaluation suite (`Evaluation.md`), record a backup demo capture, finalize docs.
+Remove pre-build language and make every current-state document agree with the implementation, releases and remote Git state.
 
-A "walking skeleton" (a rough run through all four phases on one tile) should exist **by the end of Sprint 0** — it is the single best way to surface integration problems early.
+Done when:
 
-## Milestones
+- `Tracker.md` routes to real active work.
+- PRD, TRD, Schema, Design and UserJourney describe the shipped product.
+- README, SETUP and deploy instructions use real paths, tags and commands.
+- Evaluation/Research distinguish validated results, negative results and hypotheses.
+- RiskRegister lists current risks rather than solved setup risks.
+- Documentation links and the full test suite pass.
 
-| ID | Milestone | Definition of done |
-|---|---|---|
-| **M0** | Environment ready | Both machines run PyTorch on GPU (5070 verified on CUDA 12.8); all core libs import; deps pinned |
-| **M1** | Data pipeline ready | Datasets cached; OSM→mask script produces aligned masks for an AOI; tiling works |
-| **M2** | Segmentation working | Fine-tuned model outputs road masks; IoU/Occlusion-Recall measured |
-| **M3** | Routable graph | Mask → skeleton → graph → MST/Union-Find healing; Connectivity Ratio measured |
-| **M4** | Resilience analysis | Betweenness + node ablation + global-efficiency Resilience Index produce a degradation curve |
-| **M5** | Dashboard interactive | Map renders; clicking a node disables it and shows rerouting + travel-time impact |
-| **M6** | Integrated demo | Full pipeline runs end-to-end on a demo tile; evaluation report produced; backup capture recorded |
+### A45 — Repository simplification and performance
 
-## Deliverables
+Profile before changing. Remove duplication and dead paths, reduce large-module responsibility, and improve hot paths only where a benchmark demonstrates value.
 
-- Trained model checkpoint (`models/`, git-ignored).
-- Road masks for the demo AOI.
-- Healed routable graph (`graph.graphml` / GeoJSON).
-- Criticality scores (CSV) + resilience-degradation curve.
-- Streamlit + Folium dashboard (`app.py`).
-- Evaluation report (metrics per `Evaluation.md`).
-- The documentation set (this `docs/` folder).
-- A short screen-capture of a working end-to-end run (demo insurance).
+Required gates:
 
-## Dependencies
+- Existing behavior tests remain green; add characterization tests before touching ambiguous behavior.
+- Report lines/modules removed or responsibility reduced; do not reward line-count reduction that obscures logic.
+- Benchmark the affected path before and after on representative sample and large synthetic inputs.
+- Preserve §4 artifact contracts and deployment dependency boundaries.
+- Keep rejected research code quarantined from production imports; delete it only when its evidence remains documented and no reproducibility contract depends on it.
 
-- **Internal:** Phase II needs masks (Phase I) **or** an OSM graph for early dev; Phase III needs a healed graph; Phase IV needs precomputed artifacts; Phase 5 needs all. The OSM-graph path is what lets the graph/analysis workstream start immediately.
-- **External:** datasets (DeepGlobe/SpaceNet/OpenSatMap/Sentinel-2/LISS-IV — see `Research.md`); Cartosat-3 access for the high-res demo tile; open-source libraries; **free Colab/Kaggle for training (primary, hardware-agnostic path)**; optional local NVIDIA GPU + CUDA toolchain for those who have one.
+### A46 — Graph-first model improvement
 
-## Release Strategy
+Continue from the A18-LoRA result rather than restarting the mask-model search. The immediate question is whether better encoder adaptation, training coverage and graph context can raise common-unit routing while preserving reproducibility and licensing safety.
 
-- **Versioning:** `v0.1` = walking skeleton (end-to-end on one tile, rough); `v0.x` = each phase reaching working state; `v1.0` = integrated demo with evaluation numbers.
-- **What "released" means:** a repo that runs locally with `streamlit run app.py` against committed sample artifacts, plus pinned dependencies (and optionally a `Dockerfile`) so anyone can reproduce it. An optional public demo can be hosted on a free CPU tier (see `TRD.md` → Deployment), since the dashboard serves precomputed outputs.
-- **Reproducibility:** fixed seeds, documented configs, checkpoints saved off-device.
+Required gates:
 
-## Risk Mitigation
+- Same frozen chips, vector ground truth, coordinate frame and coverage as the strict chip APLS evaluator.
+- Paired uncertainty interval excludes zero in favor of the candidate.
+- Absolute fraction of achievable routing improves materially, not only the relative ranking.
+- New geography/sensor evidence is kept separate from the repeatedly consulted Mumbai development benchmark.
+- A deploy candidate must also pass runtime, checkpoint compatibility, provenance and rollback checks.
 
-The plan bakes in the key mitigations (full detail in `RiskRegister.md`):
-- **Walking skeleton early** so integration risk surfaces in Sprint 0, not at the end.
-- **Graph/analysis on OSM first** so that workstream never waits on segmentation.
-- **Pretrained models + fine-tuning only** (no training from scratch) to fit the compute budget.
-- **Cloud-first training** (Colab/Kaggle) so the build runs on any machine and never waits on local GPU setup; local GPUs are an optional speed-up.
-- **Frequent checkpointing** so a laptop thermal shutdown loses ≤ 1 epoch.
-- **Fallback MVP:** if segmentation underperforms, demonstrate Phases II–IV directly on an OSM-derived graph — the graph-theoretic resilience analysis (the most novel part) still shines.
+### F9 — UI/UX overhaul
+
+The overhaul happens after architecture and model outputs settle. It may reorganize presentation and interaction but must retain the pure-Python Streamlit/Folium constraint and all working analysis capabilities.
+
+Required gates:
+
+- Browser-verified desktop and narrow-screen flows.
+- Keyboard-accessible alternatives for map-only interactions.
+- Clear separation of sample exploration, uploaded-image jobs, method/evidence and exports.
+- No regression in job recovery, map state, scenario correctness or production dependency smoke.
+- Updated `Design.md` and `UserJourney.md` in the same PR.
+
+### O1/X1 — Operational closeout
+
+O1 applies and verifies the immutable release on the live services. X1 captures the final approved sample and upload flows only after O1 and F9 are complete.
+
+## Release and branch policy
+
+- Each task uses a branch from current remote `dev` and a focused PR back to `dev`.
+- `main` is a human-controlled stage gate; agents never target or merge it.
+- Application production uses an approved immutable tag or commit, not moving `dev`.
+- Model releases include checkpoint checksum, architecture metadata, threshold, evaluation evidence and compatibility notes.
+
+## Definition of “better”
+
+- **Documentation:** shorter, current, non-duplicative and verifiably correct.
+- **Code:** easier to follow with equal behavior; performance claims require measurements.
+- **Model:** common-unit routing improves with paired evidence and no hidden frame/data leakage.
+- **UI:** task completion and comprehension improve in real browser flows, not only in screenshots.
+- **Operations:** the exact approved ref is live, health-checked and recoverable.

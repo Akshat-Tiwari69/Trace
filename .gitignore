@@ -11,7 +11,7 @@ data/finetune/*
 data/finetune_rural/*
 models/*
 
-# local GPU env + caches (kept off C:, never committed)
+# local GPU environments and caches (machine-local, never committed)
 .venv-gpu/
 .pip-cache/
 .tmp/
