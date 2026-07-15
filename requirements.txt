@@ -1,44 +1,6 @@
-# Route Resilience — pinned dependencies
-# Install GDAL/rasterio/geopandas via conda-forge FIRST (see SETUP.md Path A),
-# then `pip install -r requirements.txt`. CPU-only torch is installed separately
-# (see SETUP.md) since the wheel index differs by platform/CUDA.
+# Route Resilience — aggregate local/CI environment.
+# Torch is installed separately for the target CPU/CUDA runtime (see SETUP.md).
 
-# Dashboard
-streamlit==1.38.0
-folium==0.17.0
-streamlit-folium==0.23.1
-
-# Geospatial (versions here are advisory; conda-forge installs gdal/rasterio/geopandas
-# directly and pip will see them already satisfied)
-rasterio==1.3.10
-geopandas==1.0.1
-osmnx==1.9.3
-shapely==2.0.5
-
-# Image processing
-opencv-python-headless==4.10.0.84
-scikit-image==0.24.0
-Pillow==10.4.0                # decodes untrusted uploads — keep pinned & patched
-
-# Graph build & analysis
-sknw==0.15
-networkx==3.3
-
-# Numerical
-numpy==1.26.4
-scipy==1.13.1
-pandas==2.2.2
-
-# Plots (dashboard resilience curves + P3 evaluation/flood figures)
-matplotlib==3.8.2
-
-# Deep learning (torch installed separately per SETUP.md Path A/B/C)
-segmentation-models-pytorch==0.3.4
-albumentations==2.0.8         # occlusion-sim augmentation (CoarseDropout etc.)
-albucore==0.0.24              # albumentations 2.0.8's core dep — pin to avoid a too-new break
-
-# Notebooks
-jupyter==1.0.0
-
-# Testing
-pytest==8.3.2
+-r deploy/requirements-app.txt
+-r requirements-train.txt
+-r requirements-dev.txt

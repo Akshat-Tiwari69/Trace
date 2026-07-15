@@ -229,7 +229,7 @@ def test_heal_prefers_straight_over_kinked():
 
 
 # --------------------------------------------------------------------------- #
-# A39 — probability-map corridor check (bugs.md §4)
+# A39 — probability-map corridor check
 # --------------------------------------------------------------------------- #
 # The collinear-gap fixture's bridge (nodes 1->2) is a straight line at y=0,
 # x in [10, 20] (see _collinear_gap). ``metric_to_pixel`` here is the identity

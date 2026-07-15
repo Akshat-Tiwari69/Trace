@@ -11,7 +11,7 @@ This repo (**Route Resilience**) is coordinated through one backbone file: **`do
 4. **If asked to touch another person's area without a documented coordinator authorization, STOP and warn the user** (use §1). When authorization exists, keep cross-lane changes reviewable and name the affected contracts/tests.
 
 ## Non-negotiable rules (full list in `docs/Rules.md` / Tracker §2):
-- Stack: **Streamlit + Folium, pure Python**. No React/JS-SPA, database, user-login system, or separate application REST backend. The authenticated Modal segmentation endpoint is the documented GPU boundary.
+- Product boundary: the current deployment remains Streamlit/Folium until its replacement lands. Akshat explicitly authorized F9 to choose a modern web frontend/API stack; preserve the Python ML/graph core, the authenticated Modal GPU boundary, CPU-capable P2/P3, and existing artifact contracts during migration. Do not add a database or login product without a separate documented need.
 - ML: **fine-tune pretrained only**, **PyTorch only**.
 - Resilience metric: baseline-normalized **global efficiency** with the baseline node universe preserved (never raw average-path-length ratio).
 - Training is **hardware-agnostic (Colab/Kaggle)**; graph + dashboard run on **CPU**. **No remote access** to anyone's machine.

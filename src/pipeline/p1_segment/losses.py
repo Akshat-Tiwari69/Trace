@@ -142,7 +142,7 @@ def lovasz_hinge(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 def sdt_weight_map(target: torch.Tensor, w0: float = 4.0, sigma_px: float = 6.0) -> torch.Tensor:
     """Per-pixel BCE weight from the signed distance to the nearest road pixel.
 
-    bugs.md §3: a cheap topology-loss proxy — pushes the BCE gradient to focus
+    A41: a cheap topology-loss proxy — pushes the BCE gradient to focus
     near road boundaries/thin structures instead of clDice's expensive
     differentiable skeletonization. ``weight = 1 + w0 * exp(-d^2 / 2*sigma^2)``
     where ``d`` is the Euclidean distance (in pixels) from each background pixel
@@ -169,7 +169,7 @@ class ComboLoss(nn.Module):
     Lovász directly optimises IoU, Dice handles class imbalance, BCE stabilises
     early training, and clDice rewards connectivity. ``cldice_weight`` is a plain
     attribute so a training loop can ramp it on in the final epochs. ``sdt_bce_weight``
-    (bugs.md §3) is a cheaper topology proxy: when > 0 it is used directly as ``w0``
+    (A41) is a cheaper topology proxy: when > 0 it is used directly as ``w0``
     in ``sdt_weight_map`` and the BCE term becomes an SDT-weighted BCE; all other
     terms are left exactly as configured — it does NOT zero Lovász/clDice (A9's
     postmortem confound).

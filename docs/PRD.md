@@ -36,8 +36,8 @@ Route Resilience addresses both layers:
 | **FR7** | Preserve parallel edges, geometry, inferred-edge flags, confidence when available and positive metric lengths | Shipped |
 | **FR8** | Rank critical nodes and expose articulation points/bridges | Shipped |
 | **FR9** | Simulate single-junction and area/compound failures | Shipped, including drawn flood polygons and keyboard alternatives |
-| **FR10** | Report a finite, bounded Resilience Index based on baseline-normalized global efficiency | Single-scenario path shipped; multi-step curve denominator fix is queued in A45 |
-| **FR11** | Show rerouting, criticality, resilience curves and rankings in a Streamlit/Folium dashboard | Shipped |
+| **FR10** | Report a finite, bounded Resilience Index based on baseline-normalized global efficiency | Shipped for single-scenario and multi-step paths; failed nodes preserve the baseline universe |
+| **FR11** | Show rerouting, criticality, resilience curves and rankings in an accessible map-led web experience | Shipped in the current Streamlit/Folium baseline; full replacement authorized for F9 |
 | **FR12** | Export the current graph and a concise visual summary | Shipped as GeoJSON and PNG |
 | **FR13** | Evaluate routing/topology with a common-unit protocol and paired uncertainty | Shipped for v3.2 vs A18 research comparisons |
 
@@ -79,7 +79,7 @@ In scope:
 - Single-AOI research analysis from committed sample artifacts or one uploaded/local image.
 - Pretrained PyTorch model fine-tuning and graph-first research.
 - Classical CPU graph construction, healing, criticality and global-efficiency scenarios.
-- Public Streamlit/Folium demonstration on a single Oracle host with Modal P1.
+- Public map-led demonstration on a single Oracle host with Modal P1 (currently Streamlit/Folium; replacement approved for F9).
 - Reproducible files, evaluation and exports.
 
 Out of scope:
@@ -88,7 +88,7 @@ Out of scope:
 - Accounts, collaborative projects, permanent storage, database or multi-tenant platform.
 - Live traffic/GPS feeds and lane-level travel-time modeling.
 - National-scale serving or horizontally distributed queue workers.
-- JavaScript SPA/mobile rewrite in this release.
+- Native mobile application.
 - Final sensor/geographic claims before new held-out evidence exists.
 
 ## Next product gates
@@ -96,7 +96,7 @@ Out of scope:
 1. A44 documentation and evidence coherence.
 2. A45 code simplification/performance with preserved contracts.
 3. A46 graph-first absolute-routing improvement plus licensing/reproducibility resolution.
-4. F9 UI/UX overhaul on the stable architecture.
+4. F9 researched web-stack replacement on the stable domain architecture.
 5. O1 live deployment reconciliation and X1 final capture.
 
 The ordered execution plan lives in `Implementation.md`; live status lives only in `Tracker.md`.

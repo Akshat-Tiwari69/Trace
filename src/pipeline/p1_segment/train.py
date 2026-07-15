@@ -12,8 +12,6 @@ from typing import Callable
 import torch
 from torch.utils.data import DataLoader
 
-from src.pipeline.p1_segment.metrics import dice_score, iou_score
-
 
 def train_one_epoch(
     model: torch.nn.Module,
@@ -45,32 +43,15 @@ def train_one_epoch(
     return total / max(n, 1)
 
 
-@torch.no_grad()
+@torch.inference_mode()
 def evaluate(
     model: torch.nn.Module,
     loader: DataLoader,
     device: str = "cpu",
     threshold: float = 0.5,
-    reduction: str = "global",
 ) -> dict[str, float]:
-    """Evaluate IoU + Dice over a loader.
-
-    ``reduction="global"`` (default) accumulates intersection/union over the
-    **whole set** (paper-grade — unaffected by batch size or per-tile road
-    coverage); ``"batch_mean"`` averages per-batch scores (legacy behaviour).
-    """
+    """Evaluate global IoU + Dice over a loader, independent of batch size."""
     model.eval()
-    if reduction == "batch_mean":
-        iou_sum, dice_sum, n = 0.0, 0.0, 0
-        for images, masks in loader:
-            images, masks = images.to(device), masks.to(device)
-            preds = (torch.sigmoid(model(images)) >= threshold).float()
-            iou_sum += iou_score(preds, masks)
-            dice_sum += dice_score(preds, masks)
-            n += 1
-        n = max(n, 1)
-        return {"iou": iou_sum / n, "dice": dice_sum / n}
-
     # Accumulate on-device; convert once at the end (avoids a GPU sync per batch).
     inter = pred_sum = target_sum = 0
     for images, masks in loader:

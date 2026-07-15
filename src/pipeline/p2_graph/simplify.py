@@ -1,8 +1,8 @@
 """Graph simplification — prune stubs + collapse degree-2 chains (task S3).
 
 A skeleton→sknw graph (even after healing) carries two kinds of redundancy that
-bloat the network without adding routing information (``docs/Research.md`` →
-Roadmap §B; the same idea as OSMnx's ``simplify_graph``):
+bloat the network without adding routing information (the same idea as OSMnx's
+``simplify_graph``):
 
 * **Degree-2 interstitial nodes** — points that merely sit *along* a road, not at
   a junction. They can be merged away: ``A—B—C`` with ``B`` degree-2 becomes a

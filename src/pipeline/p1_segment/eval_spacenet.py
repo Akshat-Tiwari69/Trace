@@ -76,7 +76,7 @@ def split_heldout_chips(
     """Split the frozen held-out chips into a threshold-SELECTION and REPORT half.
 
     Tuning the deploy threshold on the same chips used for the reported number is
-    the classic "optimise on the test set" bias (bugs.md §3): the winning IoU is
+    the classic A17 "optimise on the test set" bias: the winning IoU is
     inflated by having picked the operating point on that very data. This carves
     the *already-frozen* held-out set into two disjoint halves — select the
     threshold on ``selection``, report the final number on ``report`` — without
@@ -243,7 +243,7 @@ def threshold_sweep(
 
     Reports each model's best threshold + its IoU there, plus the IoU at a shared
     0.44 for continuity — so the "best model" verdict doesn't hinge on a threshold
-    picked for the older v1/A4 checkpoints (A21 / Codex audit #3). ``chips``
+    picked for the older v1/A4 checkpoints (A21). ``chips``
     restricts the sweep to a subset of the held-out chips (used by
     :func:`honest_threshold_eval` to select the threshold on a held-out half that
     is disjoint from the reporting half)."""
@@ -301,7 +301,7 @@ def honest_threshold_eval(
     selection_frac: float = 0.5, seed: int = 23,
 ) -> dict:
     """Bias-free threshold + report: select the operating point on one held-out
-    half, report IoU on the disjoint other half (bugs.md §3).
+    half, report IoU on the disjoint other half (A17).
 
     Fixes the "threshold tuned on the reported set" leak: the sweep runs only on
     the SELECTION chips, and the final IoU is measured on the REPORT chips the
@@ -348,7 +348,7 @@ def main() -> None:
     p.add_argument("--device", default="cpu")
     p.add_argument("--sweep", action="store_true", help="A21: sweep thresholds 0.20-0.70 and report each model's best")
     p.add_argument("--honest-threshold", action="store_true",
-                   help="bugs.md §3: select the threshold on one held-out half, report IoU on the disjoint other half")
+                   help="A17: select the threshold on one held-out half, report IoU on the disjoint other half")
     p.add_argument("--grayscale", action="store_true",
                    help="desaturate input (Cartosat-3 PAN proxy) to measure the sensor-modality gap")
     p.add_argument("--out", default="data/sample/spacenet_mumbai_eval.json")

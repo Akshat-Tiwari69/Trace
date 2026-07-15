@@ -1,4 +1,4 @@
-"""Contract tests on the committed ``data/sample`` artifacts (bugs.md §4/§5F).
+"""Contract tests on the committed ``data/sample`` artifacts (Tracker §4).
 
 The deployed dashboard's ONLY data source is the committed sample. Runtime
 validation in ``app.py`` surfaces a broken sample to *users*; these tests catch
@@ -9,16 +9,49 @@ edge fails here before it ships.
 from __future__ import annotations
 
 import csv
+import hashlib
+import json
 from pathlib import Path
 
 from src.pipeline.p2_graph.graph_io import graph_to_geojson, load_geojson_graph, save_geojson
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SAMPLE_GEOJSON = REPO_ROOT / "data" / "sample" / "panaji_demo_graph.geojson"
-SAMPLE_CRITICALITY = REPO_ROOT / "data" / "sample" / "panaji_demo_criticality.csv"
+SAMPLE_DIR = REPO_ROOT / "data" / "sample"
+SAMPLE_GEOJSON = SAMPLE_DIR / "panaji_demo_graph.geojson"
+SAMPLE_CRITICALITY = SAMPLE_DIR / "panaji_demo_criticality.csv"
+EVIDENCE_MANIFEST = SAMPLE_DIR / "panaji_demo_evidence_manifest.json"
 
-# The §4 dashboard contract (mirrors app.py's runtime checks).
+# The Tracker §4 dashboard contract (mirrors app.py's runtime checks).
 REQUIRED_CRITICALITY_COLUMNS = {"node_id", "betweenness", "rank", "is_critical", "x", "y"}
+
+
+def _artifact_sha256(path: Path) -> str:
+    data = path.read_bytes()
+    if path.suffix in {".csv", ".geojson", ".json"}:
+        data = data.replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
+
+
+def test_sample_evidence_manifest_matches_committed_artifacts():
+    manifest = json.loads(EVIDENCE_MANIFEST.read_text(encoding="utf-8"))
+    source = manifest["input"]
+    artifacts = manifest["artifacts"]
+
+    assert source == {
+        "path": SAMPLE_GEOJSON.name,
+        "sha256": _artifact_sha256(SAMPLE_GEOJSON),
+    }
+    assert set(artifacts) == {
+        "panaji_demo_flood_curve.png",
+        "panaji_demo_graph_eval.json",
+        "panaji_demo_percolation.json",
+        "panaji_demo_resilience.csv",
+        "panaji_demo_resilience_curve.png",
+    }
+    for name, record in artifacts.items():
+        expected_sha256 = _artifact_sha256(SAMPLE_DIR / name)
+        assert record["sha256"] == expected_sha256
+        assert record["command"].startswith("python -m src.pipeline.")
 
 
 def test_sample_graph_loads_and_meets_contract():

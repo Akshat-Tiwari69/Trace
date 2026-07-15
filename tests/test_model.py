@@ -183,6 +183,31 @@ def test_predict_large_prob_batch_size_invariant():
     assert np.array_equal(one >= 0.5, many >= 0.5)   # binarised road mask unchanged
 
 
+def test_predict_large_prob_bounds_in_flight_tiles_to_batch_size(monkeypatch):
+    import src.pipeline.p1_segment.model as model_module
+
+    image = np.zeros((3, 10, 3), dtype=np.uint8)
+    image[:, :, 0] = np.arange(10, dtype=np.uint8)
+    calls, tile_starts = [], []
+
+    def fake_batch(model, images, device="cpu", tta=False, batch_size=None):
+        calls.append((len(images), tta, batch_size))
+        tile_starts.extend(int(tile[0, 0, 0]) for tile in images)
+        assert all(tile.shape == (4, 4, 3) and not tile[3].any() for tile in images)
+        return [np.full((4, 4), tile[0, 0, 0] / 255, np.float32) for tile in images]
+
+    monkeypatch.setattr(model_module, "predict_prob_batch", fake_batch)
+    probability = model_module.predict_large_prob(
+        None, image, tile_size=4, stride=3, batch_size=2, tta=True
+    )
+
+    assert calls == [(2, True, 2), (1, True, 2)]
+    assert tile_starts == [0, 3, 6]
+    assert probability.shape == image.shape[:2]
+    with pytest.raises(ValueError, match="batch_size must be positive"):
+        model_module.predict_large_prob(None, image, tile_size=4, batch_size=0)
+
+
 def test_save_checkpoint_persists_and_omits_train_state(tmp_path):
     # A19: checkpoints can carry optimizer/epoch state for --resume, and stay
     # backward-compatible (no train_state key) when it isn't passed.
@@ -201,7 +226,7 @@ def test_save_checkpoint_persists_and_omits_train_state(tmp_path):
 
 
 def test_load_checkpoint_blob_takes_safe_path_for_own_checkpoints(tmp_path):
-    # A37 bugs.md §6 P2: checkpoints written by save_checkpoint() hold only
+    # A37: checkpoints written by save_checkpoint() hold only
     # tensors + JSON-safe primitives, so they must load under weights_only=True
     # with no fallback warning.
     model = build_model(encoder_weights=None)

@@ -1,0 +1,8 @@
+*.sh text eol=lf
+*.service text eol=lf
+*.timer text eol=lf
+data/sample/panaji_demo_evidence_manifest.json text eol=lf
+data/sample/panaji_demo_graph.geojson text eol=lf
+data/sample/panaji_demo_graph_eval.json text eol=lf
+data/sample/panaji_demo_percolation.json text eol=lf
+data/sample/panaji_demo_resilience.csv text eol=lf

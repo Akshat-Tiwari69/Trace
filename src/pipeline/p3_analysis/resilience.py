@@ -98,10 +98,9 @@ def resilience_index(
     network is still in one piece). Operates on a copy — the input is untouched.
 
     ``k`` forwards to :func:`global_efficiency` for k-sample estimation on large
-    graphs. Note both efficiencies are then estimates from *independently* sampled
-    sources (the baseline and perturbed graphs have different node sets), so the
-    ratio is approximate and noisier; use ``k=None`` (default) for an exact,
-    directly-comparable ratio.
+    graphs. Failed nodes remain in the baseline node universe, so the deterministic
+    node order and seed select the same sources for both efficiencies. A supplied
+    ``baseline_efficiency`` must use the same sampling protocol.
     """
     base = (
         global_efficiency(graph, weight, k=k)
@@ -195,9 +194,9 @@ def ablation_curve(
     ``docs/Evaluation.md``. ``k`` forwards to :func:`global_efficiency` for
     k-sample estimation, so the per-step recompute stays cheap on large graphs.
 
-    When ``k`` is set, the source nodes are sampled **once** from the original
-    node set and reused at every removal step (dropping removed nodes), so the
-    per-step estimates are directly comparable rather than resampling noise.
+    Failed nodes remain as isolates, preserving the baseline node universe and
+    normaliser at every step. When ``k`` is set, the source nodes are sampled
+    **once** and reused unchanged, so the estimates remain directly comparable.
     Raises ``ValueError`` when the baseline efficiency is 0 (degenerate graph) —
     a silent 0.0 would be indistinguishable from "network destroyed".
     """
@@ -214,9 +213,7 @@ def ablation_curve(
     def _efficiency(g: "nx.Graph") -> float:
         if fixed_sources is None:
             return global_efficiency(g, weight, k=k)
-        return global_efficiency(
-            g, weight, sources=[s for s in fixed_sources if g.has_node(s)]
-        )
+        return global_efficiency(g, weight, sources=fixed_sources)
 
     base = _efficiency(graph)
     if base <= 0:
@@ -244,7 +241,12 @@ def ablation_curve(
     curve = [AblationPoint(0, base, 1.0 if base > 0 else 0.0, _largest_cc_fraction(graph))]
     working = graph.copy()
     for i, node in enumerate(sequence, start=1):
-        working.remove_node(node)
+        incident = (
+            working.edges(node, keys=True)
+            if working.is_multigraph()
+            else working.edges(node)
+        )
+        working.remove_edges_from(list(incident))
         eff = _efficiency(working)
         curve.append(
             AblationPoint(

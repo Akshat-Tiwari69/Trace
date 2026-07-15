@@ -84,7 +84,7 @@ def mask_to_skeleton_with_distance(mask01: np.ndarray) -> tuple[np.ndarray, np.n
     Returns ``(skeleton, distance)`` where ``distance[r, c]`` is the Euclidean
     distance from a road pixel to the nearest background pixel — i.e. the road
     **half-width** at the centreline. Sampled along each edge in
-    :func:`skeleton_to_graph` to populate ``width_m`` (bugs.md §4).
+    :func:`skeleton_to_graph` to populate the optional ``width_m`` edge attribute.
 
     We keep ``skeletonize`` for the topology (the validated S3/S4/S5 graph) and
     take the distance transform of the mask separately, rather than swapping to
@@ -148,8 +148,8 @@ def skeleton_to_graph(
     skel = np.asarray(skeleton).astype(np.uint16)
     # multi=True so parallel skeleton branches (loops, dual carriageways) survive
     # as keyed edges instead of being silently dropped inside sknw. The returned
-    # MultiGraph preserves all of them (bugs.md §4 — the headline resilience
-    # metric was biased by the old keep-shortest collapse).
+    # MultiGraph preserves all of them; the old keep-shortest collapse biased
+    # the headline resilience metric (A37).
     raw = sknw.build_sknw(skel, multi=True)
 
     # Pixel size (metres) for width: square-pixel UTM grid, else the GSD.
@@ -221,7 +221,7 @@ def skeleton_to_graph(
 def build_metric_to_pixel(transform: "Affine | None" = None, resolution_m: float = 1.0):
     """Return the exact inverse of :func:`skeleton_to_graph`'s ``pixel_to_metric``.
 
-    Healing's probability-map corridor check (bugs.md §4) needs to look up the
+    Healing's probability-map corridor check needs to look up the
     P1 prob raster at points sampled along a candidate bridge's metric geometry —
     this maps a bridge point ``(x, y)`` back to the ``(row, col)`` pixel it came
     from, using the same ``transform``/``resolution_m`` the graph was built with.

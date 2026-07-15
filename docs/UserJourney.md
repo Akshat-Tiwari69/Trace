@@ -1,4 +1,4 @@
-# UserJourney.md — Current User Flows
+# UserJourney.md — Current Flows and F9 Parity Contract
 
 ## Users and entry points
 
@@ -100,9 +100,9 @@ Pipeline CSV/JSON evidence remains available to technical users but is not prese
 | Map tile provider unavailable | Keep controls/evidence usable and explain the basemap failure |
 | No nodes in a drawn area | Say that the selection affected no junctions |
 
-## F9 improvement goals
+## F9 replacement goals
 
-The later UI/UX overhaul must improve this journey without changing its semantics:
+The authorized web-stack replacement must improve this journey without changing its semantics:
 
 - clearer first-run choice between sample exploration and own imagery;
 - less tab/sub-tab hunting for the primary scenario flow;
@@ -110,3 +110,4 @@ The later UI/UX overhaul must improve this journey without changing its semantic
 - keyboard and screen-reader alternatives for every essential map action;
 - more legible job progress, evidence, privacy and uncertainty;
 - browser-tested completion of Flows A–E.
+- measured bundle/payload/Web-Vitals/map-interaction budgets before the Streamlit baseline is removed.

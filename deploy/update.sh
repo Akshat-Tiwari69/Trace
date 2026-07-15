@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Auto-deploy: if the deploy target on origin moved, hard-sync to it, refresh
-# deps, restart, health-check, and roll back on failure.
+# Resolve an approved immutable target, hard-sync to it, refresh dependencies,
+# restart, health-check, and roll back on failure.
 # Run by roadresilience-update.timer (user systemd) every ~2 min. No sudo needed.
 set -euo pipefail
 
@@ -11,14 +11,21 @@ cd "$REPO"
 # from ~/.config/roadresilience/deploy.env; refusing an empty value prevents an
 # accidental return to continuously shipping the checked-out dev branch.
 DEPLOY_REF="${DEPLOY_REF:-}"
-if [ -z "$DEPLOY_REF" ]; then
-    echo "DEPLOY_REF is required (use an immutable release tag, e.g. v1.2.3)" >&2
+if [[ "$DEPLOY_REF" =~ ^[0-9a-fA-F]{40}$ ]]; then
+    TARGET_REF="${DEPLOY_REF}^{commit}"
+elif [[ "$DEPLOY_REF" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+    TARGET_REF="refs/tags/${DEPLOY_REF}^{commit}"
+else
+    echo "DEPLOY_REF must be an immutable application release tag or full 40-character commit SHA" >&2
     exit 2
 fi
 
-git fetch --quiet origin
+git fetch --quiet --tags origin
 
-TARGET="$(git rev-parse "origin/$DEPLOY_REF" 2>/dev/null || git rev-parse "$DEPLOY_REF")"
+if ! TARGET="$(git rev-parse --verify "$TARGET_REF" 2>/dev/null)"; then
+    echo "DEPLOY_REF does not resolve to a commit: $DEPLOY_REF" >&2
+    exit 2
+fi
 LOCAL="$(git rev-parse @)"
 
 if [ "$LOCAL" = "$TARGET" ]; then

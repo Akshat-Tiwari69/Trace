@@ -119,7 +119,7 @@ def compare_checkpoints_apls(
     threshold: float | None = None, device: str = "cpu", seed: int = 7,
     gsd_m: float = GSD_M,
 ) -> dict:
-    """Paired-bootstrap comparison of two checkpoints' APLS (bugs.md §3).
+    """A17 paired-bootstrap comparison of two checkpoints' APLS.
 
     Scores both checkpoints on the **same** held-out tiles, pairs them by tile,
     and returns a 95% CI on the APLS delta (b − a). A promotion is only justified
@@ -166,7 +166,7 @@ def main() -> None:
     p.add_argument("--gsd-m", type=float, default=GSD_M,
                    help="ground sampling distance of the evaluation masks in metres/pixel")
     p.add_argument("--compare", action="store_true",
-                   help="bugs.md §3: paired-bootstrap CI on the APLS delta between the first two checkpoints")
+                   help="A17 paired-bootstrap CI on the APLS delta between the first two checkpoints")
     p.add_argument("--out", default="data/sample/spacenet_mumbai_apls.json")
     args = p.parse_args()
 

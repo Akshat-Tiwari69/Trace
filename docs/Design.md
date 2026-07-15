@@ -1,6 +1,6 @@
-# Design.md — Dashboard Baseline and F9 Brief
+# Design.md — Current Baseline and Web-Replacement Brief
 
-> The product remains Streamlit + Folium. This document records the current visual/interaction contract and the goals for the later F9 overhaul; it does not propose a different frontend stack.
+> Streamlit/Folium describes the current deployed baseline, not the target. On 2026-07-14 Akshat authorized a full web-stack replacement. F9 will preserve the behavioral contract below while replacing the presentation, then rewrite this document with the selected stack, visual system and measured budgets.
 
 ## Current information architecture
 
@@ -81,16 +81,17 @@ F9 adds browser-level checks for focus order, keyboard completion, narrow layout
 ## Performance design
 
 - Cache stable graph/data transformations by an input fingerprint.
-- Render edges as vectorized GeoJSON rather than one Python Folium object per edge.
-- Avoid rebuilding static map layers and exports on unrelated reruns.
+- Keep graph payloads compact and URL-loaded; graduate to vector tiles only when representative data justifies the extra operational surface.
+- Route-split and dynamically load the interactive map so editorial/sample orientation does not pay its JavaScript cost before needed.
+- Prefer GPU-backed vector rendering and a small number of data-driven layers over one DOM/Python object per feature.
 - Keep map payload/AOI bounded; use measured graph sampling/caching for large analysis.
-- Preserve the production-only dependency smoke when components are extracted during A45/F9.
+- Set and verify Core Web Vitals, bundle, payload and map-interaction budgets before visual polish is accepted.
 
 ## F9 overhaul objectives
 
 1. Make “Explore the sample” and “Analyze your imagery” unmistakable first-run paths.
 2. Reduce nested navigation and keep the primary scenario story visible.
-3. Create a consistent component/layout system outside the 1,900-line `app.py` without introducing a framework rewrite.
+3. Replace the 1,900-line Streamlit presentation with a coherent web component/layout system while keeping Python domain logic behind a thin API.
 4. Improve evidence hierarchy: result first, supporting metrics second, method/limitations always reachable.
 5. Make upload privacy, cold-start/queue status and uncertainty understandable before submission.
 6. Preserve every working analysis/export/recovery behavior through browser and unit tests.
@@ -102,4 +103,5 @@ F9 adds browser-level checks for focus order, keyboard completion, narrow layout
 - Keyboard-only scenario and area-selection completion.
 - No regression in existing app/unit/import/production-upload tests.
 - Updated design tokens/components and removal of superseded CSS/UI paths.
+- Recorded production bundle/payload sizes, Core Web Vitals and representative map frame/interaction measurements.
 - Tracker log with the user problems solved, not only aesthetic changes.

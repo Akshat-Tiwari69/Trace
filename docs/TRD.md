@@ -66,7 +66,7 @@ The deployed checkpoint remains `a4-roadseg-v3.2`/`road_pan.pt` until a candidat
 ### P3 — analysis
 
 - Node betweenness, articulation points, graph bridges and optional percolation/demand variants.
-- Baseline-normalized global-efficiency Resilience Index under targeted, random, flood or custom failures. The single-scenario path preserves the baseline node universe; multi-step curve normalization has a known A45 defect and its old evidence must not be treated as final.
+- Baseline-normalized global-efficiency Resilience Index under targeted, random, flood or custom failures. Single-scenario and multi-step paths preserve the baseline node universe; current curve evidence was regenerated after the A45 correction.
 - Exact or fixed-source sampled paths for larger graphs.
 - Analyzed GraphML/GeoJSON and tabular criticality/resilience outputs.
 
@@ -88,7 +88,7 @@ APLS/topology utilities are housed in the P3 analysis package for reuse, but nor
 | Modal P1 | Pinned Python/PyTorch GPU image | Modal, scales to zero |
 | P2/P3/P4 | CPU, production dependency subset | Oracle Ubuntu ARM user service |
 | TLS/reverse proxy | Caddy | Public 80/443; Streamlit should bind loopback 8501 |
-| Updates | systemd timer + `deploy/update.sh` | Configured `DEPLOY_REF`, health check and rollback; branch-name rejection is still A45-C5 |
+| Updates | systemd timer + `deploy/update.sh` | Immutable application tag/full SHA only, health check and rollback |
 
 The repository proves deployment code and CI smokes; `Tracker.md` O1 is required to prove the current live box matches it.
 
@@ -120,12 +120,12 @@ The repository proves deployment code and CI smokes; `Tracker.md` O1 is required
 | P1 inference | Remote GPU for hosted uploads; CPU remains supported for local batch use but is slower |
 | Large imagery | Tiled/blended inference; source images still have explicit size limits |
 
-Performance claims must be measured on representative inputs. A45 owns the next profiling/refactor pass.
+Performance claims must be measured on representative inputs. A45 measurements and their limits are recorded in `Evaluation.md`; future changes must retain the same before/after discipline.
 
 ## Deliberate non-goals
 
 - Database, accounts, multi-tenant storage or horizontal queue workers.
-- JavaScript SPA/WebGL rewrite in this release.
+- Native mobile application.
 - Live traffic/GPS integration.
 - National-scale graph serving.
 - Claiming final geographic/sensor generalization from the Mumbai development benchmark.

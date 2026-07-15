@@ -244,12 +244,12 @@ def sample_prob_along_polyline(
     prob: np.ndarray,
     metric_to_pixel: Callable[[float, float], tuple[float, float]],
 ) -> float:
-    """Mean P1 road probability sampled at each point of a metric polyline (§4/§9.3).
+    """Mean P1 road probability sampled along a metric polyline.
 
     Shared by two callers that both want "how much does the model believe a
-    road is here": the healing corridor check (candidate bridge curves, §4) and
+    road is here": the healing corridor check on candidate bridge curves and
     the per-edge ``confidence`` attribute build_graph computes for every final
-    edge's own geometry (§9.3, including bridged edges — their corridor support
+    edge's own geometry (including bridged edges — their corridor support
     *is* their confidence). A frontage road and the highway it parallels can
     both be broken by the same occlusion, and distance/angle/crossing alone
     can't tell which pair is the *real* gap; an occluded real road still
@@ -281,7 +281,7 @@ def _filter_crossing_bridges(
     """Drop candidate bridges whose straight segment crosses an existing road.
 
     Distance + angle alone can't tell a real gap from a frontage road running
-    parallel to a highway (bugs.md §4): a bridge that jumps *over* an unrelated
+    parallel to a highway: a bridge that jumps *over* an unrelated
     road link is a phantom route that inflates measured resilience. We reject any
     candidate whose straight u→v segment ``crosses`` an existing edge it is not
     incident to (touching at a shared endpoint is fine). An STRtree keeps this
@@ -340,8 +340,8 @@ class HealReport:
     largest_cc_before: int
     largest_cc_after: int
     bridges_added: int
-    bridges_rejected_crossing: int = 0  # candidates dropped for crossing a real road (§4)
-    bridges_rejected_corridor: int = 0  # candidates dropped for low P1 prob-map support (§4)
+    bridges_rejected_crossing: int = 0  # candidates crossing a real road
+    bridges_rejected_corridor: int = 0  # candidates with low P1 probability support
 
     @property
     def connectivity_ratio(self) -> float:
@@ -371,13 +371,13 @@ def heal_graph(
     drawn geometry is smoothed — so connectivity is identical to a straight-bridge
     heal.
 
-    ``prob`` (P1's probability raster, bugs.md §4) + ``metric_to_pixel`` enable a
+    ``prob`` (P1's probability raster) + ``metric_to_pixel`` enable a
     **corridor check**: a candidate bridge is rejected if the mean P1 probability
     sampled at ``corridor_samples`` points along its curve is below
     ``min_corridor_support``, catching the frontage-road-vs-highway false bridge
     the distance/angle/crossing guards can't. ``prob is None`` (the default —
     mask-only input, e.g. an upload or an old artifact) runs **exactly** the
-    pre-§4 behaviour: no corridor check at all, regardless of
+    mask-only behaviour: no corridor check at all, regardless of
     ``min_corridor_support``.
     """
     import networkx as nx
@@ -388,7 +388,7 @@ def heal_graph(
     bridges = find_candidate_bridges(
         graph, comps_before, gap_max_m, angle_max_deg, angle_penalty_factor
     )
-    # Reject bridges that would jump over an existing road (false-bridge guard, §4).
+    # Reject bridges that would jump over an existing road.
     bridges, rejected_crossing = _filter_crossing_bridges(graph, bridges)
     bridges.sort(key=lambda b: b.score)
 
@@ -414,7 +414,7 @@ def heal_graph(
             support = sample_prob_along_polyline(curve, prob, metric_to_pixel)
             if support < min_corridor_support:
                 rejected_corridor += 1
-                continue  # low prob-map support — likely the wrong pair (§4)
+                continue  # low probability support — likely the wrong pair
         uf.union(b.u, b.v)
         graph.add_edge(
             b.u,

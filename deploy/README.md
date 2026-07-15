@@ -21,7 +21,12 @@ There is currently no GitHub **application Release** containing the July hardeni
 - a new immutable application tag created from reviewed `dev`, or
 - a reviewed full 40-character commit SHA.
 
-Call it `APP_REF` below. Do **not** use `dev`, `main` or another moving branch. The current `update.sh` still resolves branch names, so branch rejection is tracked as A45-C5; operator discipline is required until that guard lands.
+Call it `APP_REF` below. `deploy/update.sh` accepts only:
+
+- an approved application release tag shaped `vN.N` or `vN.N.N`, resolved strictly under `refs/tags/`; or
+- an exact full 40-character hexadecimal commit SHA.
+
+It rejects moving branches such as `dev`/`main`, abbreviated SHAs, model-asset tags such as `a4-roadseg-v3.2`, malformed refs and values that do not resolve to a commit.
 
 ## One-time Oracle bring-up
 
@@ -145,7 +150,7 @@ An external failed connection to `:8501` is encouraging but does not prove both 
 
 ## Updates and rollback
 
-`roadresilience-update.timer` starts `roadresilience-update.service` about every two minutes. The script resolves `DEPLOY_REF`, hard-resets the read-only checkout only when the target changes, refreshes dependencies, restarts Streamlit and polls its health endpoint. On failure it restores the previous commit and dependencies.
+`roadresilience-update.timer` starts `roadresilience-update.service` about every two minutes. The script validates and resolves the immutable `DEPLOY_REF`, hard-resets the read-only checkout only when the target changes, refreshes dependencies, restarts Streamlit and polls its health endpoint. On failure it restores the previous commit and dependencies.
 
 To trigger a manual update, start the service so systemd loads `DEPLOY_REF`:
 

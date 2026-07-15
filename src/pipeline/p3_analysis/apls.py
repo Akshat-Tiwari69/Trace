@@ -28,6 +28,7 @@ import argparse
 import json
 import math
 import random
+from bisect import bisect_left
 from pathlib import Path
 
 import numpy as np
@@ -88,13 +89,13 @@ def _densify(graph, interval_m: float):
 
         def point_at_fraction(fraction: float) -> tuple[float, float]:
             target = fraction * cumulative[-1]
-            for j in range(1, len(cumulative)):
-                if cumulative[j] >= target:
-                    span = cumulative[j] - cumulative[j - 1]
-                    local = 0.0 if span == 0 else (target - cumulative[j - 1]) / span
-                    p, q = geometry[j - 1], geometry[j]
-                    return p[0] + (q[0] - p[0]) * local, p[1] + (q[1] - p[1]) * local
-            return geometry[-1][0], geometry[-1][1]
+            j = min(len(cumulative) - 1, max(1, bisect_left(cumulative, target)))
+            if j == 0:
+                return geometry[0][0], geometry[0][1]
+            span = cumulative[j] - cumulative[j - 1]
+            local = 0.0 if span == 0 else (target - cumulative[j - 1]) / span
+            p, q = geometry[j - 1], geometry[j]
+            return p[0] + (q[0] - p[0]) * local, p[1] + (q[1] - p[1]) * local
 
         seg, prev = length / k, u
         for i in range(1, k):
@@ -138,30 +139,31 @@ def _apls_oneway(src, dst, snap: dict, n_samples: int, weight: str, seed: int) -
         print("[apls] WARNING: <2 nodes in one direction — scoring 0.0")
         return 0.0
     rng = random.Random(seed)
-    contribs: list[float] = []
+    pairs = [rng.sample(nodes, 2) for _ in range(n_samples)]
+    src_groups: dict = {}
+    for index, (a, b) in enumerate(pairs):
+        src_groups.setdefault(a, []).append((index, b))
+
+    contribs = [0.0] * n_samples
+    dst_groups: dict = {}
     skipped = 0
-    for _ in range(n_samples):
-        a, b = rng.sample(nodes, 2)
-        try:
-            length_src = nx.shortest_path_length(src, a, b, weight=weight)
-        except nx.NetworkXNoPath:
-            skipped += 1
-            contribs.append(0.0)  # fragmentation is a routing failure
-            continue
-        if length_src <= 0:
-            skipped += 1
-            contribs.append(0.0)
-            continue
-        a2, b2 = snap.get(a), snap.get(b)
-        if a2 is None or b2 is None or a2 == b2:
-            contribs.append(0.0)  # no correspondence → worst score
-            continue
-        try:
-            length_dst = nx.shortest_path_length(dst, a2, b2, weight=weight)
-        except nx.NetworkXNoPath:
-            contribs.append(0.0)
-            continue
-        contribs.append(max(0.0, 1.0 - abs(length_src - length_dst) / length_src))
+    for a, targets in src_groups.items():
+        lengths = nx.single_source_dijkstra_path_length(src, a, weight=weight)
+        for index, b in targets:
+            length_src = lengths.get(b)
+            if length_src is None or length_src <= 0:
+                skipped += 1
+                continue
+            a2, b2 = snap.get(a), snap.get(b)
+            if a2 is not None and b2 is not None and a2 != b2:
+                dst_groups.setdefault(a2, []).append((index, b2, length_src))
+
+    for a2, targets in dst_groups.items():
+        lengths = nx.single_source_dijkstra_path_length(dst, a2, weight=weight)
+        for index, b2, length_src in targets:
+            length_dst = lengths.get(b2)
+            if length_dst is not None:
+                contribs[index] = max(0.0, 1.0 - abs(length_src - length_dst) / length_src)
     if skipped > n_samples // 2:
         print(f"[apls] WARNING: {skipped}/{n_samples} sampled pairs unreachable — "
               "effective sample is small; treat this score with caution")

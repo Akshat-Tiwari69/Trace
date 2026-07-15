@@ -3,8 +3,8 @@
   "graph": {
     "nodes": 364,
     "edges": 500,
-    "bridged_edges": 5,
-    "bridged_pct": 1.0
+    "bridged_edges": 4,
+    "bridged_pct": 0.8
   },
   "simplify": {
     "nodes_before": 605,
@@ -54,11 +54,11 @@
   "resilience": {
     "baseline_global_efficiency": 0.001507,
     "ablation_steps": 40,
-    "targeted_ri_end": 0.5653,
-    "random_ri_end": 0.7746,
-    "targeted_minus_random_gap": 0.2093,
-    "targeted_mean_ri": 0.7518,
-    "random_mean_ri": 0.9025,
+    "targeted_ri_end": 0.4477,
+    "random_ri_end": 0.6135,
+    "targeted_minus_random_gap": 0.1658,
+    "targeted_mean_ri": 0.68,
+    "random_mean_ri": 0.8105,
     "targeted_degrades_faster": true
   }
 }

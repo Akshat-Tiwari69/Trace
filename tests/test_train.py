@@ -30,3 +30,12 @@ def test_evaluate_reports_iou_and_dice():
     assert set(scores) == {"iou", "dice"}
     assert 0.0 <= scores["iou"] <= 1.0
     assert 0.0 <= scores["dice"] <= 1.0
+
+
+def test_evaluate_uses_inference_mode():
+    class InferenceOnly(torch.nn.Module):
+        def forward(self, images):
+            assert torch.is_inference_mode_enabled()
+            return torch.zeros(images.shape[0], 1, images.shape[2], images.shape[3])
+
+    evaluate(InferenceOnly(), _tiny_loader(), device="cpu")

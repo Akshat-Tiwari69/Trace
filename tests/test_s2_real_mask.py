@@ -36,7 +36,7 @@ def test_s2_runs_on_pixelspace_predicted_mask(tmp_path):
     processed = tmp_path / "processed"
     cfg = GraphConfig(aoi=aoi, interim_dir=interim, processed_dir=processed, resolution_m=1.0)
 
-    # Write the stand-in predicted mask at the §4 contract path (no manifest).
+    # Write the stand-in predicted mask at the Tracker §4 contract path (no manifest).
     save_binary_png(_synthetic_predicted_mask(), cfg.mask_path)
     assert not cfg.manifest_path.exists()  # pixel-space: no georeferencing
 

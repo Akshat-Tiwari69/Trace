@@ -1,4 +1,4 @@
-"""Golden + statistical tests for the model-promotion harness (bugs.md §3).
+"""Golden + statistical tests for the A17 model-promotion harness.
 
 The promotion evals (`eval_spacenet`, `apls_eval`) have historically been run by
 hand and transcribed into the Tracker — a regression *in the harness itself*

@@ -1,4 +1,4 @@
-"""Tests for the filesystem job queue (bugs.md §5H/§9.4).
+"""Tests for the crash-safe filesystem FIFO job queue.
 
 Drives `_process_one()` directly rather than spinning up ensure_worker's
 background thread — deterministic, no sleeping. Each test monkeypatches

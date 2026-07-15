@@ -117,6 +117,17 @@ def test_resilience_index_uses_baseline_node_universe():
     assert 0.0 <= result["resilience_index"] <= 1.0
 
 
+def test_sampled_resilience_uses_comparable_sources():
+    g = nx.path_graph(12)
+    nx.set_edge_attributes(g, 1.0, "length_m")
+    base = global_efficiency(g, k=4)
+
+    result = resilience_index(g, [6], baseline_efficiency=base, k=4)
+
+    assert result["baseline_efficiency"] == base
+    assert 0.0 <= result["resilience_index"] <= 1.0
+
+
 def test_targeted_removal_hurts_more_than_peripheral():
     """Removing a high-betweenness chokepoint must drop resilience further than
     removing a peripheral node — the betweenness sanity check."""
@@ -153,8 +164,24 @@ def test_sampled_ablation_reuses_fixed_sources(monkeypatch):
     nx.set_edge_attributes(g, 1.0, "length_m")
     ablation_curve(g, sequence=[7, 6], k=3, seed=9)
     assert calls[0] is not None
-    assert set(calls[1]).issubset(calls[0])
-    assert set(calls[2]).issubset(calls[1])
+    assert calls[0] == calls[1] == calls[2]
+
+
+def test_ablation_curve_preserves_baseline_node_universe():
+    g = nx.Graph()
+    g.add_edge(0, 1, length_m=1.0)
+    g.add_nodes_from([2, 3])
+
+    curve = ablation_curve(g, sequence=[3, 2, 0])
+
+    assert [point.resilience_index for point in curve] == pytest.approx(
+        [1.0, 1.0, 1.0, 0.0]
+    )
+    assert all(math.isfinite(point.resilience_index) for point in curve)
+    assert all(0.0 <= point.resilience_index <= 1.0 for point in curve)
+    assert [point.largest_cc_fraction for point in curve] == pytest.approx(
+        [0.5, 0.5, 0.5, 0.25]
+    )
 
 
 def test_targeted_ablation_requires_betweenness():

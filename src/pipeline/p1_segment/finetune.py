@@ -1,6 +1,6 @@
 """A6 step 3: fine-tune the released checkpoint on domain-matched pairs.
 
-Starts from `a4-roadseg-v1` (never from scratch, per §2) and adapts it to the
+Starts from `a4-roadseg-v1` (never from scratch, per Tracker §2) and adapts it to the
 Indian OSM pairs from `build_finetune_data.py` (`data/finetune/`) **without
 forgetting DeepGlobe**. The first naive run (full-model fine-tune, small anchor)
 adapted to India (+0.13 IoU) but regressed DeepGlobe (−0.07) — fine-tuning the
@@ -44,9 +44,9 @@ from src.pipeline.p1_segment.dataset import (
 )
 from src.pipeline.p1_segment.losses import ComboLoss
 from src.pipeline.p1_segment.model import (
+    VALIDATION_INFERENCE_PROTOCOL,
     load_checkpoint,
     load_train_state,
-    predict_large,
     predict_large_prob,
     save_checkpoint,
 )
@@ -70,10 +70,10 @@ class FineTuneConfig:
     epochs: int = 12
     finetune_oversample: int = 3
     crops_per_image: int = 1
-    foreground_bias: float = 0.0         # bugs.md §3: P(road-containing crop); 0 = uniform
+    foreground_bias: float = 0.0         # P(road-containing crop); 0 = uniform
     occlusion: bool | str = True         # "heavy" = stronger occlusion aug (A8)
     cldice_weight: float = 0.1           # soft-clDice weight; 0 avoids its 8 GB skeletonize OOM (A12)
-    sdt_bce_weight: float = 0.0          # bugs.md §3: SDT-weighted BCE topology proxy; 0 = off
+    sdt_bce_weight: float = 0.0          # A41 SDT-weighted BCE topology proxy; 0 = off
     num_workers: int = 0                 # DataLoader workers (0 = safe on low RAM, per A12)
     val_fraction: float = 0.15
     deepglobe_iou_tolerance: float = 0.005   # max allowed DeepGlobe drop vs v1
@@ -133,9 +133,9 @@ def _read_val_pair_cached(sat_path: str, mask_path: str, sat_mtime: float, mask_
     The held-out val images are identical every epoch, yet ``_iou_on_pairs`` runs
     ~3× per epoch — this turns 3×epochs disk re-reads/pair into a single read.
     Keyed on ``(path, mtime)`` so tiles regenerated at the same path are re-read
-    instead of served stale (an unbounded process-lifetime cache would silently
-    pin old arrays in a long-lived run — bugs.md §3), and bounded so a huge val
-    set can't grow memory without limit. Callers must treat the returned arrays
+    instead of served stale. It is bounded so a long-lived run cannot silently
+    pin old arrays or grow memory without limit on a huge validation set.
+    Callers must treat the returned arrays
     as read-only (they're shared)."""
     del sat_mtime, mask_mtime  # participate in the cache key only
     from src.pipeline.p1_segment.raster_io import imread_gray, imread_rgb
@@ -154,7 +154,7 @@ def _read_val_pair(sat_path: str, mask_path: str):
 
 @torch.no_grad()
 def _iou_scores_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False) -> list[float]:
-    """Per-tile IoU via full-image sliding prediction.
+    """Per-tile IoU from the Hann-blended probabilities used for calibration.
 
     ``grayscale=True`` decolorizes each image (3-channel grey) before predicting —
     a Cartosat-PAN proxy, so the fine-tune can watch the sensor-modality gap close
@@ -169,7 +169,8 @@ def _iou_scores_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool =
         img, gt = _read_val_pair(str(sat_path), str(mask_path))
         if grayscale:
             img = cv2.cvtColor(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
-        pred = predict_large(model, img, tile_size=tile_size, device=device, threshold=thr) > 0
+        probability = predict_large_prob(model, img, tile_size=tile_size, device=device)
+        pred = probability >= thr
         inter = np.logical_and(pred, gt).sum()
         union = np.logical_or(pred, gt).sum()
         scores.append(float(inter / max(union, 1)))
@@ -237,6 +238,11 @@ def finetune(cfg: FineTuneConfig) -> dict:
             "instead of allowing the release gate to pass open")
     resume_state = load_train_state(cfg.resume, map_location=cfg.device) if cfg.resume else None
     if resume_state:  # keep the v1 anchor (keep_floor) fixed — model here is already fine-tuned
+        if resume_state.get("validation_inference_protocol") != VALIDATION_INFERENCE_PROTOCOL:
+            raise ValueError(
+                "resume checkpoint uses an incompatible validation inference protocol; "
+                "restart from init"
+            )
         base_dg, base_ind = resume_state["v1_deepglobe"], resume_state["v1_indian"]
         if "v1_deepglobe_scores" not in resume_state:
             raise ValueError(
@@ -252,7 +258,8 @@ def finetune(cfg: FineTuneConfig) -> dict:
     frozen = cfg.encoder_lr_scale <= 0.0
     print(f"v1 baseline | DeepGlobe IoU {base_dg:.4f} | Indian IoU {base_ind:.4f} | "
           f"encoder {'FROZEN' if frozen else f'lr×{cfg.encoder_lr_scale}'} | "
-          f"train {len(train_pairs)} (anchor incl.) | val dg {len(deepglobe_val)}/ind {len(indian_val)}")
+          f"train {len(train_pairs)} (anchor incl.) | val dg {len(deepglobe_val)}/ind {len(indian_val)} | "
+          f"inference {VALIDATION_INFERENCE_PROTOCOL}")
 
     loader_generator = torch.Generator()
     loader_generator.manual_seed(cfg.seed)
@@ -335,6 +342,7 @@ def finetune(cfg: FineTuneConfig) -> dict:
                 "v1_indian_val_iou": float(base_ind), "v1_deepglobe_val_iou": float(base_dg),
                 "deepglobe_delta_ci_low": dg_ci.ci_low,
                 "deepglobe_delta_ci_high": dg_ci.ci_high,
+                "validation_inference_protocol": VALIDATION_INFERENCE_PROTOCOL,
                 "epoch": epoch,
             })
             print(f"  saved new best -> {out} (Indian {ind_iou:.4f}, DeepGlobe {dg_iou:.4f})")
@@ -342,11 +350,13 @@ def finetune(cfg: FineTuneConfig) -> dict:
         save_checkpoint(model, last, meta={
             **{k: meta.get(k) for k in ("encoder", "arch", "decoder_attention_type", "image_size")},
             "threshold": selected_thr, "epoch": epoch,
+            "validation_inference_protocol": VALIDATION_INFERENCE_PROTOCOL,
         }, train_state={
             "optimizer": optimizer.state_dict(), "scaler": scaler.state_dict(), "epoch": epoch,
             "best_score": best_score, "best_row": best_row, "history": history,
             "rng_state": torch.get_rng_state(), "v1_deepglobe": base_dg, "v1_indian": base_ind,
             "v1_deepglobe_scores": base_dg_scores,
+            "validation_inference_protocol": VALIDATION_INFERENCE_PROTOCOL,
             "loader_rng_state": loader_generator.get_state(),
             "python_rng_state": list(random.getstate()),
             "numpy_rng_state": {
@@ -368,7 +378,8 @@ def finetune(cfg: FineTuneConfig) -> dict:
               f"DeepGlobe {best_row['deepglobe_iou']:.4f} (v1 {base_dg:.4f}, "
               f"{best_row['deepglobe_iou']-base_dg:+.4f}) -> {out}")
     return {"best": best_row, "v1_deepglobe": base_dg, "v1_indian": base_ind, "history": history,
-            "n_train": len(train_pairs), "start_epoch": start_epoch, "resumed": bool(cfg.resume)}
+            "n_train": len(train_pairs), "start_epoch": start_epoch, "resumed": bool(cfg.resume),
+            "validation_inference_protocol": VALIDATION_INFERENCE_PROTOCOL}
 
 
 def main() -> None:
@@ -387,7 +398,7 @@ def main() -> None:
     p.add_argument("--oversample", type=int, default=3)
     p.add_argument("--crops-per-image", type=int, default=1)
     p.add_argument("--foreground-bias", type=float, default=0.0,
-                   help="probability a train crop must contain road pixels (bugs.md §3; 0 = uniform)")
+                   help="probability a train crop must contain road pixels (0 = uniform)")
     p.add_argument("--occlusion", choices=["standard", "heavy", "none"], default="standard",
                    help="occlusion augmentation strength (A8: 'heavy')")
     p.add_argument("--deepglobe-tol", type=float, default=0.005, help="max allowed DeepGlobe IoU drop vs v1")
@@ -397,7 +408,7 @@ def main() -> None:
     p.add_argument("--grayscale-p", type=float, default=0.0, help="A24: random desaturation for Cartosat-PAN robustness")
     p.add_argument("--cldice-weight", type=float, default=0.1, help="0 avoids the 8 GB clDice OOM (A12)")
     p.add_argument("--sdt-bce", type=float, default=0.0,
-                   help="bugs.md §3: SDT-weighted BCE topology proxy strength (w0); 0 = off")
+                   help="A41 SDT-weighted BCE topology proxy strength (w0); 0 = off")
     p.add_argument("--num-workers", type=int, default=0)
     p.add_argument("--spacenet-corpus", default=None,
                    help="A23: SpaceNet dg_format dir — train on the NON-held-out chips (frozen A17 split)")

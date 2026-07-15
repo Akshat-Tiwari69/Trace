@@ -1,4 +1,4 @@
-"""Filesystem-backed FIFO job queue for upload analysis (bugs.md §5H/§9.4).
+"""Filesystem-backed FIFO job queue for A39 upload analysis.
 
 A37 (upload_analysis.py) added a `BoundedSemaphore(1)` as an interim guard: a
 second concurrent upload lost the race and got an outright "busy, retry"
@@ -337,7 +337,7 @@ def _pid_alive(pid: int | None) -> bool:
 
 
 def _recover_stale_running() -> int:
-    """Re-queue any job stuck in 'running' (bugs.md §5H crash-safety).
+    """Re-queue a job whose running-worker lease is stale.
 
     Recover only jobs whose owner process is no longer alive. Leases are useful
     crash metadata, but this worker does not renew them during long analyses;

@@ -6,7 +6,7 @@ Route Resilience converts satellite imagery into a routable road graph, flags in
 
 [Open the public dashboard](https://trace.tiwaribabu.in) · [Setup](SETUP.md) · [Evaluation](docs/Evaluation.md) · [Current work](docs/Tracker.md)
 
-> **Status (2026-07-13):** the P1→P4 product and public sample dashboard are working; repository CI is green. Mask model v3.2 is the intended production checkpoint. A18-LoRA validates a graph-first research direction but is not deploy-ready. The exact live Oracle/Modal ref/checksum still requires the O1 operator audit.
+> **Status (2026-07-14):** the P1→P4 product and public sample dashboard are working. A45 is complete: multi-step resilience is corrected, validation inference is unified, repeated logic is reduced and 318 tests pass. Mask model v3.2 remains the intended production checkpoint. A18-LoRA validates a graph-first research direction but is not deploy-ready. The exact live Oracle/Modal ref/checksum still requires the O1 operator audit.
 
 ## What it does
 
@@ -51,8 +51,9 @@ Do not compare those absolute chip scores to the legacy tile-mask APLS column ab
 - build-time healing: 8 → 3 components; five bridges added, four surviving final inferred edges
 - 79 articulation nodes / 92 structural bridges
 - APLS vs cached OSM truth: `0.5369`
+- 40-step targeted RI: mean `0.6800`, end `0.4477`; seeded-random mean `0.8105`, end `0.6135`
 
-Multi-step resilience-curve absolutes are temporarily withheld from headline use because A45 must fix a shrinking-node denominator in `ablation_curve()` and regenerate the curves. The single-scenario dashboard RI already preserves the baseline node universe.
+Multi-step failure now isolates failed nodes while preserving the baseline node universe, so RI remains comparable and bounded. The current graph, resilience, flood and percolation evidence is regenerated and fingerprinted in `data/sample/panaji_demo_evidence_manifest.json`; older curve artifacts are superseded.
 
 ## Quickstart — sample dashboard
 
@@ -125,9 +126,10 @@ docs/                      product, architecture, evidence, research and coordin
 tests/                     CPU/unit/contract/application tests
 ```
 
-## Non-negotiable design rules
+## Product boundaries
 
-- Streamlit + Folium, pure Python; no database, user-login product or JavaScript SPA in this release.
+- Streamlit/Folium is the current deployed presentation only. F9 is authorized to replace it with a performance-budgeted web frontend and thin Python API while keeping the Python domain pipeline and artifacts authoritative.
+- No database or user-login product without a separate demonstrated need.
 - PyTorch and pretrained fine-tuning only.
 - Resilience is based on global efficiency and must preserve the baseline node universe.
 - P2/P3/dashboard remain CPU-capable; training/hosted P1 may use GPU.
@@ -140,14 +142,14 @@ tests/                     CPU/unit/contract/application tests
 python -m pytest tests/ -q
 ```
 
-A44 baseline: **284 passed** locally; remote `dev` CI also runs dashboard import and a clean local mask-to-resilience contract smoke under production dependencies.
+A44 baseline: **284 passed** locally. Current A45 state: **318 passed** locally; remote `dev` CI also runs dashboard import and a clean local mask-to-resilience contract smoke under production dependencies.
 
 ## Current roadmap
 
-1. **A44:** reconcile documentation and evidence.
-2. **A45:** fix resilience/inference protocol correctness, simplify code and measure performance.
+1. **A44 (complete):** reconcile documentation and evidence.
+2. **A45 (complete):** fix resilience/inference protocol correctness, simplify code and measure performance.
 3. **A46:** improve graph-first absolute routing and resolve license/reproducibility/new-geography gates.
-4. **F9:** UI/UX overhaul after architecture/model outputs stabilize.
+4. **F9:** replace Streamlit/Folium with the researched high-design web experience after architecture/model outputs stabilize.
 5. **O1/X1:** immutable live rollout verification and final demo capture.
 
 See [Tracker.md](docs/Tracker.md) for status and [bugs.md](bugs.md) for the current issue ledger.

@@ -46,3 +46,29 @@ def test_evaluate_occlusion_recall_runs(tmp_path):
     assert 0.0 <= res["occlusion_recall"] <= 1.0
     assert 0.0 <= res["clean_iou"] <= 1.0
     assert res["n_pairs"] == 2
+
+
+def test_occlusion_evidence_uses_hann_blended_probabilities(tmp_path, monkeypatch):
+    import src.pipeline.p1_segment.occlusion_eval as eval_module
+
+    _write_pair(tmp_path, "p")
+    pair = (tmp_path / "p_sat.jpg", tmp_path / "p_mask.png")
+    calls = []
+
+    def blended(model, image, tile_size=512, device="cpu"):
+        calls.append((image.copy(), tile_size, device))
+        return np.full(image.shape[:2], 0.8, dtype=np.float32)
+
+    monkeypatch.setattr(eval_module, "predict_large_prob", blended, raising=False)
+    monkeypatch.setattr(
+        eval_module,
+        "predict_large",
+        lambda model, image, **kwargs: np.zeros(image.shape[:2], dtype=np.uint8),
+        raising=False,
+    )
+
+    result = evaluate_occlusion_recall(None, [pair], threshold=0.75, tile_size=64)
+
+    assert len(calls) == 2
+    assert result["clean_iou"] > 0
+    assert result["inference_protocol"] == "hann_blended_probability_v1"

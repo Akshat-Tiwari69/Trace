@@ -32,7 +32,7 @@ def nodes_in_polygon(graph, polygon: list) -> list[int]:
 
     Uses an STRtree to bbox-filter candidate nodes before the exact ``covers``
     test (same pattern as ``healing.py``'s edge-crossing rejection) — avoids an
-    O(V) ``contains``/``covers`` call per node at city scale (bugs.md §4)."""
+    O(V) ``contains``/``covers`` call per node at city scale."""
     from shapely.geometry import Point, Polygon
     from shapely.strtree import STRtree
 

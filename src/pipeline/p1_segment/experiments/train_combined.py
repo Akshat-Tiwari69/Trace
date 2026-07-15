@@ -3,7 +3,7 @@
 Trains the full A4 recipe on a **multi-dataset** corpus (DeepGlobe + Massachusetts
 + …) — the principled way to break the recipe plateau the A7–A9 fine-tunes hit.
 Unlike those fine-tunes, this trains from the **ImageNet-pretrained encoder**
-(per §2 — never random init) so clDice + heavy occlusion can help from epoch 0.
+(the project forbids random initialization) so clDice + heavy occlusion can help from epoch 0.
 
 Recipe: SegFormer MiT + SCSE U-Net, **EMA** weights (evaluated + saved),
 ComboLoss (BCE+Dice+Lovász+clDice), discriminative encoder/decoder LR, warmup +

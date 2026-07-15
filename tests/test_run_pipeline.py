@@ -1,4 +1,4 @@
-"""A5 walking-skeleton test: one tile flows P1→P2→P3→P4 (orchestration). CPU.
+"""CPU checks for the local P1-P4 orchestration and CLI contracts.
 
 P1 (the real model) is covered by test_model; here we inject a deterministic
 synthetic-mask segmenter so the P2→P3→P4 wiring is tested end-to-end without a
@@ -7,7 +7,14 @@ synthetic-mask segmenter so the P2→P3→P4 wiring is tested end-to-end without
 
 from __future__ import annotations
 
+import builtins
+from collections import Counter
+import hashlib
+import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import numpy as np
 
@@ -77,3 +84,161 @@ def test_pipeline_signature_invalidates_p1_on_config_change(tmp_path):
     assert changed["stages"][0]["ran"] is True
     assert unchanged["stages"][0]["ran"] is False
     assert unchanged["stages"][0]["reason"] == "signature-match"
+
+
+def test_cli_config_preserves_unspecified_values(tmp_path, monkeypatch):
+    from src.pipeline import run_pipeline
+
+    config_path = tmp_path / "pipeline.json"
+    config_path.write_text(json.dumps({
+        "aoi": "from-config",
+        "image": "config.png",
+        "checkpoint": "config.pt",
+        "resolution_m": 2.5,
+        "device": "cuda",
+        "tta": True,
+        "blend": False,
+        "postprocess": True,
+        "curve_steps": 7,
+    }))
+    captured = {}
+    monkeypatch.setattr(run_pipeline, "run", lambda *_args, **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(sys, "argv", ["run_pipeline", "--config", str(config_path)])
+
+    run_pipeline.main()
+
+    config = captured["config"]
+    assert (config.resolution_m, config.device, config.curve_steps) == (2.5, "cuda", 7)
+    assert (config.tta, config.blend, config.postprocess) == (True, False, True)
+
+
+def test_cli_explicit_flags_override_config(tmp_path, monkeypatch):
+    from src.pipeline import run_pipeline
+
+    config_path = tmp_path / "pipeline.json"
+    config_path.write_text(json.dumps({
+        "aoi": "from-config",
+        "image": "config.png",
+        "checkpoint": "config.pt",
+        "gap_max_m": 12.0,
+    }))
+    captured = {}
+    monkeypatch.setattr(run_pipeline, "run", lambda *_args, **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(sys, "argv", [
+        "run_pipeline", "--config", str(config_path),
+        "--aoi", "from-cli", "--image", "cli.png", "--checkpoint", "cli.pt",
+        "--resolution-m", "3.0", "--tile-size", "256", "--threshold", "0.6",
+        "--device", "cpu", "--curve-steps", "9", "--tta", "--no-blend",
+        "--postprocess", "--min-component-size", "20", "--pp-open-radius", "1",
+        "--pp-close-radius", "2", "--fill-holes", "30",
+        "--min-corridor-support", "0.4",
+    ])
+
+    run_pipeline.main()
+
+    config = captured["config"]
+    assert (config.aoi, config.image, config.checkpoint) == ("from-cli", "cli.png", "cli.pt")
+    assert (config.resolution_m, config.tile_size, config.threshold) == (3.0, 256, 0.6)
+    assert (config.device, config.curve_steps, config.tta, config.blend) == ("cpu", 9, True, False)
+    assert (config.postprocess, config.min_component_size) == (True, 20)
+    assert (config.pp_open_radius, config.pp_close_radius, config.fill_holes) == (1, 2, 30)
+    assert config.min_corridor_support == 0.4
+    assert config.gap_max_m == 12.0
+
+
+def test_cli_help_is_cp1252_safe_and_current():
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "cp1252"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "src.pipeline.run_pipeline", "--help"],
+        cwd=Path(__file__).parents[1], env=env, capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr.decode("cp1252")
+    assert "Run road segmentation, graph construction, and resilience analysis" in (
+        result.stdout.decode("cp1252")
+    )
+
+
+def test_run_hashes_unchanged_p1_inputs_once(tmp_path, monkeypatch):
+    import networkx as nx
+
+    from src.pipeline.p1_segment.provenance import build_provenance, write_provenance
+    from src.pipeline import run_pipeline
+
+    image = tmp_path / "image.bin"
+    checkpoint = tmp_path / "checkpoint.pt"
+    image.write_bytes(b"image" * 100)
+    checkpoint.write_bytes(b"checkpoint" * 100)
+    expected_checkpoint_sha = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    targets = {image.resolve(), checkpoint.resolve()}
+    scans = Counter()
+    path_open = Path.open
+    builtin_open = builtins.open
+
+    def count_path_open(path, mode="r", *args, **kwargs):
+        if Path(path).resolve() in targets and mode == "rb":
+            scans[Path(path).resolve()] += 1
+        return path_open(path, mode, *args, **kwargs)
+
+    def count_builtin_open(path, mode="r", *args, **kwargs):
+        if Path(path).resolve() in targets and mode == "rb":
+            scans[Path(path).resolve()] += 1
+        return builtin_open(path, mode, *args, **kwargs)
+
+    def fake_inference(image_path, checkpoint_path, aoi, interim_dir,
+                       checkpoint_sha256=None, threshold=None, **_kwargs):
+        mask = np.zeros((256, 256), np.uint8)
+        mask[64:192, 126:130] = 1
+        mask[126:130, 64:192] = 1
+        out = Path(interim_dir) / f"{aoi}_mask.png"
+        save_binary_png(mask, out)
+        provenance_kwargs = ({"checkpoint_sha256": checkpoint_sha256}
+                             if checkpoint_sha256 is not None else {})
+        record = build_provenance(
+            checkpoint_path, {"encoder": "test", "arch": "test"},
+            threshold if threshold is not None else 0.5, **provenance_kwargs,
+        )
+        write_provenance(Path(interim_dir) / aoi / "provenance.json", record)
+        return out, float(mask.mean())
+
+    monkeypatch.setattr(Path, "open", count_path_open)
+    monkeypatch.setattr(builtins, "open", count_builtin_open)
+    monkeypatch.setattr("src.pipeline.p1_segment.predict.run_inference", fake_inference)
+    monkeypatch.setattr(run_pipeline, "build_graph", lambda _cfg: None)
+    monkeypatch.setattr(run_pipeline, "analyze", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(run_pipeline, "_load_graph_for_summary", lambda _cfg: nx.path_graph(2))
+    monkeypatch.setattr(run_pipeline, "verify_dashboard_ready", lambda _cfg: {
+        "columns_match": True, "geojson_exists": True,
+    })
+
+    summary = run_pipeline.run(
+        image, checkpoint, "hash-once",
+        interim_dir=tmp_path / "interim", processed_dir=tmp_path / "processed",
+        curve_steps=2,
+    )
+
+    assert scans == Counter({image.resolve(): 1, checkpoint.resolve(): 1})
+    assert summary["provenance"]["model_sha256"] == expected_checkpoint_sha
+    manifest = json.loads((tmp_path / "interim/hash-once_mask.png.stage.json").read_text())
+    assert manifest["inputs"][1]["sha256"] == expected_checkpoint_sha
+
+
+def test_file_identity_cache_invalidates_on_stat_change(tmp_path):
+    from src.pipeline.run_pipeline import _file_identity
+
+    path = tmp_path / "artifact.bin"
+    path.write_bytes(b"first")
+    hashes = {}
+    first = _file_identity(path, hashes)
+
+    path.write_bytes(b"second-value")
+    second = _file_identity(path, hashes)
+    assert second["sha256"] != first["sha256"]
+
+    previous_mtime = path.stat().st_mtime_ns
+    path.write_bytes(b"same-length!")
+    os.utime(path, ns=(path.stat().st_atime_ns, previous_mtime + 1_000_000_000))
+    third = _file_identity(path, hashes)
+    assert third["sha256"] != second["sha256"]

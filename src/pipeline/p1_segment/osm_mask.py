@@ -226,7 +226,7 @@ def tile_array(
 # 5 · Small IO helpers
 # --------------------------------------------------------------------------- #
 def save_binary_png(mask01: np.ndarray, path: Path) -> None:
-    """Save a {0,1} mask as a PNG holding pixel values 0/1 (per §4 contract).
+    """Save a {0,1} mask as a PNG holding pixel values 0/1 (per Tracker §4).
 
     Atomic (A36): temp + ``os.replace`` so a crash mid-write can't leave a
     truncated mask at the contract path for P2 to consume.
@@ -246,7 +246,7 @@ def save_prob_png(prob: np.ndarray, path: Path) -> None:
     """Save a float [0,1] probability map as an 8-bit PNG (``round(prob*255)``).
 
     The blended inference path computes this per-pixel road probability then
-    used to discard it after thresholding — corridor-aware healing (bugs.md §4)
+    used to discard it after thresholding — A39 corridor-aware healing
     needs it to tell a sub-threshold-but-present occluded road from terrain with
     no road signal at all. 1/255 quantisation is fine for a mean-over-samples
     corridor check. Atomic (A36 pattern): temp + ``os.replace``.
