@@ -130,7 +130,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 |---|---|---|---|---|---|
 | **A44** | ✅ | Reconcile and simplify all documentation | Akshat/coordinator | — | Current docs agree with code/evidence, historical audit archived, sample graph/APLS evidence refreshed, links/JSON/mirrors checked, 284 tests green; PR opened into `dev` |
 | **A45** | ✅ | Repository-wide correctness, simplification and performance refactor | Coordinator across all lanes | A44 | Baseline-universe resilience, one probability inference protocol, evaluator labels, immutable deploy refs and CLI precedence corrected; duplicated/dead logic reduced; focused benchmarks improved; 318 tests green |
-| **A46** | ⏳ | Graph-first model improvement program | Akshat | A44; use A45 foundations where relevant | Reproducible/license-safe run contract; existing-checkpoint APLS selection and threshold/radius calibration first; deterministic LoRA capacity study only if needed; 102-chip selection and one pre-registered 127-chip comparison; no promotion without material paired/absolute gains and deployment checks |
+| **A46** | 🔄 | Graph-first model improvement program | Akshat | A44; use A45 foundations where relevant | Reproducible/license-safe run contract; existing-checkpoint APLS selection and threshold/radius calibration first; deterministic LoRA capacity study only if needed; 102-chip selection and one pre-registered 127-chip comparison; no promotion without material paired/absolute gains and deployment checks |
 | **O1** | ⏳ | Close production operator checklist | Akshat | approved release ref | Modal/app redeployed from an immutable ref; port 8501 closed; service/Caddy/journald config installed; live upload smoke passes; rate limiting decision recorded |
 | **F9** | 🔒 | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; bundle/payload/Web-Vitals/map budgets pass; old presentation removed |
 | **X1** | 🔒 | Final backup demo capture | All | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
@@ -205,6 +205,12 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-07-15 (Akshat/coordinator — A46 and full-lane verification started)**
+
+- Akshat reconfirmed authorization across every lane, explicitly including P2/P3, and authorized focused workflow merges through the complete UI/UX replacement.
+- Froze a disjoint 102-chip A46 selection manifest and pre-registered the candidate-vs-LoRA floors before selection: paired raw APLS gain `>=0.02`, positive paired CI, and normalized APLS `>=0.25`. The evaluator now supports explicit manifests, incumbent comparison, per-chip routing/fragmentation/runtime evidence and local run provenance; the 127-chip comparison remains closed until a candidate is registered.
+- A full P2/P3 audit is running before F9 so the new interface cannot present invalid topology or resilience results. Confirmed P2 blockers include transitive junction consolidation over hundreds of metres, dropped closed-loop roads, and incomplete coordinate/artifact validation; each requires a regression and regenerated evidence before UI parity is accepted.
 
 **2026-07-15 (Akshat/coordinator — A45 PR follow-up)**
 

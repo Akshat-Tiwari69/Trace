@@ -26,15 +26,21 @@ then both outputs map into the common 400px frame:
     ``<a18-pred-dir>/graph/mumbai_{chip}.p`` -- adj-dict ``{(r,c): [(r,c), ...]}``
     in raster (row,col), no flip.
 
-Gate mode (``--strict``, both models present) FAILS unless every scorable GT chip
-has BOTH scores -- a missing A18 prediction on a hard chip must count against A18,
-not silently drop out of the paired bootstrap (the selection bias that would
-inflate a promotion delta). requested/scorable/missing lists are always reported.
+Gate mode (``--strict``) compares the candidate with both v3.2 and the LoRA r=4
+incumbent.  It fails unless every scorable GT chip has all three scores, the paired
+candidate-minus-incumbent CI is positive, raw mean APLS improves by at least 0.02,
+and normalized APLS reaches 0.25.  A missing prediction on a hard chip must count
+against the candidate, not silently drop out of the paired bootstrap.
 
     python -m src.pipeline.p1_segment.chip_apls_eval --self-check --n-chips 3
+    python -m src.pipeline.p1_segment.chip_apls_eval \
+        --candidates-json .tmp/a46_candidates.json \
+        --chip-manifest data/sample/a46_selection_chips.json \
+        --chip-key validation --out .tmp/a46_selection.json
     python -m src.pipeline.p1_segment.chip_apls_eval --strict \
-        --v32 models/road_pan.pt --a18-pred-dir .tmp/a43_samroad/infer_out \
-        --n-chips 80 --n-samples 600 --out .tmp/a18_vs_v32_chip_apls.json
+        --v32 models/road_pan.pt --incumbent-pred-dir .tmp/a18_lora_reference \
+        --a18-pred-dir .tmp/a46_candidate --n-samples 600 \
+        --out .tmp/a46_registered_comparison.json
 
 ASCII-only prints (Windows redirected stdout is cp1252 -- bit A38/A39). Mandatory
 __main__ guard (Windows subprocess/DataLoader safety).
@@ -46,6 +52,7 @@ import json
 import math
 import pickle
 import random
+import time
 from pathlib import Path
 
 import numpy as np
@@ -61,6 +68,11 @@ IMAGE_SIZE = 400   # 400px common frame -- must match the A18 converter/dataset
 NATIVE_PX = 1300   # native SN5 PS-RGB chip size
 V32_SCALE = 0.6    # native 1300 -> 780px (~0.5m, v3.2's deployed GSD)
 GATE_N_SAMPLES = 600   # apls sample count for a gate-grade score
+# Pre-registered A46 candidate-vs-incumbent metric floors.  The incumbent LoRA
+# r=4 reaches 0.1808 of its GT-self ceiling; a deployable research candidate must
+# make a visible step beyond that result, not merely win a noisy relative test.
+MIN_MATERIAL_APLS_DELTA = 0.02
+MIN_NORMALIZED_APLS = 0.25
 
 
 def _native_coord_to_frame(value: float) -> int:
@@ -73,6 +85,44 @@ def _write_report(path: Path | str, report: dict) -> None:
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2))
+
+
+def _load_chip_ids(manifest: Path | str, key: str, n_chips: int | None,
+                   seed: int) -> list[str]:
+    """Read an explicit frozen chip list without silently dropping inputs.
+
+    Selection manifests use ``validation`` while the historical comparison file
+    uses ``test_chips``.  Sampling is deterministic and the returned IDs are
+    naturally sorted so report ordering is stable across platforms.
+    """
+    data = json.loads(Path(manifest).read_text())
+    if key not in data or not isinstance(data[key], list):
+        raise ValueError(f"chip manifest must contain a list at key {key!r}")
+    chips = list(dict.fromkeys(str(chip) for chip in data[key]))
+    if n_chips and n_chips < len(chips):
+        chips = random.Random(seed).sample(chips, n_chips)
+    return sorted(chips, key=lambda x: int(x.replace("chip", "").replace("mumbai_", "")))
+
+
+def _graph_diagnostics(graph) -> dict:
+    """Exact fragmentation and size diagnostics for one undirected road graph."""
+    import networkx as nx
+
+    n = graph.number_of_nodes()
+    components = list(nx.connected_components(graph)) if n else []
+    component_sizes = [len(nodes) for nodes in components]
+    reachable_pairs = sum(size * (size - 1) for size in component_sizes)
+    total_pairs = n * (n - 1)
+    return {
+        "nodes": n,
+        "edges": graph.number_of_edges(),
+        "components": len(components),
+        "isolates": len(list(nx.isolates(graph))) if n else 0,
+        "largest_component_node_fraction": max(component_sizes, default=0) / n if n else 0.0,
+        "reachable_pair_fraction": reachable_pairs / total_pairs if total_pairs else 0.0,
+        "total_edge_length_m": float(sum(
+            float(data.get("length_m", 0.0)) for _, _, data in graph.edges(data=True))),
+    }
 
 
 def _chip_eff_xy(src) -> tuple[float, float]:
@@ -248,36 +298,128 @@ def a18_pred_path(a18_pred_dir: Path | str, chip: str) -> Path:
     return Path(a18_pred_dir) / "graph" / f"mumbai_{chip}.p"
 
 
+def _prediction_provenance(pred_dir: Path | None) -> dict | None:
+    """Read hashes/metadata emitted by the local-only A46 inference runner."""
+    if pred_dir is None:
+        return None
+    from src.pipeline.p1_segment.provenance import sha256_file
+
+    config = pred_dir / "config.yaml"
+    manifest = pred_dir / "run_manifest.json"
+    out = {
+        "directory": str(pred_dir),
+        "config_sha256": sha256_file(config) if config.is_file() else None,
+        "run_manifest_sha256": sha256_file(manifest) if manifest.is_file() else None,
+        "run_manifest": json.loads(manifest.read_text()) if manifest.is_file() else None,
+    }
+    return out
+
+
+def _chip_model_result(graph, score: float, ceiling: float,
+                       runtime_seconds: float, gt_length_m: float) -> dict:
+    diagnostics = _graph_diagnostics(graph)
+    diagnostics["edge_length_gt_fraction"] = (
+        diagnostics["total_edge_length_m"] / gt_length_m if gt_length_m > 0 else None)
+    return {
+        "apls": float(score),
+        "apls_normalized": min(1.0, float(score) / ceiling) if ceiling > 1e-6 else None,
+        "runtime_seconds": float(runtime_seconds),
+        "diagnostics": diagnostics,
+    }
+
+
+def _model_summary(scores: dict[str, float], ceilings: dict[str, float],
+                   per_chip: dict[str, dict], model_key: str) -> dict:
+    rows = [per_chip[chip][model_key] for chip in scores if model_key in per_chip[chip]]
+    diag_keys = (
+        "components", "isolates", "largest_component_node_fraction",
+        "reachable_pair_fraction", "total_edge_length_m", "edge_length_gt_fraction")
+    return {
+        "n_scored": len(scores),
+        "apls_mean": float(np.mean(list(scores.values()))) if scores else None,
+        "apls_norm_mean": _norm_mean(scores, ceilings),
+        "runtime_seconds": float(sum(row["runtime_seconds"] for row in rows)),
+        "diagnostics_mean": {
+            key: float(np.mean([
+                row["diagnostics"][key] for row in rows
+                if row["diagnostics"].get(key) is not None
+            ])) if any(row["diagnostics"].get(key) is not None for row in rows) else None
+            for key in diag_keys
+        },
+    }
+
+
+def _candidate_sort_key(summary: dict) -> tuple:
+    """APLS-first deterministic ranking with connectivity-only tiebreakers."""
+    diagnostics = summary.get("diagnostics_mean") or {}
+    return (
+        -float(summary.get("apls_mean") or 0.0),
+        -float(summary.get("apls_norm_mean") or 0.0),
+        -float(diagnostics.get("reachable_pair_fraction") or 0.0),
+        -float(diagnostics.get("largest_component_node_fraction") or 0.0),
+        float(diagnostics.get("components") or math.inf),
+        str(summary.get("label") or ""),
+    )
+
+
+def _promotion_gate(rep: dict,
+                    min_delta: float = MIN_MATERIAL_APLS_DELTA,
+                    min_normalized: float = MIN_NORMALIZED_APLS) -> dict:
+    """Evaluate the pre-registered A46 metric gate against the LoRA incumbent.
+
+    This is deliberately stronger than "candidate beats v3.2": it requires a
+    statistically supported paired win over the incumbent, a material raw APLS
+    step, and a useful absolute fraction of the GT-self ceiling.  Passing this
+    metric gate does not waive the separate license, reproducibility, sensor and
+    deployment checks recorded in ``docs/Evaluation.md``.
+    """
+    comparison = rep.get("compare_incumbent") or {}
+    normalized = (rep.get("a18") or {}).get("apls_norm_mean")
+    delta = comparison.get("delta_a18_minus_incumbent")
+    checks = {
+        "complete_coverage": bool((rep.get("coverage") or {}).get("complete")),
+        "paired_ci_win": (comparison.get("verdict") == "b wins" and
+                          bool(comparison.get("excludes_zero"))),
+        "material_raw_delta": delta is not None and float(delta) >= min_delta,
+        "absolute_normalized_apls": (normalized is not None and
+                                     float(normalized) >= min_normalized),
+    }
+    passed = all(checks.values())
+    return {
+        "passed": passed,
+        "verdict": "metric gate passed" if passed else "metric gate failed",
+        "thresholds": {
+            "min_candidate_minus_incumbent_apls": min_delta,
+            "min_candidate_normalized_apls": min_normalized,
+        },
+        "checks": checks,
+    }
+
+
 def strict_exit_code(rep: dict) -> int:
     """Process status for a STRICT promotion gate (call only in ``--strict`` mode).
 
     A gate's exit code must encode *promotion success*, not merely evaluation
     completion:
-      * 0 -- complete coverage AND A18 wins ("b wins": CI excludes 0, delta>0) -> promote
+      * 0 -- the full pre-registered A46 metric gate passes
       * 2 -- incomplete coverage (fail-loud; a missing artifact must not pass)
-      * 3 -- no promotion: regression ("a wins"), inconclusive, or missing comparison
-    Pure function so it is unit-testable against the real BootstrapCI.verdict strings.
+      * 3 -- no promotion: an effect floor, absolute floor, CI, or comparison fails
     """
     cmp = rep.get("compare")
-    if not cmp:
-        return 3
-    verdict = str(cmp.get("verdict", ""))
-    if verdict.startswith("GATE FAIL"):
+    if cmp and str(cmp.get("verdict", "")).startswith("GATE FAIL"):
         return 2
-    return 0 if verdict == "b wins" else 3
+    gate = rep.get("promotion_gate") or {}
+    return 0 if gate.get("passed") is True else 3
 
 
 def _heldout_chips(n_chips: int | None, seed: int) -> list[str]:
-    chips = json.loads(HELDOUT.read_text())["test_chips"]
-    chips = [c for c in chips
-             if (SRC_RGB / f"SN5_roads_train_AOI_8_Mumbai_PS-RGB_{c}.tif").exists()]
-    if n_chips and n_chips < len(chips):
-        chips = random.Random(seed).sample(chips, n_chips)
-    return sorted(chips, key=lambda x: int(x.replace("chip", "")))
+    return _load_chip_ids(HELDOUT, "test_chips", n_chips, seed)
 
 
 def coverage(scorable: list[str], v32_scores: dict, a18_scores: dict,
-             want_v32: bool, want_a18: bool) -> dict:
+             want_v32: bool, want_a18: bool,
+             incumbent_scores: dict | None = None,
+             want_incumbent: bool = False) -> dict:
     """Which scorable chips are missing a requested model's score.
 
     A chip is *scorable* if it has >=2 GT nodes. Gate coverage is complete only when
@@ -286,11 +428,15 @@ def coverage(scorable: list[str], v32_scores: dict, a18_scores: dict,
     """
     missing_v32 = [c for c in scorable if want_v32 and c not in v32_scores]
     missing_a18 = [c for c in scorable if want_a18 and c not in a18_scores]
+    incumbent_scores = incumbent_scores or {}
+    missing_incumbent = [
+        c for c in scorable if want_incumbent and c not in incumbent_scores]
     return {
         "n_scorable": len(scorable),
         "missing_v32": missing_v32,
         "missing_a18": missing_a18,
-        "complete": not missing_v32 and not missing_a18,
+        "missing_incumbent": missing_incumbent,
+        "complete": not missing_v32 and not missing_a18 and not missing_incumbent,
     }
 
 
@@ -336,7 +482,10 @@ def _paired_comparison(scorable: list[str], v32_scores: dict[str, float],
 def compare_on_chips(v32_ckpt: Path | None, a18_pred_dir: Path | None,
                      n_chips: int | None = None, threshold: float | None = None,
                      device: str = "cpu", seed: int = 7,
-                     n_samples: int = GATE_N_SAMPLES, strict: bool = False) -> dict:
+                     n_samples: int = GATE_N_SAMPLES, strict: bool = False,
+                     chip_manifest: Path | None = None,
+                     chip_key: str = "test_chips",
+                     incumbent_pred_dir: Path | None = None) -> dict:
     """Score v3.2 and/or A18 vs vector GT on common heldout chips.
 
     Returns per-chip scores, a coverage report, and -- when both models are present
@@ -344,7 +493,8 @@ def compare_on_chips(v32_ckpt: Path | None, a18_pred_dir: Path | None,
     APLS delta (A18 - v3.2). Promotion is only justified when coverage is complete
     AND the CI excludes zero.
     """
-    chips = _heldout_chips(n_chips, seed)
+    manifest = chip_manifest or HELDOUT
+    chips = _load_chip_ids(manifest, chip_key, n_chips, seed)
 
     model = thr = None
     if v32_ckpt is not None:
@@ -356,8 +506,11 @@ def compare_on_chips(v32_ckpt: Path | None, a18_pred_dir: Path | None,
     scorable: list[str] = []
     v32_scores: dict[str, float] = {}
     a18_scores: dict[str, float] = {}
+    incumbent_scores: dict[str, float] = {}
     ceilings: dict[str, float] = {}   # per-chip apls(GT,GT): the achievable max on this chip
+    per_chip: dict[str, dict] = {}
     for chip in chips:
+        gt_start = time.perf_counter()
         bands, transform, eff_x, eff_y = _read_chip(chip)
         gt_g = adj_to_apls_graph(_geojson_adj(chip, transform), eff_x, eff_y)
         if gt_g.number_of_nodes() < 2:
@@ -370,36 +523,97 @@ def compare_on_chips(v32_ckpt: Path | None, a18_pred_dir: Path | None,
         # absolute number (the raw paired delta already cancels it; normalized makes
         # the absolute score interpretable as "fraction of achievable routing").
         ceilings[chip] = float(chip_apls(gt_g, gt_g, n_samples))
+        gt_diagnostics = _graph_diagnostics(gt_g)
+        per_chip[chip] = {
+            "gt": {
+                "apls_self": ceilings[chip],
+                "runtime_seconds": float(time.perf_counter() - gt_start),
+                "diagnostics": gt_diagnostics,
+            }
+        }
+        gt_length = gt_diagnostics["total_edge_length_m"]
         if model is not None:
-            s = chip_apls(v32_chip_graph(model, bands, thr, eff_x, eff_y, device), gt_g, n_samples)
+            started = time.perf_counter()
+            pred_g = v32_chip_graph(model, bands, thr, eff_x, eff_y, device)
+            s = chip_apls(pred_g, gt_g, n_samples)
             if not math.isnan(s):
                 v32_scores[chip] = float(s)
+                per_chip[chip]["v32"] = _chip_model_result(
+                    pred_g, s, ceilings[chip], time.perf_counter() - started, gt_length)
+        if incumbent_pred_dir is not None:
+            started = time.perf_counter()
+            pp = a18_pred_path(incumbent_pred_dir, chip)
+            if pp.exists():
+                incumbent_g = adj_to_apls_graph(pickle.loads(pp.read_bytes()), eff_x, eff_y)
+                s = chip_apls(incumbent_g, gt_g, n_samples)
+                if not math.isnan(s):
+                    incumbent_scores[chip] = float(s)
+                    per_chip[chip]["incumbent"] = _chip_model_result(
+                        incumbent_g, s, ceilings[chip], time.perf_counter() - started,
+                        gt_length)
         if a18_pred_dir is not None:
+            started = time.perf_counter()
             pp = a18_pred_path(a18_pred_dir, chip)
             if pp.exists():   # file MISSING -> coverage gap; file present but empty -> real 0.0
                 adj = pickle.loads(pp.read_bytes())
-                s = chip_apls(adj_to_apls_graph(adj, eff_x, eff_y), gt_g, n_samples)
+                a18_g = adj_to_apls_graph(adj, eff_x, eff_y)
+                s = chip_apls(a18_g, gt_g, n_samples)
                 if not math.isnan(s):
                     a18_scores[chip] = float(s)
+                    per_chip[chip]["a18"] = _chip_model_result(
+                        a18_g, s, ceilings[chip], time.perf_counter() - started, gt_length)
 
     cov = coverage(scorable, v32_scores, a18_scores,
-                   want_v32=model is not None, want_a18=a18_pred_dir is not None)
+                   want_v32=model is not None, want_a18=a18_pred_dir is not None,
+                   incumbent_scores=incumbent_scores,
+                   want_incumbent=incumbent_pred_dir is not None)
+    from src.pipeline.p1_segment.provenance import sha256_file
+
+    v32_summary = _model_summary(v32_scores, ceilings, per_chip, "v32")
+    v32_summary.update({
+        "checkpoint": v32_ckpt.name if v32_ckpt else None,
+        "checkpoint_sha256": sha256_file(v32_ckpt) if v32_ckpt else None,
+        "threshold": thr,
+    })
+    incumbent_summary = _model_summary(
+        incumbent_scores, ceilings, per_chip, "incumbent")
+    incumbent_summary.update({
+        "pred_dir": str(incumbent_pred_dir) if incumbent_pred_dir else None,
+    })
+    a18_summary = _model_summary(a18_scores, ceilings, per_chip, "a18")
+    a18_summary.update({"pred_dir": str(a18_pred_dir) if a18_pred_dir else None})
     out: dict = {
-        "n_requested": len(chips), "coverage": cov, "n_samples": n_samples,
+        "protocol": {
+            "name": "a46-common-unit-chip-apls-v1",
+            "chip_manifest": str(manifest),
+            "chip_manifest_sha256": sha256_file(manifest),
+            "chip_key": chip_key,
+            "selection_seed": seed,
+            "apls_samples_per_chip": n_samples,
+            "coordinate_contract": "x=column,y=row",
+        },
+        "n_requested": len(chips), "requested_chips": chips,
+        "scorable_chips": scorable, "coverage": cov, "n_samples": n_samples,
         "gt_ceiling_mean": float(np.mean([ceilings[c] for c in scorable])) if scorable else None,
-        "v32": {"checkpoint": v32_ckpt.name if v32_ckpt else None, "n_scored": len(v32_scores),
-                "apls_mean": float(np.mean(list(v32_scores.values()))) if v32_scores else None,
-                "apls_norm_mean": _norm_mean(v32_scores, ceilings), "threshold": thr},
-        "a18": {"pred_dir": str(a18_pred_dir) if a18_pred_dir else None, "n_scored": len(a18_scores),
-                "apls_mean": float(np.mean(list(a18_scores.values()))) if a18_scores else None,
-                "apls_norm_mean": _norm_mean(a18_scores, ceilings)},
+        "v32": v32_summary,
+        "incumbent": incumbent_summary,
+        "a18": a18_summary,
+        "prediction_provenance": {
+            "incumbent": _prediction_provenance(incumbent_pred_dir),
+            "candidate": _prediction_provenance(a18_pred_dir),
+        },
+        "per_chip": per_chip,
     }
     if model is not None and a18_pred_dir is not None:
         if strict and not cov["complete"]:
             out["compare"] = {"verdict": "GATE FAIL: incomplete coverage",
-                              "missing_v32": cov["missing_v32"], "missing_a18": cov["missing_a18"]}
+                              "missing_v32": cov["missing_v32"],
+                              "missing_incumbent": cov["missing_incumbent"],
+                              "missing_a18": cov["missing_a18"]}
             print(f"  GATE FAIL: {len(cov['missing_v32'])} v32 + "
-                  f"{len(cov['missing_a18'])} a18 scorable chips missing", flush=True)
+                  f"{len(cov['missing_incumbent'])} incumbent + "
+                  f"{len(cov['missing_a18'])} candidate scorable chips missing",
+                  flush=True)
         else:
             # Raw paired delta stays the gate verdict (shared GT fragmentation
             # cancels in the pairing). Normalized paired delta is reported alongside
@@ -409,7 +623,117 @@ def compare_on_chips(v32_ckpt: Path | None, a18_pred_dir: Path | None,
             out["compare_normalized"] = _paired_comparison(
                 scorable, _normalized(v32_scores, ceilings),
                 _normalized(a18_scores, ceilings), cov["complete"])
+    if incumbent_pred_dir is not None and a18_pred_dir is not None:
+        comparison = _paired_comparison(
+            scorable, incumbent_scores, a18_scores, cov["complete"])
+        comparison["delta_a18_minus_incumbent"] = comparison.pop(
+            "delta_a18_minus_v32")
+        out["compare_incumbent"] = comparison
+        normalized_comparison = _paired_comparison(
+            scorable, _normalized(incumbent_scores, ceilings),
+            _normalized(a18_scores, ceilings), cov["complete"])
+        normalized_comparison["delta_a18_minus_incumbent"] = normalized_comparison.pop(
+            "delta_a18_minus_v32")
+        out["compare_incumbent_normalized"] = normalized_comparison
+    if strict:
+        out["promotion_gate"] = _promotion_gate(out)
     return out
+
+
+def select_prediction_dirs(candidates: dict[str, Path],
+                           chip_manifest: Path,
+                           chip_key: str = "validation",
+                           n_samples: int = GATE_N_SAMPLES,
+                           seed: int = 7) -> dict:
+    """Rank existing prediction directories on one frozen selection split.
+
+    GT conversion and GT-self ceilings are computed once per chip, while every
+    checkpoint is scored in the same process.  This avoids 27 repeated reference
+    passes and makes it difficult to accidentally mix selection and comparison
+    manifests.
+    """
+    from src.pipeline.p1_segment.provenance import sha256_file
+
+    chips = _load_chip_ids(chip_manifest, chip_key, None, seed)
+    labels = sorted(candidates)
+    scores: dict[str, dict[str, float]] = {label: {} for label in labels}
+    ceilings: dict[str, float] = {}
+    scorable: list[str] = []
+    per_chip: dict[str, dict] = {}
+
+    for chip in chips:
+        gt_started = time.perf_counter()
+        _, transform, eff_x, eff_y = _read_chip(chip)
+        gt_g = adj_to_apls_graph(_geojson_adj(chip, transform), eff_x, eff_y)
+        if gt_g.number_of_nodes() < 2:
+            continue
+        scorable.append(chip)
+        ceiling = float(chip_apls(gt_g, gt_g, n_samples))
+        ceilings[chip] = ceiling
+        gt_diagnostics = _graph_diagnostics(gt_g)
+        per_chip[chip] = {
+            "gt": {
+                "apls_self": ceiling,
+                "runtime_seconds": float(time.perf_counter() - gt_started),
+                "diagnostics": gt_diagnostics,
+            },
+            "candidates": {},
+        }
+        gt_length = gt_diagnostics["total_edge_length_m"]
+        for label in labels:
+            started = time.perf_counter()
+            pred_path = a18_pred_path(candidates[label], chip)
+            if not pred_path.is_file():
+                continue
+            graph = adj_to_apls_graph(
+                pickle.loads(pred_path.read_bytes()), eff_x, eff_y)
+            score = chip_apls(graph, gt_g, n_samples)
+            if math.isnan(score):
+                continue
+            scores[label][chip] = float(score)
+            per_chip[chip]["candidates"][label] = _chip_model_result(
+                graph, score, ceiling, time.perf_counter() - started, gt_length)
+
+    summaries: list[dict] = []
+    for label in labels:
+        flat = {
+            chip: {"candidate": row["candidates"][label]}
+            for chip, row in per_chip.items()
+            if label in row["candidates"]
+        }
+        summary = _model_summary(scores[label], ceilings, flat, "candidate")
+        summary.update({
+            "label": label,
+            "pred_dir": str(candidates[label]),
+            "missing_chips": [chip for chip in scorable if chip not in scores[label]],
+            "coverage_complete": all(chip in scores[label] for chip in scorable),
+            "provenance": _prediction_provenance(candidates[label]),
+        })
+        summaries.append(summary)
+
+    ranked = sorted(summaries, key=_candidate_sort_key)
+    for index, summary in enumerate(ranked, start=1):
+        summary["rank"] = index
+    return {
+        "protocol": {
+            "name": "a46-checkpoint-selection-v1",
+            "selection_only": True,
+            "chip_manifest": str(chip_manifest),
+            "chip_manifest_sha256": sha256_file(chip_manifest),
+            "chip_key": chip_key,
+            "selection_seed": seed,
+            "apls_samples_per_chip": n_samples,
+            "coordinate_contract": "x=column,y=row",
+        },
+        "n_requested": len(chips),
+        "requested_chips": chips,
+        "scorable_chips": scorable,
+        "gt_ceiling_mean": (
+            float(np.mean([ceilings[chip] for chip in scorable])) if scorable else None),
+        "candidates": ranked,
+        "selected_label": ranked[0]["label"] if ranked else None,
+        "per_chip": per_chip,
+    }
 
 
 def _self_check(n_chips: int, device: str) -> None:
@@ -466,6 +790,14 @@ def main() -> None:
     p.add_argument("--v32", default=None, help="v3.2 checkpoint (e.g. models/road_pan.pt)")
     p.add_argument("--a18-pred-dir", default=None,
                    help="inferencer output dir; reads <dir>/graph/mumbai_{chip}.p adj-dicts")
+    p.add_argument("--incumbent-pred-dir", default=None,
+                   help="incumbent LoRA prediction dir required by the A46 strict gate")
+    p.add_argument("--chip-manifest", default=str(HELDOUT),
+                   help="JSON containing the frozen chip IDs")
+    p.add_argument("--chip-key", default="test_chips",
+                   help="list key inside --chip-manifest (selection uses validation)")
+    p.add_argument("--candidates-json", default=None,
+                   help="selection mode: JSON object mapping checkpoint labels to prediction dirs")
     p.add_argument("--n-chips", type=int, default=None, help="random heldout chips to score (None=all)")
     p.add_argument("--n-samples", type=int, default=GATE_N_SAMPLES, help="apls sampled node pairs per chip")
     p.add_argument("--threshold", type=float, default=None, help="shared v3.2 threshold override")
@@ -481,15 +813,32 @@ def main() -> None:
         _self_check(args.n_chips or 3, args.device)
         return
 
+    if args.candidates_json:
+        candidate_data = json.loads(Path(args.candidates_json).read_text())
+        if not isinstance(candidate_data, dict) or not candidate_data:
+            raise SystemExit("--candidates-json must contain a non-empty JSON object")
+        report = select_prediction_dirs(
+            {str(label): Path(path) for label, path in candidate_data.items()},
+            chip_manifest=Path(args.chip_manifest), chip_key=args.chip_key,
+            n_samples=args.n_samples)
+        _write_report(args.out, report)
+        print(f"-> {args.out}", flush=True)
+        return
+
     if not args.v32 and not args.a18_pred_dir:
         raise SystemExit("provide --v32 and/or --a18-pred-dir (or --self-check)")
-    if args.strict and not (args.v32 and args.a18_pred_dir):
-        raise SystemExit("--strict is a promotion gate: it requires BOTH --v32 and --a18-pred-dir")
+    if args.strict and not (args.v32 and args.incumbent_pred_dir and args.a18_pred_dir):
+        raise SystemExit(
+            "--strict is the A46 metric gate: it requires --v32, "
+            "--incumbent-pred-dir and --a18-pred-dir")
     rep = compare_on_chips(
         Path(args.v32) if args.v32 else None,
         Path(args.a18_pred_dir) if args.a18_pred_dir else None,
         n_chips=args.n_chips, threshold=args.threshold, device=args.device,
-        n_samples=args.n_samples, strict=args.strict)
+        n_samples=args.n_samples, strict=args.strict,
+        chip_manifest=Path(args.chip_manifest), chip_key=args.chip_key,
+        incumbent_pred_dir=(
+            Path(args.incumbent_pred_dir) if args.incumbent_pred_dir else None))
     _write_report(args.out, rep)
     print(f"-> {args.out}", flush=True)
     # Fail-loud for automation: a strict gate encodes promotion success in its exit

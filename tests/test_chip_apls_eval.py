@@ -6,12 +6,17 @@ Run: .venv-gpu/Scripts/python.exe -m pytest tests/test_chip_apls_eval.py -q
 """
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import networkx as nx
 
 from src.pipeline.p1_segment.apls_eval import _DEG_X, _DEG_Y
 from src.pipeline.p1_segment.chip_apls_eval import (
-    _native_coord_to_frame, _paired_comparison, _write_report,
-    a18_pred_path, adj_to_apls_graph, chip_apls, coverage, strict_exit_code)
+    MIN_MATERIAL_APLS_DELTA, MIN_NORMALIZED_APLS,
+    _candidate_sort_key, _graph_diagnostics, _load_chip_ids, _native_coord_to_frame,
+    _paired_comparison, _promotion_gate, _write_report, a18_pred_path,
+    adj_to_apls_graph, chip_apls, coverage, strict_exit_code)
 from src.pipeline.p1_segment.stats import paired_bootstrap_ci
 
 
@@ -82,6 +87,71 @@ def test_report_writer_creates_nested_parent(tmp_path):
     assert out.is_file()
 
 
+def test_explicit_chip_manifest_is_deterministic(tmp_path):
+    manifest = tmp_path / "split.json"
+    manifest.write_text('{"validation": ["chip9", "chip2", "chip5"]}')
+    assert _load_chip_ids(manifest, "validation", None, seed=99) == [
+        "chip2", "chip5", "chip9"]
+    assert _load_chip_ids(manifest, "validation", 2, seed=7) == ["chip2", "chip9"]
+
+
+def test_a46_selection_manifest_is_frozen_and_disjoint_from_comparison():
+    root = Path(__file__).resolve().parents[1]
+    selection = json.loads(
+        (root / "data/sample/a46_selection_chips.json").read_text())["validation"]
+    comparison = json.loads(
+        (root / "data/sample/spacenet_mumbai_heldout_chips.json").read_text())["test_chips"]
+    assert len(selection) == len(set(selection)) == 102
+    assert set(selection).isdisjoint(comparison)
+
+
+def test_a46_run_manifest_schema_covers_decision_provenance():
+    root = Path(__file__).resolve().parents[1]
+    schema = json.loads(
+        (root / "data/sample/a46_run_manifest.schema.json").read_text())
+    assert set(schema["required"]) == {
+        "schema_version", "run_id", "purpose", "redistribution_allowed",
+        "licenses", "code", "data", "model", "environment", "inference",
+        "promotion_contract",
+    }
+
+
+def test_graph_diagnostics_report_fragmentation_and_metric_length():
+    g = nx.Graph()
+    g.add_edge(0, 1, length_m=3.0)
+    g.add_node(2)
+    d = _graph_diagnostics(g)
+    assert d == {
+        "nodes": 3,
+        "edges": 1,
+        "components": 2,
+        "isolates": 1,
+        "largest_component_node_fraction": 2 / 3,
+        "reachable_pair_fraction": 1 / 3,
+        "total_edge_length_m": 3.0,
+    }
+
+
+def test_candidate_ranking_uses_apls_then_connectivity_tiebreakers():
+    strong = {
+        "label": "strong", "apls_mean": .2, "apls_norm_mean": .3,
+        "diagnostics_mean": {"reachable_pair_fraction": .4,
+                             "largest_component_node_fraction": .5,
+                             "components": 3},
+    }
+    connected = {
+        "label": "connected", "apls_mean": .1, "apls_norm_mean": .2,
+        "diagnostics_mean": {"reachable_pair_fraction": .8,
+                             "largest_component_node_fraction": .9,
+                             "components": 1},
+    }
+    assert sorted([connected, strong], key=_candidate_sort_key)[0]["label"] == "strong"
+
+    tied = {**strong, "label": "tied", "diagnostics_mean": {
+        **strong["diagnostics_mean"], "reachable_pair_fraction": .6}}
+    assert sorted([strong, tied], key=_candidate_sort_key)[0]["label"] == "tied"
+
+
 def test_coverage_flags_missing_a18():
     cov = coverage(["a", "b", "c"], {"a": .5, "b": .4, "c": .3}, {"a": .6, "c": .5},
                    want_v32=True, want_a18=True)
@@ -93,6 +163,15 @@ def test_coverage_complete_when_all_present():
     cov = coverage(["a", "b"], {"a": .5, "b": .4}, {"a": .6, "b": .5},
                    want_v32=True, want_a18=True)
     assert cov["complete"]
+
+
+def test_coverage_includes_requested_incumbent():
+    cov = coverage(
+        ["a", "b"], {"a": .2, "b": .2}, {"a": .4, "b": .4},
+        want_v32=True, want_a18=True,
+        incumbent_scores={"a": .3}, want_incumbent=True)
+    assert not cov["complete"]
+    assert cov["missing_incumbent"] == ["b"]
 
 
 def test_a18_pred_path_contract():
@@ -119,10 +198,32 @@ def test_missing_artifact_fails_strict_with_nonzero_exit(tmp_path):
 
 
 def test_strict_exit_code_encodes_promotion_not_completion():
-    # real BootstrapCI.verdict strings; only complete-coverage + A18 win -> 0
-    assert strict_exit_code({"compare": {"verdict": "b wins"}}) == 0            # A18 wins -> promote
-    assert strict_exit_code({"compare": {"verdict": "a wins"}}) == 3            # v3.2 wins -> regression
-    assert strict_exit_code(
-        {"compare": {"verdict": "inconclusive (CI straddles 0 — within sampling noise)"}}) == 3
+    # A relative win alone is not a promotion. The material and absolute gates
+    # must also pass against the incumbent A18 checkpoint.
+    assert strict_exit_code({"promotion_gate": {"passed": True}}) == 0
+    assert strict_exit_code({"promotion_gate": {"passed": False}}) == 3
     assert strict_exit_code({"compare": {"verdict": "GATE FAIL: incomplete coverage"}}) == 2
-    assert strict_exit_code({}) == 3                                            # missing comparison
+    assert strict_exit_code({}) == 3
+
+
+def test_promotion_gate_requires_paired_material_and_absolute_gain():
+    base = {
+        "coverage": {"complete": True},
+        "compare_incumbent": {
+            "verdict": "b wins", "excludes_zero": True,
+            "delta_a18_minus_incumbent": MIN_MATERIAL_APLS_DELTA,
+        },
+        "a18": {"apls_norm_mean": MIN_NORMALIZED_APLS},
+    }
+    assert _promotion_gate(base)["passed"]
+
+    too_small = {**base, "compare_incumbent": {
+        **base["compare_incumbent"],
+        "delta_a18_minus_incumbent": MIN_MATERIAL_APLS_DELTA - 1e-6,
+    }}
+    assert not _promotion_gate(too_small)["passed"]
+
+    too_fragmented = {**base, "a18": {
+        "apls_norm_mean": MIN_NORMALIZED_APLS - 1e-6,
+    }}
+    assert not _promotion_gate(too_fragmented)["passed"]

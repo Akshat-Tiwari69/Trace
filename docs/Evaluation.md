@@ -169,12 +169,13 @@ Fine-tune threshold selection, clean/gray checks, forget gates and synthetic-occ
 3. Use the 102-chip validation split for checkpoint/threshold/hyperparameter selection. Keep the 127-chip comparison closed until one configuration is pre-registered; it remains development evidence, not a final test.
 4. Require complete candidate/reference coverage; missing outputs fail the gate.
 5. Report raw APLS, GT-self ceiling, normalized diagnostic, component/isolated-node/edge-length/reachability diagnostics and runtime.
-6. Use paired chip resampling/randomization with a CI; promotion requires the interval to exclude zero in the candidate’s favor and exceed a predeclared material-effect floor.
-7. Require a material absolute gain beyond the current LoRA 18% ceiling fraction.
+6. Use paired chip resampling/randomization against the LoRA r=4 incumbent. The interval must exclude zero in the candidate's favor and the paired raw-APLS mean gain must be at least **0.02**. This floor is frozen before checkpoint selection and before reopening the 127-chip comparison.
+7. Require candidate normalized APLS of at least **0.25**, a material absolute step beyond the incumbent's `0.1808` GT-self-ceiling fraction. Passing these metric floors identifies a research candidate; it does not waive step 9.
 8. Validate a later candidate on an untouched geography/sensor before final generalization language.
 9. Before deployment: license, dependency lock, deterministic run manifest, checkpoint provenance/checksum, runtime/memory, Modal/local compatibility, rollback and live smoke.
 
 ## Evidence work queued in A46
 
-- Track exact A18/A46 configs/results in a license-safe reproducible artifact set.
+- The frozen 102-chip selection IDs live in `data/sample/a46_selection_chips.json`; `data/sample/a46_run_manifest.schema.json` defines the local-run evidence contract. The 102 and 127 sets are disjoint.
+- Track exact A18/A46 configs/results in a license-safe reproducible artifact set. Upstream SAM-Road++ currently publishes no license, so its source, local patch and derived checkpoints remain ignored/local and cannot be redistributed or deployed.
 - Add a genuinely untouched geography/sensor evaluation set.

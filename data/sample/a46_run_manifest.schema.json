@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://route-resilience.local/schemas/a46-run-manifest-v1.json",
+  "title": "A46 graph-first experiment run manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "purpose",
+    "redistribution_allowed",
+    "licenses",
+    "code",
+    "data",
+    "model",
+    "environment",
+    "inference",
+    "promotion_contract"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "purpose": {"type": "string", "minLength": 1},
+    "redistribution_allowed": {"type": "boolean"},
+    "licenses": {"type": "object"},
+    "code": {
+      "type": "object",
+      "required": [
+        "trace_git_sha",
+        "samroadplus_upstream_git_sha",
+        "samroadplus_local_patch_sha256"
+      ]
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "selection_manifest_sha256",
+        "selection_key",
+        "chip_count",
+        "chip_ids",
+        "coordinate_contract"
+      ]
+    },
+    "model": {
+      "type": "object",
+      "required": [
+        "checkpoint_sha256",
+        "epoch",
+        "config_sha256",
+        "sam_checkpoint_sha256"
+      ]
+    },
+    "environment": {
+      "type": "object",
+      "required": [
+        "python",
+        "platform",
+        "torch",
+        "lightning",
+        "cuda_runtime",
+        "cudnn",
+        "gpu",
+        "deterministic_algorithms",
+        "historical_checkpoint_reproducibility"
+      ]
+    },
+    "inference": {
+      "type": "object",
+      "required": [
+        "command",
+        "thresholds",
+        "graph_count",
+        "graphs_sha256"
+      ]
+    },
+    "promotion_contract": {
+      "type": "object",
+      "required": [
+        "selection_split_only",
+        "min_candidate_minus_incumbent_raw_apls",
+        "min_candidate_normalized_apls",
+        "comparison_split_runs_allowed_after_preregistration"
+      ]
+    }
+  },
+  "additionalProperties": true
+}
