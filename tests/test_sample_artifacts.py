@@ -25,6 +25,13 @@ EVIDENCE_MANIFEST = SAMPLE_DIR / "panaji_demo_evidence_manifest.json"
 REQUIRED_CRITICALITY_COLUMNS = {"node_id", "betweenness", "rank", "is_critical", "x", "y"}
 
 
+def _artifact_sha256(path: Path) -> str:
+    data = path.read_bytes()
+    if path.suffix in {".csv", ".geojson", ".json"}:
+        data = data.replace(b"\r\n", b"\n")
+    return hashlib.sha256(data).hexdigest()
+
+
 def test_sample_evidence_manifest_matches_committed_artifacts():
     manifest = json.loads(EVIDENCE_MANIFEST.read_text(encoding="utf-8"))
     source = manifest["input"]
@@ -32,7 +39,7 @@ def test_sample_evidence_manifest_matches_committed_artifacts():
 
     assert source == {
         "path": SAMPLE_GEOJSON.name,
-        "sha256": hashlib.sha256(SAMPLE_GEOJSON.read_bytes()).hexdigest(),
+        "sha256": _artifact_sha256(SAMPLE_GEOJSON),
     }
     assert set(artifacts) == {
         "panaji_demo_flood_curve.png",
@@ -42,7 +49,7 @@ def test_sample_evidence_manifest_matches_committed_artifacts():
         "panaji_demo_resilience_curve.png",
     }
     for name, record in artifacts.items():
-        expected_sha256 = hashlib.sha256((SAMPLE_DIR / name).read_bytes()).hexdigest()
+        expected_sha256 = _artifact_sha256(SAMPLE_DIR / name)
         assert record["sha256"] == expected_sha256
         assert record["command"].startswith("python -m src.pipeline.")
 

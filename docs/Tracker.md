@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-07-14 · **Phase:** A45 complete; A46 next · **Overall:** core product working; model improvement and authorized web replacement remain
+**Last updated:** 2026-07-15 · **Phase:** A45 complete; A46 next · **Overall:** core product working; model improvement and authorized web replacement remain
 
 ---
 
@@ -205,6 +205,10 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-07-15 (Akshat/coordinator — A45 PR follow-up)**
+
+- PR #128 CI exposed Windows/Ubuntu newline-dependent hashes in the sample evidence manifest. The artifact bytes are unchanged; explicit LF attributes and canonical text hashing make the contract platform-independent. Full verification remains **318 passed, 2 upstream warnings**.
 
 **2026-07-14 (Akshat/coordinator — A45 complete)**
 

@@ -10,15 +10,15 @@
       "command": "python -m src.pipeline.p3_analysis.flood --aoi panaji_demo --sample-dir data/sample --processed-dir data/processed"
     },
     "panaji_demo_graph_eval.json": {
-      "sha256": "fac65919b2b9dac9bce788271639e32c84383129530ba01eaca1388a5d9c4ad1",
+      "sha256": "cb694b78caba9b5ca4caea13711cfff90c867705f5dbc00d8bdd2fccebbbb9a4",
       "command": "python -m src.pipeline.p3_analysis.evaluate --aoi panaji_demo --sample-dir data/sample --curve-steps 40 --top-n 5"
     },
     "panaji_demo_percolation.json": {
-      "sha256": "6adcbe345076f270da4983c2fbde597743c55db12fc140107f5e1022f1ce376e",
+      "sha256": "dc8eee18e670b5f54c38be86919e6fa5e903a27c54f82920301ebfec004231d1",
       "command": "python -m src.pipeline.p3_analysis.percolation --aoi panaji_demo --sample-dir data/sample --corner se --top-n 10"
     },
     "panaji_demo_resilience.csv": {
-      "sha256": "f0c12a8bee5447b3135bae64519c3894fbf2c5f6ec793fa1cdc194513c768465",
+      "sha256": "abe4729e9231969f077ebae1820aaf02a452b43e9406b6400f6246d60a7945e0",
       "command": "python -m src.pipeline.p3_analysis.analyze --aoi panaji_demo --critical-fraction 0.10 --curve-steps 25",
       "copy_from": "data/processed/panaji_demo_resilience.csv"
     },
