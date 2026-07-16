@@ -48,6 +48,8 @@ __main__ guard (Windows subprocess/DataLoader safety).
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
 import math
 import pickle
@@ -63,6 +65,7 @@ ROOT = Path(__file__).resolve().parents[3]
 SRC_RGB = ROOT / "data/raw/spacenet/SN5_roads_train_AOI_8_Mumbai/PS-RGB"
 SRC_GEO = ROOT / "data/raw/spacenet/SN5_roads_train_AOI_8_Mumbai/geojson_roads_speed"
 HELDOUT = ROOT / "data/sample/spacenet_mumbai_heldout_chips.json"
+A46_SELECTION = ROOT / "data/sample/a46_selection_chips.json"
 
 IMAGE_SIZE = 400   # 400px common frame -- must match the A18 converter/dataset
 NATIVE_PX = 1300   # native SN5 PS-RGB chip size
@@ -84,7 +87,7 @@ def _write_report(path: Path | str, report: dict) -> None:
     """Write JSON after ensuring a caller-supplied output directory exists."""
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, indent=2))
+    out.write_text(json.dumps(report, indent=2, allow_nan=False))
 
 
 def _load_chip_ids(manifest: Path | str, key: str, n_chips: int | None,
@@ -98,10 +101,95 @@ def _load_chip_ids(manifest: Path | str, key: str, n_chips: int | None,
     data = json.loads(Path(manifest).read_text())
     if key not in data or not isinstance(data[key], list):
         raise ValueError(f"chip manifest must contain a list at key {key!r}")
-    chips = list(dict.fromkeys(str(chip) for chip in data[key]))
+    chips = [str(chip).removeprefix("mumbai_") for chip in data[key]]
+    if not chips:
+        raise ValueError(f"chip manifest list at key {key!r} must not be empty")
+    if len(chips) != len(set(chips)):
+        raise ValueError(f"chip manifest list at key {key!r} contains duplicate IDs")
     if n_chips and n_chips < len(chips):
         chips = random.Random(seed).sample(chips, n_chips)
     return sorted(chips, key=lambda x: int(x.replace("chip", "").replace("mumbai_", "")))
+
+
+def _same_manifest(path: Path | str, registered: Path) -> bool:
+    from src.pipeline.p1_segment.provenance import sha256_file
+    candidate = Path(path)
+    return candidate.is_file() and sha256_file(candidate) == sha256_file(registered)
+
+
+def _require_registered_selection(manifest: Path | str, key: str,
+                                  n_chips: int | None, n_samples: int) -> None:
+    if key != "validation" or not _same_manifest(manifest, A46_SELECTION):
+        raise ValueError("selection mode requires the registered 102-chip A46 manifest/key")
+    if n_chips is not None:
+        raise ValueError("selection mode requires all registered 102 chips")
+    if n_samples != GATE_N_SAMPLES:
+        raise ValueError(f"selection mode requires {GATE_N_SAMPLES} APLS samples per chip")
+
+
+def _require_registered_comparison(manifest: Path | str, key: str,
+                                   n_chips: int | None, n_samples: int,
+                                   threshold: float | None) -> None:
+    if key != "test_chips" or not _same_manifest(manifest, HELDOUT):
+        raise ValueError("strict mode requires the registered 127-chip comparison manifest/key")
+    if n_chips is not None:
+        raise ValueError("strict mode requires all registered comparison chips")
+    if n_samples != GATE_N_SAMPLES:
+        raise ValueError(f"strict mode requires {GATE_N_SAMPLES} APLS samples per chip")
+    if threshold is not None:
+        raise ValueError("strict mode rejects a v3.2 threshold override")
+
+
+class _AdjacencyUnpickler(pickle.Unpickler):
+    """Load only pickle primitives; prediction files are never a public input."""
+
+    def find_class(self, module: str, name: str):
+        raise pickle.UnpicklingError(f"pickle global {module}.{name} is not allowed")
+
+
+def _load_adjacency(path: Path) -> dict:
+    stream = io.BytesIO(path.read_bytes())
+    adjacency = _AdjacencyUnpickler(stream).load()
+    if stream.read(1):
+        raise ValueError(f"prediction {path} has trailing pickle data")
+    if not isinstance(adjacency, dict):
+        raise ValueError(f"prediction {path} must contain an adjacency dictionary")
+    if len(adjacency) > IMAGE_SIZE * IMAGE_SIZE:
+        raise ValueError(f"prediction {path} contains too many nodes")
+
+    def validate_node(node, role: str) -> None:
+        if (not isinstance(node, tuple) or len(node) != 2 or
+                any(isinstance(value, bool) or not isinstance(value, int)
+                    for value in node)):
+            raise ValueError(f"prediction {path} has invalid {role} {node!r}")
+        if any(value < 0 or value >= IMAGE_SIZE for value in node):
+            raise ValueError(f"prediction {path} has out-of-frame {role} {node!r}")
+
+    for node, neighbors in adjacency.items():
+        validate_node(node, "node")
+        if not isinstance(neighbors, (list, tuple, set)):
+            raise ValueError(f"prediction {path} neighbors for {node!r} must be a sequence")
+        for neighbor in neighbors:
+            validate_node(neighbor, "neighbor")
+    return adjacency
+
+
+def _preflight_chip_inputs(chips: list[str], rgb_dir: Path = SRC_RGB,
+                           geo_dir: Path = SRC_GEO) -> None:
+    missing_rgb = [
+        chip for chip in chips
+        if not (rgb_dir / f"SN5_roads_train_AOI_8_Mumbai_PS-RGB_{chip}.tif").is_file()
+    ]
+    missing_gt = [
+        chip for chip in chips
+        if not (geo_dir / (
+            f"SN5_roads_train_AOI_8_Mumbai_geojson_roads_speed_{chip}.geojson"
+        )).is_file()
+    ]
+    if missing_rgb or missing_gt:
+        raise FileNotFoundError(
+            f"chip protocol inputs incomplete; missing RGB={missing_rgb}; "
+            f"missing GT={missing_gt}")
 
 
 def _graph_diagnostics(graph) -> dict:
@@ -298,19 +386,180 @@ def a18_pred_path(a18_pred_dir: Path | str, chip: str) -> Path:
     return Path(a18_pred_dir) / "graph" / f"mumbai_{chip}.p"
 
 
+def _graph_artifact_digest(pred_dir: Path) -> tuple[str, int]:
+    """Digest the exact named prediction artifacts in a directory."""
+    from src.pipeline.p1_segment.provenance import sha256_file
+
+    paths = sorted((pred_dir / "graph").glob("*.p"), key=lambda path: path.name)
+    digest = hashlib.sha256()
+    for path in paths:
+        digest.update(path.name.encode())
+        digest.update(bytes.fromhex(sha256_file(path)))
+    return digest.hexdigest().upper(), len(paths)
+
+
+def _run_manifest_errors(manifest: object) -> list[str]:
+    if not isinstance(manifest, dict):
+        return ["run manifest must be an object"]
+    errors: list[str] = []
+    expected_top = {
+        "licenses": dict, "code": dict, "data": dict, "model": dict,
+        "environment": dict, "inference": dict, "promotion_contract": dict,
+    }
+    if manifest.get("schema_version") != 1:
+        errors.append("schema_version must be 1")
+    for key in ("run_id", "purpose"):
+        if not isinstance(manifest.get(key), str) or not manifest[key]:
+            errors.append(f"{key} must be a non-empty string")
+    if not isinstance(manifest.get("redistribution_allowed"), bool):
+        errors.append("redistribution_allowed must be boolean")
+    for key, expected in expected_top.items():
+        if not isinstance(manifest.get(key), expected):
+            errors.append(f"{key} must be an object")
+    if errors:
+        return errors
+
+    required_strings = {
+        "code": ("trace_git_sha", "samroadplus_upstream_git_sha",
+                 "samroadplus_local_patch_sha256"),
+        "model": ("checkpoint_sha256", "config_sha256",
+                  "effective_config_sha256", "sam_checkpoint_sha256"),
+        "data": ("selection_manifest_sha256", "selection_key", "coordinate_contract"),
+        "inference": ("graphs_sha256",),
+        "environment": (
+            "python", "platform", "torch", "lightning", "gpu",
+            "historical_checkpoint_reproducibility"),
+    }
+    for section, keys in required_strings.items():
+        for key in keys:
+            if not isinstance(manifest[section].get(key), str) or not manifest[section][key]:
+                errors.append(f"{section}.{key} must be a non-empty string")
+    chip_ids = manifest["data"].get("chip_ids")
+    if (not isinstance(chip_ids, list) or not chip_ids or
+            any(not isinstance(chip, str) or not chip for chip in chip_ids) or
+            len(chip_ids) != len(set(chip_ids))):
+        errors.append("data.chip_ids must be a non-empty unique string list")
+    for section, key in (
+            ("data", "chip_count"), ("model", "epoch"),
+            ("inference", "graph_count")):
+        value = manifest[section].get(key)
+        minimum = 0 if (section, key) == ("model", "epoch") else 1
+        if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+            errors.append(f"{section}.{key} must be an integer >= {minimum}")
+    command = manifest["inference"].get("command")
+    if (not isinstance(command, list) or not command or
+            any(not isinstance(part, str) for part in command)):
+        errors.append("inference.command must be a non-empty string list")
+    if not isinstance(manifest["inference"].get("thresholds"), dict):
+        errors.append("inference.thresholds must be an object")
+    wall_seconds = manifest["inference"].get("wall_seconds_inference")
+    if (isinstance(wall_seconds, bool) or not isinstance(wall_seconds, (int, float))
+            or not math.isfinite(wall_seconds) or wall_seconds <= 0):
+        errors.append("inference.wall_seconds_inference must be a finite number > 0")
+    environment = manifest["environment"]
+    if not isinstance(environment.get("deterministic_algorithms"), bool):
+        errors.append("environment.deterministic_algorithms must be boolean")
+    if not isinstance(environment.get("cuda_runtime"), (str, type(None))):
+        errors.append("environment.cuda_runtime must be a string or null")
+    if (isinstance(environment.get("cudnn"), bool) or
+            not isinstance(environment.get("cudnn"), (int, str, type(None)))):
+        errors.append("environment.cudnn must be an integer, string or null")
+    promotion = manifest["promotion_contract"]
+    if not isinstance(promotion.get("selection_split_only"), bool):
+        errors.append("promotion_contract.selection_split_only must be boolean")
+    for key in ("min_candidate_minus_incumbent_raw_apls",
+                "min_candidate_normalized_apls"):
+        value = promotion.get(key)
+        if (isinstance(value, bool) or not isinstance(value, (int, float)) or
+                not math.isfinite(value) or value < 0):
+            errors.append(f"promotion_contract.{key} must be a finite number >= 0")
+    allowed = promotion.get("comparison_split_runs_allowed_after_preregistration")
+    if isinstance(allowed, bool) or not isinstance(allowed, int) or allowed < 0:
+        errors.append(
+            "promotion_contract.comparison_split_runs_allowed_after_preregistration "
+            "must be an integer >= 0")
+    return errors
+
+
+def _protocol_manifest_errors(manifest: object, pred_dir: Path) -> list[str]:
+    """Match a run to one frozen A46 split and its exact graph filenames."""
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("data"), dict):
+        return ["run manifest has no valid data protocol"]
+    from src.pipeline.p1_segment.provenance import sha256_file
+
+    data = manifest["data"]
+    key = data.get("selection_key")
+    registered = A46_SELECTION if key == "validation" else HELDOUT if key == "test_chips" else None
+    if registered is None:
+        return ["data.selection_key is not a registered A46 protocol"]
+    registered_data = json.loads(registered.read_text())
+    expected_ids = registered_data[key]
+    errors: list[str] = []
+    if str(data.get("selection_manifest_sha256", "")).upper() != sha256_file(registered).upper():
+        errors.append("registered split digest does not match run manifest")
+    if data.get("chip_ids") != expected_ids:
+        errors.append("chip IDs/order do not match the registered split")
+    if data.get("chip_count") != len(expected_ids):
+        errors.append("chip count does not match the registered split")
+    actual_names = {path.name for path in (pred_dir / "graph").glob("*.p")}
+    expected_names = {f"mumbai_{chip}.p" for chip in expected_ids}
+    if actual_names != expected_names:
+        errors.append("graph filenames do not match the registered split")
+    selection_only = (manifest.get("promotion_contract") or {}).get("selection_split_only")
+    if selection_only != (key == "validation"):
+        errors.append("selection_split_only does not match the registered split")
+    return errors
+
+
 def _prediction_provenance(pred_dir: Path | None) -> dict | None:
-    """Read hashes/metadata emitted by the local-only A46 inference runner."""
+    """Verify hashes/metadata emitted by the local-only A46 inference runner."""
     if pred_dir is None:
         return None
     from src.pipeline.p1_segment.provenance import sha256_file
 
     config = pred_dir / "config.yaml"
     manifest = pred_dir / "run_manifest.json"
+    errors: list[str] = []
+    manifest_data = None
+    if manifest.is_file():
+        try:
+            manifest_data = json.loads(manifest.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            errors.append(f"invalid run manifest: {exc}")
+    else:
+        errors.append("run_manifest.json is missing")
+    errors.extend(_run_manifest_errors(manifest_data))
+    errors.extend(_protocol_manifest_errors(manifest_data, pred_dir))
+
+    graph_sha, graph_count = _graph_artifact_digest(pred_dir)
+    effective_config_sha = sha256_file(config) if config.is_file() else None
+    if effective_config_sha is None:
+        errors.append("config.yaml is missing")
+    if isinstance(manifest_data, dict):
+        inference = manifest_data.get("inference") or {}
+        model = manifest_data.get("model") or {}
+        if str(inference.get("graphs_sha256", "")).upper() != graph_sha:
+            errors.append("graph digest does not match run manifest")
+        if inference.get("graph_count") != graph_count:
+            errors.append("graph count does not match run manifest")
+        if (effective_config_sha and
+                str(model.get("effective_config_sha256", "")).upper()
+                != effective_config_sha.upper()):
+            errors.append("effective config digest does not match run manifest")
+        source_config = Path(model.get("config", ""))
+        if source_config.is_file():
+            source_sha = sha256_file(source_config)
+            if str(model.get("config_sha256", "")).upper() != source_sha.upper():
+                errors.append("source config digest does not match run manifest")
     out = {
         "directory": str(pred_dir),
-        "config_sha256": sha256_file(config) if config.is_file() else None,
+        "valid": not errors,
+        "errors": errors,
+        "effective_config_sha256": effective_config_sha,
+        "graphs_sha256": graph_sha,
+        "graph_count": graph_count,
         "run_manifest_sha256": sha256_file(manifest) if manifest.is_file() else None,
-        "run_manifest": json.loads(manifest.read_text()) if manifest.is_file() else None,
+        "run_manifest": manifest_data,
     }
     return out
 
@@ -352,7 +601,11 @@ def _model_summary(scores: dict[str, float], ceilings: dict[str, float],
 def _candidate_sort_key(summary: dict) -> tuple:
     """APLS-first deterministic ranking with connectivity-only tiebreakers."""
     diagnostics = summary.get("diagnostics_mean") or {}
+    coverage_complete = bool(summary.get("coverage_complete", True))
+    provenance_valid = bool(summary.get("provenance_valid", True))
     return (
+        0 if coverage_complete and provenance_valid else 1,
+        len(summary.get("missing_chips") or []),
         -float(summary.get("apls_mean") or 0.0),
         -float(summary.get("apls_norm_mean") or 0.0),
         -float(diagnostics.get("reachable_pair_fraction") or 0.0),
@@ -360,6 +613,13 @@ def _candidate_sort_key(summary: dict) -> tuple:
         float(diagnostics.get("components") or math.inf),
         str(summary.get("label") or ""),
     )
+
+
+def _select_complete_candidate(ranked: list[dict]) -> str | None:
+    for summary in ranked:
+        if summary.get("coverage_complete") and summary.get("provenance_valid", True):
+            return str(summary["label"])
+    return None
 
 
 def _promotion_gate(rep: dict,
@@ -376,8 +636,11 @@ def _promotion_gate(rep: dict,
     comparison = rep.get("compare_incumbent") or {}
     normalized = (rep.get("a18") or {}).get("apls_norm_mean")
     delta = comparison.get("delta_a18_minus_incumbent")
+    provenance = rep.get("prediction_provenance") or {}
     checks = {
         "complete_coverage": bool((rep.get("coverage") or {}).get("complete")),
+        "incumbent_provenance": bool((provenance.get("incumbent") or {}).get("valid")),
+        "candidate_provenance": bool((provenance.get("candidate") or {}).get("valid")),
         "paired_ci_win": (comparison.get("verdict") == "b wins" and
                           bool(comparison.get("excludes_zero"))),
         "material_raw_delta": delta is not None and float(delta) >= min_delta,
@@ -495,6 +758,7 @@ def compare_on_chips(v32_ckpt: Path | None, a18_pred_dir: Path | None,
     """
     manifest = chip_manifest or HELDOUT
     chips = _load_chip_ids(manifest, chip_key, n_chips, seed)
+    _preflight_chip_inputs(chips)
 
     model = thr = None
     if v32_ckpt is not None:
@@ -544,7 +808,7 @@ def compare_on_chips(v32_ckpt: Path | None, a18_pred_dir: Path | None,
             started = time.perf_counter()
             pp = a18_pred_path(incumbent_pred_dir, chip)
             if pp.exists():
-                incumbent_g = adj_to_apls_graph(pickle.loads(pp.read_bytes()), eff_x, eff_y)
+                incumbent_g = adj_to_apls_graph(_load_adjacency(pp), eff_x, eff_y)
                 s = chip_apls(incumbent_g, gt_g, n_samples)
                 if not math.isnan(s):
                     incumbent_scores[chip] = float(s)
@@ -555,7 +819,7 @@ def compare_on_chips(v32_ckpt: Path | None, a18_pred_dir: Path | None,
             started = time.perf_counter()
             pp = a18_pred_path(a18_pred_dir, chip)
             if pp.exists():   # file MISSING -> coverage gap; file present but empty -> real 0.0
-                adj = pickle.loads(pp.read_bytes())
+                adj = _load_adjacency(pp)
                 a18_g = adj_to_apls_graph(adj, eff_x, eff_y)
                 s = chip_apls(a18_g, gt_g, n_samples)
                 if not math.isnan(s):
@@ -655,6 +919,7 @@ def select_prediction_dirs(candidates: dict[str, Path],
     from src.pipeline.p1_segment.provenance import sha256_file
 
     chips = _load_chip_ids(chip_manifest, chip_key, None, seed)
+    _preflight_chip_inputs(chips)
     labels = sorted(candidates)
     scores: dict[str, dict[str, float]] = {label: {} for label in labels}
     ceilings: dict[str, float] = {}
@@ -685,8 +950,7 @@ def select_prediction_dirs(candidates: dict[str, Path],
             pred_path = a18_pred_path(candidates[label], chip)
             if not pred_path.is_file():
                 continue
-            graph = adj_to_apls_graph(
-                pickle.loads(pred_path.read_bytes()), eff_x, eff_y)
+            graph = adj_to_apls_graph(_load_adjacency(pred_path), eff_x, eff_y)
             score = chip_apls(graph, gt_g, n_samples)
             if math.isnan(score):
                 continue
@@ -702,12 +966,14 @@ def select_prediction_dirs(candidates: dict[str, Path],
             if label in row["candidates"]
         }
         summary = _model_summary(scores[label], ceilings, flat, "candidate")
+        provenance = _prediction_provenance(candidates[label])
         summary.update({
             "label": label,
             "pred_dir": str(candidates[label]),
             "missing_chips": [chip for chip in scorable if chip not in scores[label]],
             "coverage_complete": all(chip in scores[label] for chip in scorable),
-            "provenance": _prediction_provenance(candidates[label]),
+            "provenance_valid": bool(provenance and provenance["valid"]),
+            "provenance": provenance,
         })
         summaries.append(summary)
 
@@ -731,7 +997,7 @@ def select_prediction_dirs(candidates: dict[str, Path],
         "gt_ceiling_mean": (
             float(np.mean([ceilings[chip] for chip in scorable])) if scorable else None),
         "candidates": ranked,
-        "selected_label": ranked[0]["label"] if ranked else None,
+        "selected_label": _select_complete_candidate(ranked),
         "per_chip": per_chip,
     }
 
@@ -814,6 +1080,11 @@ def main() -> None:
         return
 
     if args.candidates_json:
+        try:
+            _require_registered_selection(
+                args.chip_manifest, args.chip_key, args.n_chips, args.n_samples)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
         candidate_data = json.loads(Path(args.candidates_json).read_text())
         if not isinstance(candidate_data, dict) or not candidate_data:
             raise SystemExit("--candidates-json must contain a non-empty JSON object")
@@ -831,6 +1102,13 @@ def main() -> None:
         raise SystemExit(
             "--strict is the A46 metric gate: it requires --v32, "
             "--incumbent-pred-dir and --a18-pred-dir")
+    if args.strict:
+        try:
+            _require_registered_comparison(
+                args.chip_manifest, args.chip_key, args.n_chips,
+                args.n_samples, args.threshold)
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
     rep = compare_on_chips(
         Path(args.v32) if args.v32 else None,
         Path(args.a18_pred_dir) if args.a18_pred_dir else None,

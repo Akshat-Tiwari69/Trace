@@ -179,3 +179,9 @@ Fine-tune threshold selection, clean/gray checks, forget gates and synthetic-occ
 - The frozen 102-chip selection IDs live in `data/sample/a46_selection_chips.json`; `data/sample/a46_run_manifest.schema.json` defines the local-run evidence contract. The 102 and 127 sets are disjoint.
 - Track exact A18/A46 configs/results in a license-safe reproducible artifact set. Upstream SAM-Road++ currently publishes no license, so its source, local patch and derived checkpoints remain ignored/local and cannot be redistributed or deployed.
 - Add a genuinely untouched geography/sensor evaluation set.
+
+## A46 checkpoint selection and calibration registration (2026-07-16)
+
+All 27 historical LoRA checkpoints were inferred on the registered 102-chip selection split with complete graph coverage and verified config, graph, checkpoint and split hashes. Epoch 22 ranked first at raw APLS `0.141189` and normalized APLS `0.244357`; the epoch-18 incumbent scored `0.095836` and `0.163105`. The paired raw gain is `+0.045353` with a 95% chip-bootstrap interval of `[+0.029138, +0.063363]`. The statistical and material floors pass, but the normalized `0.25` floor does not, so no candidate is promoted and the 127-chip comparison remains closed.
+
+`data/sample/a46_calibration_plan.json` freezes the next selection-only action before calibration results are inspected: a topology-threshold sweep, followed only when necessary by registered one-variable road-threshold and neighbor-radius families. It fixes the checkpoint, split, sample count, ranking, promotion floors and stopping rule; no unregistered joint setting may be tried.

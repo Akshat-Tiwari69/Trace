@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "frozen_at": "2026-07-16",
+  "purpose": "Selection-only inference calibration for the preselected A46 epoch-22 checkpoint",
+  "selection_manifest": "data/sample/a46_selection_chips.json",
+  "selection_key": "validation",
+  "chip_count": 102,
+  "apls_samples_per_chip": 600,
+  "comparison_split_access": "forbidden until one calibrated configuration is preregistered",
+  "checkpoint": {
+    "epoch": 22,
+    "sha256": "3E5F6D04BEA52DE7E90A7555A0DA8F4F44F3F04654B17AF6E3168BA590A6DC61"
+  },
+  "incumbent": {
+    "epoch": 18,
+    "sha256": "8561EF35E80C5F337320AA4F4F283BF50488A61614FAFB34F8EB3923812F264D"
+  },
+  "baseline": {
+    "intersection_threshold": 0.195,
+    "road_threshold": 0.341,
+    "topology_threshold": 0.705,
+    "intersection_nms_radius": 8,
+    "road_nms_radius": 16,
+    "neighbor_radius": 64,
+    "max_neighbor_queries": 16,
+    "raw_apls": 0.14118921568627452,
+    "normalized_apls": 0.2443569646015588,
+    "raw_delta_vs_incumbent": 0.04535294117647059,
+    "raw_delta_ci95": [0.029137892156862754, 0.06336301470588233]
+  },
+  "stage_1": {
+    "variable": "topology_threshold",
+    "values": [0.6, 0.64, 0.67, 0.69, 0.72, 0.75, 0.78],
+    "all_other_values": "baseline"
+  },
+  "stage_2_if_stage_1_does_not_pass": {
+    "anchor": "highest-raw-APLS complete stage-1 configuration",
+    "one_variable_families": {
+      "road_threshold": [0.3, 0.32, 0.36, 0.38],
+      "neighbor_radius": [56, 72]
+    },
+    "all_other_values": "stage-1 anchor"
+  },
+  "selection_rule": {
+    "eligibility": "complete coverage and verified run provenance",
+    "primary_rank": "highest mean raw APLS",
+    "tie_breakers": [
+      "highest normalized APLS",
+      "highest reachable-pair fraction",
+      "largest-component node fraction",
+      "lowest label"
+    ],
+    "promotion_floors": {
+      "minimum_raw_delta_vs_incumbent": 0.02,
+      "paired_ci_low_must_exceed": 0.0,
+      "minimum_normalized_apls": 0.25
+    }
+  },
+  "stopping_rule": "Stop after the first completed stage whose selected configuration passes every floor; otherwise record no promotion after stage 2. No unregistered joint configuration is allowed."
+}

@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-07-15 · **Phase:** A45 complete; A46 next · **Overall:** core product working; model improvement and authorized web replacement remain
+**Last updated:** 2026-07-16 · **Phase:** A46/P2/P3 verification active · **Overall:** core product working; corrected contracts and authorized web replacement remain
 
 ---
 
@@ -205,6 +205,12 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-07-16 (Akshat/coordinator — A46 checkpoint selected; calibration registered)**
+
+- Completed all 27 checkpoint runs on the frozen 102-chip selection split with complete coverage and verified manifests. Epoch 22 leads epoch 18 by raw APLS `+0.045353`, paired 95% CI `[+0.029138, +0.063363]`; normalized APLS is `0.244357`, so the frozen `0.25` absolute floor correctly blocks promotion.
+- Registered `data/sample/a46_calibration_plan.json` before calibration: fixed epoch 22, 600 APLS samples per chip, topology-threshold stage, bounded one-variable fallback families, exact selection rule and stopping rule. The 127-chip comparison remains closed.
+- P2/P3 takeover tests exposed remaining route-pair and sampled-efficiency gaps; focused fixes continue before any web API is allowed to treat those artifacts as authoritative.
 
 **2026-07-15 (Akshat/coordinator — A46 and full-lane verification started)**
 
