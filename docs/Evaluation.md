@@ -178,3 +178,25 @@ Fine-tune threshold selection, clean/gray checks, forget gates and synthetic-occ
 
 - Track exact A18/A46 configs/results in a license-safe reproducible artifact set.
 - Add a genuinely untouched geography/sensor evaluation set.
+
+### Routing-first decode calibration (graph lane, A46 step "existing-checkpoint first")
+
+`python -m src.pipeline.p3_analysis.calibrate --ckpt <v3.2.pt> --n-chips 102`
+
+Before any training, A46 calls for existing-checkpoint APLS selection and
+threshold/radius calibration. Two decode levers are currently unexercised, and
+both are free (no retraining, no new data):
+
+| Lever | Today | Why it may move APLS |
+|---|---|---|
+| **Threshold** | the checkpoint's meta value (0.52), selected on **pixel** criteria (clean IoU / occlusion-recall) | the pixel-optimal cut is not generally the routing-optimal cut — a lower cut can close a gap that reconnects a component (large APLS gain, small IoU cost); a higher cut can drop speckle that adds spurious junctions |
+| **Healing radius** | **none** — `chip_apls_eval.mask_to_apls_graph_aniso` scores a *raw skeleton*, so the S1 MST/Union-Find healing never runs | bridging genuine gaps is exactly what APLS rewards |
+
+The harness caches each chip's probability map once and re-thresholds it (inference
+dominates cost; thresholding is free), sweeps threshold × heal-radius, and reports
+a table plus a **paired bootstrap CI of best-vs-default** (protocol step 6, shared
+`paired_bootstrap_ci`). It is **report-only** — selection must run on the 102-chip
+split, the 127-chip comparison stays closed, and promotion remains the human gate.
+
+*Status: harness landed and unit-tested; the sweep itself needs the licensed SN5
+chips + the v3.2 checkpoint to produce numbers. No result is claimed here.*

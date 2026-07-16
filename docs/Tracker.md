@@ -206,6 +206,13 @@ flowchart LR
 
 ## §10 · Daily Log
 
+**2026-07-16 (Shaivi — A46 support: routing-first decode calibration)**
+
+- Added `src/pipeline/p3_analysis/calibrate.py` + CLI — the graph lane's half of A46's "existing-checkpoint APLS selection and threshold/radius calibration first". Sweeps **threshold × heal-radius** scored by chip APLS, reports a table plus a **paired bootstrap CI of best-vs-default** (protocol step 6, reusing `p1_segment.stats.paired_bootstrap_ci` so A46 has one statistics implementation). Report-only; promotion stays the human gate.
+- **Finding that motivated it:** `chip_apls_eval.mask_to_apls_graph_aniso` decodes a **raw skeleton** — the S1 MST/Union-Find healing never runs in the scored path — and v3.2's deployed threshold (0.52) was selected on *pixel* criteria, not routing. Both are free levers on the existing checkpoint (no retraining), which is exactly what A46 wants exercised first.
+- Design: **predict once, threshold many times** — inference dominates cost, so each chip's probability map is cached and re-thresholded rather than re-inferring per candidate. Thresholding happens at the model's native scale and only the *mask* is nearest-resized into the 400px common frame, preserving v3.2's decode contract.
+- 5 unit tests (offline: synthetic probability maps + stub scorer); 74/74 graph suite green. **Not run on real chips** — needs the licensed SN5 chips + v3.2 checkpoint, which aren't in this workspace. No routing numbers claimed.
+
 **2026-07-15 (Akshat/coordinator — A45 PR follow-up)**
 
 - PR #128 CI exposed Windows/Ubuntu newline-dependent hashes in the sample evidence manifest. The artifact bytes are unchanged; explicit LF attributes and canonical text hashing make the contract platform-independent. Full verification remains **318 passed, 2 upstream warnings**.
