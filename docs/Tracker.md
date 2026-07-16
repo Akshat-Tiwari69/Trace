@@ -206,6 +206,13 @@ flowchart LR
 
 ## §10 · Daily Log
 
+**2026-07-16 (Shaivi — A46 support: structural graph diagnostics, protocol step 5)**
+
+- Added `src/pipeline/p3_analysis/diagnostics.py` — `graph_diagnostics` / `compare_to_gt` / `aggregate`: components, largest-component share, isolated nodes, empty-graph count, edge-length distribution, `length_fraction_of_gt` and reachability. These are exactly the step-5 fields the A46 promotion protocol requires **reported alongside APLS**; they existed only as one-off prose in the A18 verdict ("11.43 components vs 3.46 for GT … 48% of GT edge length … more fragmented on 114/127 chips"), so this makes the same diagnosis a reusable, tested function instead of hand analysis per candidate.
+- Why it matters: APLS says *whether* routing moved; it cannot say *why*. `length_fraction_of_gt` separates **"never found the roads"** from **"found them but broke them"** — different fixes. `is_empty` surfaces degenerate predictions (A18 had six) instead of averaging them away.
+- Validated on real committed artifacts (no licensed data needed): Panaji sample vs cached OSM truth → **3 vs 2 components, largest-CC 0.98 vs 0.99, 0 isolated, 82% of GT length** — near-GT structure, a useful contrast to the A18 fragmentation profile.
+- 7 offline unit tests. Report-only; no gate, no promotion. Pairs with the routing-first calibration harness (PR #129) — together they cover "which decode setting routes best" and "why did it change".
+
 **2026-07-15 (Akshat/coordinator — A45 PR follow-up)**
 
 - PR #128 CI exposed Windows/Ubuntu newline-dependent hashes in the sample evidence manifest. The artifact bytes are unchanged; explicit LF attributes and canonical text hashing make the contract platform-independent. Full verification remains **318 passed, 2 upstream warnings**.

@@ -24,6 +24,7 @@
 - **APLS:** similarity of shortest-path lengths after spatial snapping.
 - **Reachable-pair fraction/fragmentation:** reported alongside APLS so a tiny reachable subset cannot appear healthy.
 - **Common-unit chip gate:** both models are evaluated on the same frozen SpaceNet chips, vector ground truth and coordinate frame, with complete coverage and paired uncertainty.
+- **Structural diagnostics** (`p3_analysis/diagnostics.py`): components, largest-component share, isolated nodes, empty-graph count, edge-length distribution, `length_fraction_of_gt` and reachability — the promotion-protocol step-5 fields, as a reusable function rather than per-run hand analysis. APLS says *whether* routing moved; these say *why*. `length_fraction_of_gt` separates **"never found the roads"** from **"found them but broke them"** — different fixes. Applied to the committed Panaji sample vs its cached OSM truth: 3 vs 2 components, largest-CC share 0.98 vs 0.99, 0 isolated nodes, 82% of GT road length — i.e. near-GT structure, in contrast to the A18 fragmentation profile recorded below.
 
 ### Graph/resilience metrics
 
