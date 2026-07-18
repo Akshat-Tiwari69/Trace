@@ -161,6 +161,7 @@ Fine-tune threshold selection, clean/gray checks, forget gates and synthetic-occ
 | A38/A38b foreground-biased crops | gray pixels improved, APLS significantly worse | rejected |
 | A41/A41b SDT-BCE | pixels improved, APLS regressed | rejected |
 | A18 frozen → LoRA | common-unit routing improved strongly, absolute routing still low | graph-first direction adopted for A46 |
+| A46 epoch-22 + topology 0.60 | 127-chip raw APLS `0.181165`, `+0.076053` vs epoch-18, CI `[+0.059871, +0.092975]`; normalized `0.301519` | metric gate passed; not deployable because upstream has no license |
 
 ## Promotion protocol for A46
 
@@ -169,12 +170,21 @@ Fine-tune threshold selection, clean/gray checks, forget gates and synthetic-occ
 3. Use the 102-chip validation split for checkpoint/threshold/hyperparameter selection. Keep the 127-chip comparison closed until one configuration is pre-registered; it remains development evidence, not a final test.
 4. Require complete candidate/reference coverage; missing outputs fail the gate.
 5. Report raw APLS, GT-self ceiling, normalized diagnostic, component/isolated-node/edge-length/reachability diagnostics and runtime.
-6. Use paired chip resampling/randomization with a CI; promotion requires the interval to exclude zero in the candidate’s favor and exceed a predeclared material-effect floor.
-7. Require a material absolute gain beyond the current LoRA 18% ceiling fraction.
+6. Use paired chip resampling/randomization against the LoRA r=4 incumbent. The interval must exclude zero in the candidate's favor and the paired raw-APLS mean gain must be at least **0.02**. This floor is frozen before checkpoint selection and before reopening the 127-chip comparison.
+7. Require candidate normalized APLS of at least **0.25**, a material absolute step beyond the incumbent's `0.1808` GT-self-ceiling fraction. Passing these metric floors identifies a research candidate; it does not waive step 9.
 8. Validate a later candidate on an untouched geography/sensor before final generalization language.
 9. Before deployment: license, dependency lock, deterministic run manifest, checkpoint provenance/checksum, runtime/memory, Modal/local compatibility, rollback and live smoke.
 
-## Evidence work queued in A46
+## A46 evidence boundary
 
-- Track exact A18/A46 configs/results in a license-safe reproducible artifact set.
-- Add a genuinely untouched geography/sensor evaluation set.
+- The frozen 102-chip selection IDs live in `data/sample/a46_selection_chips.json`; `data/sample/a46_run_manifest.schema.json` defines the local-run evidence contract. The 102 and 127 sets are disjoint.
+- Track exact A18/A46 configs/results in a license-safe reproducible artifact set. Upstream SAM-Road++ currently publishes no license, so its source, local patch and derived checkpoints remain ignored/local and cannot be redistributed or deployed.
+- A genuinely untouched geography/sensor evaluation set remains required before any generalization claim.
+
+## A46 checkpoint selection and registered comparison (2026-07-18)
+
+All 27 historical LoRA checkpoints were inferred on the registered 102-chip selection split with complete graph coverage and verified config, graph, checkpoint and split hashes. Epoch 22 initially led at raw APLS `0.141189`, but missed the `0.25` normalized floor. The pre-registered stage-1 topology sweep selected threshold `0.60` at raw APLS `0.165779` and normalized APLS `0.282758`; it beat the epoch-18 incumbent by `+0.069943`, with 95% CI `[+0.051983, +0.089659]`. Every floor passed, so stage 2 was not run.
+
+`data/sample/a46_comparison_preregistration.json` froze that exact candidate, incumbent, v3.2 checkpoint, 127-chip manifest and strict 600-sample protocol before the comparison split was opened. The one permitted comparison completed 127/127 coverage. The candidate scored raw APLS `0.181165` and normalized APLS `0.301519`; the incumbent scored `0.105112` and `0.180762`; deployable v3.2 scored `0.012082` and `0.018539`. Candidate-minus-incumbent raw APLS was `+0.076053`, with 95% CI `[+0.059871, +0.092975]` and paired randomization `p=0.000100`. Fragmentation also improved: mean components fell from `11.433` to `7.937`, largest-component node fraction rose from `0.3763` to `0.5413`, and reachable-pair fraction rose from `0.2200` to `0.3859`.
+
+The metric gate passed, but **production promotion remains false**. SAM-Road++ publishes no license, so its source, patch, derived weights and predictions remain local research artifacts and cannot be redistributed or deployed. `data/sample/a46_comparison_result.json` records the license-safe result summary and hashes; licensed v3.2 remains the production checkpoint while MIT-licensed SAM-Road is evaluated next under the same protocol.

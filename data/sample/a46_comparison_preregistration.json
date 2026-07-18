@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "registered_at": "2026-07-18",
+  "purpose": "Open the frozen 127-chip comparison exactly once for the A46 stage-1 winner",
+  "selection_evidence": {
+    "manifest": "data/sample/a46_selection_chips.json",
+    "manifest_sha256": "B9CD9ECF10F9D9A3D9D0FA0675EA6CA3D574C735919E9048D8AAB3A51D77EA45",
+    "calibration_plan": "data/sample/a46_calibration_plan.json",
+    "calibration_plan_sha256": "6ED5CE56C52E70F441CB060D10C1A63B21E60553ED21461AFAA10E3AD2937CA4",
+    "selected_stage": 1,
+    "selected_label": "topology_0600",
+    "raw_apls": 0.16577941176470581,
+    "normalized_apls": 0.2827581856763009,
+    "raw_delta_vs_incumbent": 0.06994313725490196,
+    "raw_delta_ci95": [0.051983161764705875, 0.08965882352941175],
+    "paired_p_two_sided": 0.00009999000099990002,
+    "coverage_complete": true,
+    "candidate_provenance_valid": true,
+    "incumbent_provenance_valid": true,
+    "all_promotion_floors_passed": true,
+    "calibration_ranking_report_sha256": "B79F64743D8462A3F1977B06E4893FFD1B9D7FB94FD014E9ACB404B09CD18FE9",
+    "paired_selection_report_sha256": "18152FA1B9A067EFCCE489BE885721C1045A184EE2627B94B8A231785CBC5900"
+  },
+  "candidate": {
+    "model": "SAM-Road++ LoRA",
+    "epoch": 22,
+    "checkpoint_sha256": "3E5F6D04BEA52DE7E90A7555A0DA8F4F44F3F04654B17AF6E3168BA590A6DC61",
+    "effective_config_sha256": "1D8AB43206F04042498A839B0CBBADC57C8F10893FC935C689B251CE32BE6A7F",
+    "thresholds": {
+      "intersection": 0.195,
+      "road": 0.341,
+      "topology": 0.6,
+      "intersection_nms_radius": 8,
+      "road_nms_radius": 16,
+      "neighbor_radius": 64,
+      "max_neighbor_queries": 16
+    }
+  },
+  "incumbent": {
+    "model": "SAM-Road++ LoRA",
+    "epoch": 18,
+    "checkpoint_sha256": "8561EF35E80C5F337320AA4F4F283BF50488A61614FAFB34F8EB3923812F264D",
+    "effective_config_sha256": "9EC7314B615CF692F75200B8D6BB404378ABFF756C2EF7FDDE214BFBE84AC066"
+  },
+  "deployable_baseline": {
+    "model": "road_pan v3.2",
+    "checkpoint": "models/road_pan.pt",
+    "checkpoint_sha256": "0EBEDF973C0FFE0B1148D3DE38382D17AC88398C6A55F4550D661A6B1E9EED1D",
+    "threshold_override": null
+  },
+  "comparison": {
+    "manifest": "data/sample/spacenet_mumbai_heldout_chips.json",
+    "manifest_sha256": "A0BF6CB78D550B80268FEBB0C40E40EABD7A99CA4F7BB67204E00FB846BFF330",
+    "key": "test_chips",
+    "chip_count": 127,
+    "apls_samples_per_chip": 600,
+    "strict": true,
+    "allowed_candidate_runs": 1,
+    "additional_calibration_or_candidate_substitution": "forbidden"
+  },
+  "promotion_gate": {
+    "minimum_raw_delta_vs_incumbent": 0.02,
+    "paired_ci_low_must_exceed": 0.0,
+    "minimum_normalized_apls": 0.25,
+    "complete_coverage_required": true,
+    "valid_provenance_required": true,
+    "license_and_deployment_checks_remain_separate": true
+  },
+  "redistribution": {
+    "allowed": false,
+    "reason": "SAM-Road++ publishes no license; the candidate remains local research evidence and cannot replace the licensed production model"
+  }
+}

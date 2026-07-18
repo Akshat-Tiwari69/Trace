@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "evaluated_at": "2026-07-18",
+  "registration": "data/sample/a46_comparison_preregistration.json",
+  "comparison_manifest": "data/sample/spacenet_mumbai_heldout_chips.json",
+  "comparison_manifest_sha256": "A0BF6CB78D550B80268FEBB0C40E40EABD7A99CA4F7BB67204E00FB846BFF330",
+  "chip_count": 127,
+  "apls_samples_per_chip": 600,
+  "coverage_complete": true,
+  "candidate": {
+    "label": "SAM-Road++ LoRA epoch 22, topology threshold 0.60",
+    "checkpoint_sha256": "3E5F6D04BEA52DE7E90A7555A0DA8F4F44F3F04654B17AF6E3168BA590A6DC61",
+    "effective_config_sha256": "1D8AB43206F04042498A839B0CBBADC57C8F10893FC935C689B251CE32BE6A7F",
+    "prediction_graphs_sha256": "C17BECD89620F5B11F9CB5A66D76825AB73DBEDC89A45BE1BB32C4340F090231",
+    "run_manifest_sha256": "B7C98C600782D5636F4CD8C0B3C1B245CC19C8AC298F39E2FCA9B58347B08858",
+    "inference_seconds": 311.01591062545776,
+    "raw_apls": 0.18116456692913388,
+    "normalized_apls": 0.3015192267060865,
+    "diagnostics": {
+      "mean_components": 7.937007874015748,
+      "mean_isolates": 2.7874015748031495,
+      "largest_component_node_fraction": 0.54131394357321,
+      "reachable_pair_fraction": 0.38591842757174033,
+      "mean_total_edge_length_m": 1485.9648516148463,
+      "edge_length_gt_fraction": 0.6638647790034772
+    }
+  },
+  "incumbent": {
+    "label": "SAM-Road++ LoRA epoch 18",
+    "checkpoint_sha256": "8561EF35E80C5F337320AA4F4F283BF50488A61614FAFB34F8EB3923812F264D",
+    "effective_config_sha256": "9EC7314B615CF692F75200B8D6BB404378ABFF756C2EF7FDDE214BFBE84AC066",
+    "prediction_graphs_sha256": "9AC279A742630F97F40F3E89A7A04FD39BE78AF328071ECC1CF405966D375092",
+    "run_manifest_sha256": "60E42A447A9BF2EA172AA475693D62BE85184945BD7EA90DD300FB43F08989B1",
+    "inference_seconds": 219.1719560623169,
+    "raw_apls": 0.10511181102362203,
+    "normalized_apls": 0.18076232421566504
+  },
+  "deployable_v32_baseline": {
+    "checkpoint_sha256": "0EBEDF973C0FFE0B1148D3DE38382D17AC88398C6A55F4550D661A6B1E9EED1D",
+    "threshold": 0.52,
+    "raw_apls": 0.012081889763779528,
+    "normalized_apls": 0.018539308669445087
+  },
+  "paired_candidate_minus_incumbent": {
+    "raw_apls_delta": 0.07605275590551182,
+    "raw_apls_ci95": [0.059870629921259855, 0.09297464566929133],
+    "normalized_apls_delta": 0.12075690249042144,
+    "normalized_apls_ci95": [0.09814339394754502, 0.14359759792654841],
+    "p_two_sided": 0.00009999000099990002
+  },
+  "paired_candidate_minus_v32": {
+    "raw_apls_delta": 0.1690826771653543,
+    "raw_apls_ci95": [0.14751793307086614, 0.19097523622047247]
+  },
+  "metric_gate": {
+    "passed": true,
+    "complete_coverage": true,
+    "candidate_provenance": true,
+    "incumbent_provenance": true,
+    "paired_ci_win": true,
+    "material_raw_delta": true,
+    "absolute_normalized_apls": true
+  },
+  "comparison_report_sha256": "E36E13FB0CFAC11796E242F25AFDDED3C76E147B8F028D748DAB76E2F541C473",
+  "production_decision": {
+    "promoted": false,
+    "reason": "Metric gate passed, but SAM-Road++ has no published license and cannot be redistributed or deployed. The licensed v3.2 checkpoint remains production.",
+    "next_experiment": "Evaluate the official MIT-licensed SAM-Road checkpoint with the identical frozen protocol."
+  }
+}
