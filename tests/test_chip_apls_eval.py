@@ -138,6 +138,25 @@ def test_a46_calibration_plan_freezes_selection_only_search():
     assert "forbidden" in plan["comparison_split_access"]
 
 
+def test_a46_registered_result_is_internally_consistent_and_not_deployable():
+    root = Path(__file__).resolve().parents[1]
+    registration = json.loads(
+        (root / "data/sample/a46_comparison_preregistration.json").read_text())
+    result = json.loads(
+        (root / "data/sample/a46_comparison_result.json").read_text())
+
+    assert registration["candidate"]["thresholds"]["topology"] == 0.6
+    assert result["comparison_manifest_sha256"] == registration["comparison"]["manifest_sha256"]
+    assert result["chip_count"] == registration["comparison"]["chip_count"] == 127
+    assert result["candidate"]["checkpoint_sha256"] == registration["candidate"]["checkpoint_sha256"]
+    raw_delta = result["candidate"]["raw_apls"] - result["incumbent"]["raw_apls"]
+    assert abs(raw_delta - result["paired_candidate_minus_incumbent"]["raw_apls_delta"]) < 1e-12
+    assert result["metric_gate"]["passed"] is True
+    assert result["paired_candidate_minus_incumbent"]["raw_apls_ci95"][0] > 0
+    assert result["candidate"]["normalized_apls"] >= 0.25
+    assert result["production_decision"]["promoted"] is False
+
+
 def test_a46_run_manifest_schema_covers_decision_provenance():
     root = Path(__file__).resolve().parents[1]
     schema = json.loads(

@@ -146,6 +146,19 @@ Measured planning evidence: the r=4 run took about 32.4 minutes for 27 epochs an
 - No deployment or redistribution until license/dependency/checkpoint compatibility is resolved.
 - No final generalization claim until a new held-out geography/sensor passes.
 
+## A46 outcome and licensed next move (2026-07-18)
+
+The registered stage-1 calibration and one 127-chip comparison are complete. Epoch 22 with topology threshold `0.60` reached raw/normalized APLS `0.181165/0.301519`, beating the epoch-18 LoRA incumbent by raw `+0.076053` with 95% CI `[+0.059871, +0.092975]`. This validates the graph-first direction, but not the specific implementation for production: SAM-Road++ has no published license, and Mumbai remains a repeatedly consulted development benchmark.
+
+The shortest responsible model-improvement queue is:
+
+1. Run the official MIT-licensed [SAM-Road](https://github.com/htcr/sam_road) SpaceNet checkpoint through the identical frozen evaluator and artifact adapter.
+2. If it is competitive, try heads-only adaptation, then a bounded ViT-B LoRA run with batch 1, mixed precision, gradient accumulation and checkpointing; stop immediately if an 8 GB smoke test cannot fit.
+3. Test a clean-room coupled-NMS inference ablation on the licensed baseline; it changes no training data and directly targets graph continuity.
+4. Reconsider [DeH4R](https://github.com/godx-7/DeH4R), GLD-Road or LineGraph2Road only after each publishes an explicit usable license plus reproducible code/checkpoints. Keep RNGDet++ as a historical checkpoint comparator only because its repository combines GPL text with an additional non-commercial restriction.
+
+Published paper scores are directional evidence only. Every candidate must pass this repository's frozen chip IDs, coordinate transform, GT-self normalization, complete-coverage rule and paired uncertainty gate; no external APLS percentage is directly convertible to the values above.
+
 ## Compute guidance
 
 The supported policy is simple:

@@ -130,9 +130,9 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 |---|---|---|---|---|---|
 | **A44** | ✅ | Reconcile and simplify all documentation | Akshat/coordinator | — | Current docs agree with code/evidence, historical audit archived, sample graph/APLS evidence refreshed, links/JSON/mirrors checked, 284 tests green; PR opened into `dev` |
 | **A45** | ✅ | Repository-wide correctness, simplification and performance refactor | Coordinator across all lanes | A44 | Baseline-universe resilience, one probability inference protocol, evaluator labels, immutable deploy refs and CLI precedence corrected; duplicated/dead logic reduced; focused benchmarks improved; 318 tests green |
-| **A46** | 🔄 | Graph-first model improvement program | Akshat | A44; use A45 foundations where relevant | Reproducible/license-safe run contract; existing-checkpoint APLS selection and threshold/radius calibration first; deterministic LoRA capacity study only if needed; 102-chip selection and one pre-registered 127-chip comparison; no promotion without material paired/absolute gains and deployment checks |
+| **A46** | ✅ | Graph-first model improvement program | Akshat | A44; use A45 foundations where relevant | Registered 102-chip selection and one 127-chip comparison complete; metric gate passed; deployment correctly blocked by missing upstream license; licensed next experiment recorded |
 | **O1** | ⏳ | Close production operator checklist | Akshat | approved release ref | Modal/app redeployed from an immutable ref; port 8501 closed; service/Caddy/journald config installed; live upload smoke passes; rate limiting decision recorded |
-| **F9** | 🔒 | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; bundle/payload/Web-Vitals/map budgets pass; old presentation removed |
+| **F9** | 🔄 | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; bundle/payload/Web-Vitals/map budgets pass; old presentation removed |
 | **X1** | 🔒 | Final backup demo capture | All | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
@@ -185,7 +185,7 @@ flowchart LR
 | Streamlit + Folium as permanent stack | superseded 2026-07-14 | Akshat authorized a full web replacement; preserve domain contracts and CPU deployment while selecting the new presentation/API stack through research and measured budgets |
 | File artifacts, no database/login | 🔒 | Small-team reproducibility and simple operations |
 | Modal is the sole remote inference boundary | 🔒 | GPU work stays off the ARM host; P2/P3 remain in-process |
-| v3.2 remains deployed | 🔒 until a gate win | Best current deployable mask model; later pixel-only candidates did not improve routing safely |
+| v3.2 remains deployed | 🔒 until a licensed gate win | A46 passed the metric gate, but unlicensed SAM-Road++ cannot be redistributed or deployed |
 | Mumbai is a development benchmark | 🔒 | Repeated model consultation invalidates untouched-test claims |
 | Promotion metric = strict common-unit chip APLS with paired uncertainty | 🔒 | Prevents tile/chip frame confounds and requires coverage/comparability |
 | Graph-first is the next model direction | 🔒 for A46 | A18 frozen and LoRA runs beat v3.2 on common-unit routing; absolute routing remains too low for deployment |
@@ -198,13 +198,19 @@ flowchart LR
 - **Product:** end-to-end batch and hosted-upload paths exist; sample dashboard and CPU analysis are runnable.
 - **Quality:** 318 local tests pass after A45; CI covers the full suite and the production dependency smoke.
 - **Deployment:** public dashboard responds, but the repository cannot prove the operator checklist or latest Modal/app rollout is complete.
-- **Model:** v3.2 deployed; A18-LoRA is a strong research result, not a release candidate.
+- **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** execute A46; researched web replacement F9 and O1 follow before X1.
+- **Immediate work:** finish the researched F9 web replacement and O1 deployment closure before X1.
 
 ---
 
 ## §10 · Daily Log
+
+**2026-07-18 (Akshat/coordinator — A46 closed honestly; F9 unblocked)**
+
+- Pre-registered the exact stage-1 winner before opening the 127-chip comparison: epoch 22, topology threshold `0.60`, 600 APLS samples per chip, epoch-18 incumbent and immutable v3.2 checksum.
+- Completed 127/127 candidate/incumbent/v3.2 coverage. Candidate raw APLS is `0.181165`, `+0.076053` over the incumbent with 95% CI `[+0.059871, +0.092975]`; normalized APLS is `0.301519`. Every frozen metric and provenance check passed.
+- Recorded a non-promotion despite the metric win: SAM-Road++ has no published license, so v3.2 stays production and MIT-licensed SAM-Road is the next reproducible graph-first experiment. F9 is now unblocked.
 
 **2026-07-16 (Akshat/coordinator — A46 checkpoint selected; calibration registered)**
 
