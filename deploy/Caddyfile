@@ -1,16 +1,19 @@
 # Route Resilience public TLS entrypoint. Port 8000 stays loopback-only.
 trace.tiwaribabu.in {
-    request_body {
-        max_size 12MB
-    }
-    header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains"
-        X-Content-Type-Options "nosniff"
-        X-Frame-Options "DENY"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        Permissions-Policy "camera=(), microphone=(), geolocation=()"
-        -Server
-    }
-    encode zstd gzip
-    reverse_proxy 127.0.0.1:8000
+	@invalid_host not host trace.tiwaribabu.in
+	respond @invalid_host 421
+
+	request_body {
+		max_size 12MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8000
 }
