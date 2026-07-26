@@ -65,6 +65,7 @@ def test_batch_mask_to_graph_characterization(tmp_path):
         processed_dir=tmp_path / "processed",
         resolution_m=0.5,
         min_edge_len_m=0.5,
+        consolidate=True,
     )
 
     graph, report = build_graph(cfg)
@@ -79,7 +80,7 @@ def test_batch_mask_to_graph_characterization(tmp_path):
         "bridges_rejected_corridor": 0,
     }
     assert _digest(_graph_payload(graph)) == (
-        "a0b26f7149f2d8db7f6559c02d1f43f4c97a8fea47881d08876ab232edf935b4"
+        "bac0d8fe91b57767b14a1c5bcdc81cc28d86a380211bbbba519ffcb54c4752e4"
     )
 
 
@@ -96,9 +97,13 @@ def test_upload_mask_to_graph_and_metrics_characterization():
         "n_edges": result.n_edges,
         "summary": result.summary,
     }
+    assert {
+        key: result.summary[key]
+        for key in ("efficiency_method", "efficiency_k", "efficiency_seed")
+    } == {"efficiency_method": "exact", "efficiency_k": None, "efficiency_seed": 42}
 
     assert _digest(payload) == (
-        "fe3096655846513864d1aa503c4ebe255d0aa60e4cfd0f1e00b2900871644f35"
+        "20303c7ac9988346cff5cec86ff967b6b448bf6076d09fa31e0d04e97db4b09d"
     )
 
 
@@ -121,6 +126,7 @@ def test_shared_mask_to_graph_sequence_characterization():
         resolution_m=0.5,
         min_edge_len_m=0.5,
         min_corridor_support=0.0,
+        consolidate=True,
     )
     graph, heal, simplify, consolidate, polyline = construct_graph(_two_component_mask(), cfg)
 

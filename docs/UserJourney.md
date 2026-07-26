@@ -1,113 +1,73 @@
-# UserJourney.md — Current Flows and F9 Parity Contract
+# TRACE user journeys
 
-## Users and entry points
+## Primary audience
 
-| User | Entry | Goal |
-|---|---|---|
-| Planner/disaster analyst | Hosted or local dashboard | Understand chokepoints and compare failures |
-| Geospatial reviewer | Dashboard Methodology plus exported evidence | Inspect assumptions, inferred roads and metric limits |
-| User with imagery | **Your imagery** tab | Segment one PNG/JPEG, analyze the derived graph and inspect the result |
-| Developer/researcher | CLI/notebook | Reproduce or evaluate a pipeline/model change |
+TRACE is a portfolio-grade technical demonstrator for transport, disaster-resilience, geospatial, and ML reviewers. The interface assumes curiosity, not prior graph-theory knowledge. It must expose evidence honestly enough for an expert without overwhelming a first-time visitor.
 
-The default sample path requires no GPU, checkpoint or secret. The upload path is enabled only when the Modal URL/key are configured.
+## Journey 1 — understand the product quickly
 
-## Navigation
+1. The visitor lands on the Panaji field atlas and immediately sees the road network, place, graph size, and current resilience state.
+2. A short mode strip communicates the product loop: **Explore → Stress → Compare → Recover**.
+3. Selecting the highest-ranked junction from the map or table updates a plain-language field insight explaining whether it is an articulation point or a high-flow junction.
+4. The methodology link explains the metric, sample provenance, model boundary, and limitations without interrupting the workspace.
 
-The current app has four top-level tabs:
+Success: within one minute the visitor can explain that TRACE extracts a road graph and measures how routing efficiency changes when important junctions fail.
 
-```text
-Route Resilience
-├─ Briefing
-│  ├─ baseline explanation and map
-│  └─ one-click worst-junction demonstration
-├─ Analysis
-│  ├─ Scenario
-│  ├─ Rankings
-│  ├─ Curves
-│  └─ Export
-├─ Your imagery
-│  └─ consent → segmentation → queued CPU analysis → result
-└─ Methodology
-   └─ pipeline, metrics, evidence and limitations
-```
+## Journey 2 — stress a critical junction
 
-## Flow A — Understand the baseline
+1. The visitor selects a critical junction.
+2. They choose **Test this junction**, which moves into Stress mode and stages the failure.
+3. Running the stress test sends the normalized node set to the CPU API.
+4. The result updates efficiency loss, surviving component fraction, failed links, and either a representative detour or a disconnection.
+5. The URL now carries the selected junction, mode, and failed-node set, so the scenario can be reloaded or shared.
 
-1. Open **Briefing** and read what the map and Resilience Index mean.
-2. Inspect the Panaji sample; brighter criticality colors indicate higher scores, while inferred/structural states also use labels and line styles.
-3. Trigger the worst-junction example or continue to **Analysis**.
-4. Compare the intact network with the selected failure and read the plain-language impact.
+Success: the scenario is deterministic, bounded, and derived from the same baseline/sampling policy as the committed evidence.
 
-Success: the user can explain which junction matters and what RI `1.0` represents without reading source code.
+## Journey 3 — compare and recover
 
-## Flow B — Analyze failures
+1. The visitor adds several failures and switches to Compare to vary baseline/scenario emphasis on the same map.
+2. They switch to Recover and remove junctions in descending criticality rank.
+3. Every removal automatically re-runs the scenario and exposes the recovered efficiency.
+4. Reset returns to the baseline without reloading the graph.
 
-1. Open **Analysis → Scenario**.
-2. Select a junction from the accessible control or click it on the map.
-3. Optionally draw/select an affected area for a compound failure.
-4. The app recomputes global-efficiency retention, component impact and a representative route when meaningful.
-5. Use **Rankings** to move between critical nodes and **Curves** to compare targeted/random degradation.
-6. Reset to return to the baseline.
+Success: recovery is clearly described as a criticality-ordered demonstration, not a claim of optimal infrastructure investment.
 
-Expected behavior:
+## Journey 4 — export evidence
 
-- A destructive change is not presented as a positive success state.
-- A split network remains mathematically valid; unreachable routes are explained rather than divided by infinity.
-- Multi-node scenarios do not invent a single travel-time percentage when it has no clear interpretation.
-- The map viewport and current scenario survive normal Streamlit reruns.
+1. At baseline or after a scenario, the visitor opens Export.
+2. GeoJSON contains the network plus current failed/scenario state.
+3. CSV contains ranked junction evidence and failure flags.
+4. Files are generated locally in the browser from already-loaded authoritative data.
 
-## Flow C — Upload imagery
+Success: a reviewer can inspect the exact graph and rankings behind the visible story.
 
-1. Open **Your imagery** and read/accept the processing disclosure.
-2. Choose a supported PNG/JPEG within the displayed decoded-size and pixel limits. Selection starts the configured Modal segmentation flow; there is no separate submit button.
-3. Wait through a possible scale-to-zero cold start. On a retryable transport failure, retry without losing the sample dashboard state.
-4. Modal returns a mask. If georeference is unavailable, choose/confirm the ground-sample-distance assumption used for metric graph lengths.
-5. The app persists the derived mask and versioned job state, displays queue position, then runs CPU P2/P3. Changing GSD submits a replacement analysis for that mask.
-6. Poll in the active browser session until the job is done, then inspect the uploaded-image graph and analysis. The filesystem queue survives normal process restarts, but there is no account/job library for recovering a result after the browser session is lost.
+## Journey 5 — analyze personal imagery
 
-Privacy/retention:
+1. The visitor opens **Analyze imagery** and selects a PNG or JPEG.
+2. The client immediately rejects unsupported type, more than 11 MiB, or more than 4096 px per side.
+3. The visitor supplies an estimated metres-per-pixel scale and explicitly confirms authenticated external GPU processing.
+4. The UI narrates queued, running, complete, or failed state while polling a capability URL.
+5. On completion it shows graph size, critical/articulation counts, worst-junction resilience, and the extracted network over the uploaded image.
+6. GeoJSON and JSON results can be downloaded; coordinates remain in honest image space.
 
-- There is no account or permanent project library.
-- Original upload bytes are handled in memory and sent to Modal.
-- Derived mask, queue state and result files live on the host temporarily and are age-cleaned (currently about 24 hours).
+Success: the upload reaches the maintained P1→P2→P3 path once, survives a normal app restart through the filesystem queue, never exposes the Modal secret, and never invents a georeference.
 
-## Flow D — Export and communicate
+## Failure and recovery states
 
-1. Open the Analysis export control after choosing a baseline or scenario.
-2. Download the current graph as GeoJSON and the summary as PNG.
-3. Preserve the visible assumptions/limitations when reusing the output.
+- If initial sample evidence cannot load, show a clear fatal state with retry.
+- If a simulation fails, preserve the current graph/selection and announce a dismissible error.
+- If basemap tiles fail, keep the authoritative network interactive and show an inline warning.
+- If Modal is not configured or wakes slowly, return an honest bounded error/status; never fake an analysis result.
+- If the CPU queue is busy, report queue position rather than starting competing analysis workers.
+- If an upload job fails, expose a safe public message while retaining internal detail only in server logs/state.
 
-Pipeline CSV/JSON evidence remains available to technical users but is not presented as a dashboard download unless the UI explicitly exposes it.
+## Keyboard and assistive-technology journey
 
-## Flow E — Review the method
+- A skip link moves directly to the workspace.
+- Mode tabs use arrow-key navigation and visible focus.
+- Every map-selectable critical junction exists in the semantic ranking table.
+- Buttons, ranges, toggles, upload consent, dialog close/Escape, exports, and recovery work without a pointer.
+- Status and errors use live regions; decorative graphics are hidden from assistive technology.
+- Reduced-motion users receive no essential animation.
 
-1. Open **Methodology**.
-2. Follow imagery → P1 → P2 → P3 → dashboard.
-3. Read the difference between predicted roads, healed roads, graph-theoretic bridges and resilience.
-4. Check the benchmark caveats: Mumbai is development evidence; grayscale is a PAN proxy; A18 is research-only and not deploy-ready.
-
-## Errors and recovery
-
-| Situation | Required response |
-|---|---|
-| Sample artifacts missing/corrupt | Explain the expected paths; do not show a raw traceback |
-| Modal configuration absent | Keep sample mode available and explain that upload is disabled |
-| Unsupported/oversized upload | Reject before remote inference and state the accepted limit/type |
-| Unauthorized/invalid Modal response | Fail closed, show a safe message and allow retry |
-| Cold start or queued work | Show stage/queue progress rather than a frozen page |
-| App restarts during a job | Recover queued/running state using claims/leases; do not duplicate live work |
-| Empty/degenerate mask graph | Mark the analysis failed; do not report a successful empty network |
-| Map tile provider unavailable | Keep controls/evidence usable and explain the basemap failure |
-| No nodes in a drawn area | Say that the selection affected no junctions |
-
-## F9 replacement goals
-
-The authorized web-stack replacement must improve this journey without changing its semantics:
-
-- clearer first-run choice between sample exploration and own imagery;
-- less tab/sub-tab hunting for the primary scenario flow;
-- responsive laptop/narrow layouts;
-- keyboard and screen-reader alternatives for every essential map action;
-- more legible job progress, evidence, privacy and uncertainty;
-- browser-tested completion of Flows A–E.
-- measured bundle/payload/Web-Vitals/map-interaction budgets before the Streamlit baseline is removed.
+Success: automated axe checks find zero serious/critical violations, browser journeys complete at 375/768/1024/1440 px without horizontal overflow, and a manual keyboard pass completes all five journeys.

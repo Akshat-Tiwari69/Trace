@@ -146,7 +146,15 @@ def run_inference(
         prob_path = sidecar_dir / "prob.png"
         save_prob_png(prob, prob_path)
 
-    manifest = write_manifest(aoi, interim_dir, transform, crs, prob_png=prob_path is not None)  # A26: georef for P2
+    manifest = write_manifest(
+        aoi,
+        interim_dir,
+        transform,
+        crs,
+        width=width,
+        height=height,
+        prob_png=prob_path is not None,
+    )  # A26: georef for P2
 
     # Record the checkpoint, threshold and commit beside the mask so P2/P3 can
     # carry the lineage into every downstream artifact.

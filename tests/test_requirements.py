@@ -38,7 +38,9 @@ def test_dependency_roles_are_isolated_and_aggregate_is_complete():
     dev = _pins("requirements-dev.txt")
     aggregate = _pins("requirements.txt")
 
-    assert "streamlit" in app and "streamlit" not in train
+    assert {"fastapi", "uvicorn", "python-multipart", "opencv-python-headless"} <= set(app)
+    assert {"streamlit", "folium", "streamlit-folium"}.isdisjoint(app)
+    assert "fastapi" not in train
     assert "segmentation-models-pytorch" in train and "segmentation-models-pytorch" not in app
     assert set(dev) == {"pytest", "jupyter"}
     assert aggregate == app | train | dev

@@ -12,7 +12,6 @@ from pathlib import Path
 
 import networkx as nx
 
-from src.pipeline.p1_segment.apls_eval import _DEG_X, _DEG_Y
 from src.pipeline.p1_segment.chip_apls_eval import (
     MIN_MATERIAL_APLS_DELTA, MIN_NORMALIZED_APLS,
     _candidate_sort_key, _graph_artifact_digest, _graph_diagnostics,
@@ -30,8 +29,8 @@ def test_coordinate_scaling_is_anisotropic():
     g = adj_to_apls_graph({(0, 0): [(2, 0)]}, eff_x=2.0, eff_y=3.0)
     (u, v, d), = g.edges(data=True)
     assert abs(d["length_m"] - 6.0) < 1e-9          # 2 rows * eff_y=3
-    # node (2,0): x from col=0, y from row=2*eff_y, each rescaled to degrees
-    xy = {(round(n["x"] * _DEG_X, 6), round(n["y"] * _DEG_Y, 6)) for _, n in g.nodes(data=True)}
+    # Node coordinates stay in the declared projected-metre frame.
+    xy = {(round(n["x"], 6), round(n["y"], 6)) for _, n in g.nodes(data=True)}
     assert (0.0, 0.0) in xy and (0.0, 6.0) in xy    # (col*eff_x, row*eff_y)
 
 

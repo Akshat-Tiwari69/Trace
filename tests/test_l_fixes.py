@@ -27,7 +27,7 @@ def test_modal_client_sends_auth_header_outside_json(monkeypatch):
         def __exit__(self, *_args):
             return False
 
-        def read(self):
+        def read(self, _limit=-1):
             return b'{"mask_png_b64":"AA==","threshold":0.5}'
 
     def _urlopen(request, timeout):
@@ -138,6 +138,23 @@ def test_analyze_mask_produces_graph_and_criticality():
     assert result.criticality["betweenness"].between(0, 1).all()
 
 
+def test_representative_reroute_prioritizes_and_counts_disconnections():
+    import networkx as nx
+
+    from src.app.service import representative_reroute
+
+    graph = nx.MultiGraph()
+    for neighbour in (1, 2, 3):
+        graph.add_edge(0, neighbour, length_m=1.0)
+    graph.add_edge(1, 2, length_m=10.0)  # one finite alternative; node 3 is cut off
+
+    route = representative_reroute(graph, 0)
+
+    assert route is not None and route["rerouted_path"] is None
+    assert route["disconnected_pairs"] == 2
+    assert {route["origin"], route["destination"]} == {1, 3}
+
+
 def test_analyze_mask_rejects_empty_mask():
     import pytest
 
@@ -196,118 +213,3 @@ def test_analyze_mask_busy_when_semaphore_saturated(monkeypatch):
     monkeypatch.undo()
     result = upload_analysis.analyze_mask(mask, resolution_m=0.5)
     assert result.n_nodes > 0
-
-
-# --------------------------------------------------------------------------- #
-# A37 follow-up — vectorized edge-style computation for the single GeoJson
-# road layer, replacing the per-edge folium.PolyLine loop.
-# Pure pandas/numpy: importable and callable without a Streamlit runtime.
-# --------------------------------------------------------------------------- #
-def _tiny_edge_gdf():
-    import geopandas as gpd
-    from shapely.geometry import LineString
-
-    return gpd.GeoDataFrame(
-        {
-            "u": [1, 3, 5, 7],
-            "v": [2, 4, 6, 8],
-            "is_bridged": [False, True, False, False],
-            "is_bridge": [False, False, True, False],
-            "geometry": [LineString([(0, 0), (1, 1)]) for _ in range(4)],
-        }
-    )
-
-
-def _tiny_colour_scale():
-    import branca.colormap as cm
-
-    from src.app.app import TOKENS
-
-    return cm.LinearColormap(
-        colors=[TOKENS["ramp_0"], TOKENS["ramp_1"], TOKENS["ramp_2"], TOKENS["ramp_3"]],
-        vmin=0.0,
-        vmax=1.0,
-    )
-
-
-def test_compute_edge_styles_matches_original_precedence():
-    from src.app.app import TOKENS, compute_edge_styles
-
-    edges = _tiny_edge_gdf()
-    scores = {1: 0.0, 2: 1.0, 3: 0.5, 4: 0.5, 5: 0.2, 6: 0.2, 7: 0.9, 8: 0.9}
-    styled = compute_edge_styles(
-        "test-fp-a", edges, scores, _tiny_colour_scale(),
-        disabled_nodes=(7, 8), show_healed=True, show_spof=True,
-    )
-    by_pair = {(int(r.u), int(r.v)): r for r in styled.itertuples()}
-
-    observed = by_pair[(1, 2)]
-    assert observed.state == "observed link"
-    assert observed.dash_array is None
-
-    healed = by_pair[(3, 4)]
-    assert healed.state == "healed link"
-    assert healed.dash_array == "8 6"
-    assert healed.weight == 4
-
-    spof = by_pair[(5, 6)]
-    assert spof.state == "critical bridge"
-    assert spof.color == TOKENS["spof"]
-    assert spof.weight == 5
-    assert spof.dash_array is None
-
-    disabled = by_pair[(7, 8)]
-    assert disabled.state == "disabled link"
-    assert disabled.color == TOKENS["disabled"]
-    assert disabled.dash_array == "8 6"
-    assert disabled.opacity == 0.45
-
-
-def test_compute_edge_styles_maps_confidence_to_opacity():
-    """A ``confidence`` column fades low-confidence edges, clipped
-    to [0.35, 1.0] so nothing goes fully invisible; disabled/spof keep their own
-    fixed opacity regardless of confidence."""
-    import geopandas as gpd
-
-    from src.app.app import compute_edge_styles
-
-    edges = _tiny_edge_gdf()
-    edges["confidence"] = [0.0, 0.9, 0.5, 0.2]  # edge (7,8) is the disabled one
-    scores = {1: 0.0, 2: 1.0, 3: 0.5, 4: 0.5, 5: 0.2, 6: 0.2, 7: 0.9, 8: 0.9}
-    styled = compute_edge_styles(
-        "test-fp-conf", edges, scores, _tiny_colour_scale(),
-        disabled_nodes=(7, 8), show_healed=True, show_spof=True,
-    )
-    by_pair = {(int(r.u), int(r.v)): r for r in styled.itertuples()}
-
-    # confidence=0.0 clipped up to the 0.35 floor, never invisible.
-    assert by_pair[(1, 2)].opacity == 0.35
-    assert by_pair[(3, 4)].opacity == 0.9
-    # (5, 6) is the spof edge — fixed 0.95 regardless of its confidence=0.5.
-    assert by_pair[(5, 6)].opacity == 0.95
-    # (7, 8) is disabled — fixed 0.45 regardless of its confidence=0.2.
-    assert by_pair[(7, 8)].opacity == 0.45
-
-    # No confidence column -> unchanged fixed opacity (existing behaviour).
-    plain = _tiny_edge_gdf()
-    assert isinstance(plain, gpd.GeoDataFrame)
-    styled_plain = compute_edge_styles(
-        "test-fp-conf-none", plain, scores, _tiny_colour_scale(),
-        disabled_nodes=(), show_healed=True, show_spof=False,
-    )
-    by_pair_plain = {(int(r.u), int(r.v)): r for r in styled_plain.itertuples()}
-    assert by_pair_plain[(1, 2)].opacity == 0.85
-
-
-def test_compute_edge_styles_show_healed_false_drops_bridged_edges():
-    from src.app.app import compute_edge_styles
-
-    edges = _tiny_edge_gdf()
-    scores = {1: 0.0, 2: 1.0, 3: 0.5, 4: 0.5, 5: 0.2, 6: 0.2, 7: 0.9, 8: 0.9}
-    styled = compute_edge_styles(
-        "test-fp-b", edges, scores, _tiny_colour_scale(),
-        disabled_nodes=(), show_healed=False, show_spof=True,
-    )
-    pairs = set(zip(styled["u"].astype(int), styled["v"].astype(int)))
-    assert (3, 4) not in pairs  # the healed/bridged edge was suppressed
-    assert (1, 2) in pairs

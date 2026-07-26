@@ -9,6 +9,8 @@ disconnects. Also checks the targeted-vs-random sanity property from
 from __future__ import annotations
 
 import math
+import random
+from pathlib import Path
 
 import networkx as nx
 import pytest
@@ -20,7 +22,11 @@ from src.pipeline.p3_analysis.criticality import (
     rank_table,
 )
 from src.pipeline.p3_analysis.resilience import (
+    AUTO_EFFICIENCY_SAMPLES,
+    EFFICIENCY_SEED,
+    RANDOM_REMOVAL_SEED,
     ablation_curve,
+    efficiency_sampling_policy,
     global_efficiency,
     resilience_index,
 )
@@ -113,7 +119,8 @@ def test_resilience_index_uses_baseline_node_universe():
     g.add_node(2)  # removing this isolate used to shrink N and produce RI=3
     result = resilience_index(g, removed_nodes=[2])
     assert result["resilience_index"] == pytest.approx(1.0)
-    assert result["travel_time_delta_pct"] == pytest.approx(0.0)
+    assert result["efficiency_loss_pct"] == pytest.approx(0.0)
+    assert "travel_time_delta_pct" not in result
     assert 0.0 <= result["resilience_index"] <= 1.0
 
 
@@ -149,6 +156,94 @@ def test_largest_cc_fraction_reported():
     result = resilience_index(g, [chokepoint])
     # failed node remains an isolate in the baseline universe: largest CC = 3/6
     assert result["largest_cc_fraction"] == pytest.approx(3 / 6)
+    # Of the five still-active nodes, three remain mutually connected.
+    assert result["active_largest_cc_fraction"] == pytest.approx(3 / 5)
+
+
+def test_resilience_rejects_duplicate_or_unknown_removals():
+    graph = _path3()
+    with pytest.raises(ValueError, match="duplicate"):
+        resilience_index(graph, [1, 1])
+    with pytest.raises(ValueError, match="unknown"):
+        resilience_index(graph, [99])
+
+
+def test_efficiency_sampling_policy_is_disclosed_and_overridable():
+    small = nx.path_graph(256)
+    large = nx.path_graph(300)
+
+    assert efficiency_sampling_policy(small) == {
+        "method": "exact", "k": None, "seed": 42, "active_nodes": 256,
+    }
+    assert efficiency_sampling_policy(large) == {
+        "method": "sampled", "k": 256, "seed": 42, "active_nodes": 300,
+    }
+    assert efficiency_sampling_policy(large, exact=True)["method"] == "exact"
+
+
+def test_sampled_ri_stays_within_preregistered_error_budget():
+    from src.pipeline.p2_graph.graph_io import load_geojson_graph
+
+    def sequences(graph):
+        nodes = sorted(graph, key=lambda node: (type(node).__name__, repr(node)))
+        targeted = sorted(
+            nodes,
+            key=lambda node: float(graph.nodes[node].get("betweenness", 0.0)),
+            reverse=True,
+        )[:25]
+        random_order = nodes[:]
+        random.Random(RANDOM_REMOVAL_SEED).shuffle(random_order)
+        return targeted, random_order[:25]
+
+    def max_error(graph, sequence):
+        exact = ablation_curve(graph, sequence=sequence)
+        sampled = ablation_curve(
+            graph,
+            sequence=sequence,
+            k=AUTO_EFFICIENCY_SAMPLES,
+            source_seed=EFFICIENCY_SEED,
+        )
+        return max(
+            abs(left.resilience_index - right.resilience_index)
+            for left, right in zip(exact, sampled)
+        )
+
+    sample = load_geojson_graph(
+        Path(__file__).parents[1] / "data/sample/panaji_demo_graph.geojson"
+    )
+    for sequence in sequences(sample):
+        assert max_error(sample, sequence) <= 0.02
+
+    grid = nx.convert_node_labels_to_integers(nx.grid_2d_graph(17, 17))
+    nx.set_edge_attributes(grid, 1.0, "length_m")
+    for sequence in sequences(grid):
+        assert max_error(grid, sequence) <= 0.02
+
+
+def test_random_removal_and_efficiency_source_seeds_are_independent(monkeypatch):
+    sampled_sources = []
+    real = global_efficiency
+
+    def spy(graph, weight="length_m", k=None, seed=42, sources=None):
+        if sources is not None:
+            sampled_sources.append(tuple(sources))
+        return real(graph, weight, k=k, seed=seed, sources=sources)
+
+    monkeypatch.setattr("src.pipeline.p3_analysis.resilience.global_efficiency", spy)
+    graph = nx.path_graph(12)
+    nx.set_edge_attributes(graph, 1.0, "length_m")
+    ablation_curve(
+        graph,
+        order="random",
+        steps=2,
+        k=4,
+        seed=RANDOM_REMOVAL_SEED,
+        source_seed=EFFICIENCY_SEED,
+    )
+
+    stable_nodes = sorted(graph, key=lambda node: (type(node).__name__, repr(node)))
+    expected = random.Random(EFFICIENCY_SEED).sample(stable_nodes, 4)
+    assert sampled_sources and sampled_sources[0] == tuple(expected)
 
 
 def test_sampled_ablation_reuses_fixed_sources(monkeypatch):
@@ -182,6 +277,19 @@ def test_ablation_curve_preserves_baseline_node_universe():
     assert [point.largest_cc_fraction for point in curve] == pytest.approx(
         [0.5, 0.5, 0.5, 0.25]
     )
+    assert [point.active_largest_cc_fraction for point in curve] == pytest.approx(
+        [0.5, 2 / 3, 1.0, 1.0]
+    )
+
+
+def test_ablation_curve_rejects_invalid_removal_requests():
+    graph = _path3()
+    with pytest.raises(ValueError, match="duplicate"):
+        ablation_curve(graph, sequence=[1, 1])
+    with pytest.raises(ValueError, match="unknown"):
+        ablation_curve(graph, sequence=[99])
+    with pytest.raises(ValueError, match="steps"):
+        ablation_curve(graph, sequence=[1], steps=-1)
 
 
 def test_targeted_ablation_requires_betweenness():

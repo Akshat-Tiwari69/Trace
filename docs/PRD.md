@@ -1,102 +1,71 @@
-# PRD.md — Product Requirements
+# TRACE product requirements
 
 ## Product statement
 
-Route Resilience turns satellite imagery or a prepared road graph into an explainable resilience analysis. It extracts road evidence, repairs selected gaps with explicit uncertainty, identifies structural chokepoints and lets a planner explore how junction or area failures change routing and global efficiency.
+TRACE is a map-led route-resilience demonstrator that converts satellite imagery into a routable road graph, ranks vulnerable junctions, and shows how targeted failures change network efficiency. It is designed to make an ML/graph pipeline inspectable and memorable in a recruiter or technical-review setting.
 
-The product is a research prototype for decision support—not a certified road map, emergency-routing authority or proof that every inferred connection exists on the ground.
+## Goals
 
-## Problem
+- Demonstrate a real end-to-end P1→P2→P3 system, not a static design mock.
+- Present committed sample evidence immediately without a checkpoint or GPU.
+- Let users stress, compare, recover, and export a scenario.
+- Let authorized users submit their own imagery through the authenticated Modal P1 boundary and CPU P2/P3 queue.
+- Be responsive, keyboard-operable, accessible, performant, and deployable on the existing small Oracle ARM host.
+- State model, metric, coordinate, sampling, and generalization limits honestly.
 
-Satellite-derived road masks fragment under shadows, vegetation, buildings, vehicles and sensor/domain change. Pixel accuracy alone does not show whether the result is useful for routing. Even a good road graph still needs a finite, interpretable way to describe which failures matter.
+## Non-goals
 
-Route Resilience addresses both layers:
+- Turn-by-turn navigation, traffic prediction, or real-time road closures.
+- A claim that criticality-ordered recovery is an optimal capital plan.
+- A database, account system, team workspace, or saved cloud projects.
+- Invented longitude/latitude for uploaded imagery without georeference.
+- Deployment of an unlicensed research model, even if its evaluation score is higher.
 
-1. produce road masks/graphs while preserving confidence, geometry and provenance;
-2. measure topology and network degradation rather than relying only on pixels;
-3. make the evidence explorable by a non-technical user.
+## Functional requirements
 
-## Users
-
-- **Urban and transport planners:** identify junctions and corridors that deserve redundancy or maintenance attention.
-- **Disaster-management teams:** explore localized and compound failures before an incident.
-- **Geospatial/remote-sensing reviewers:** inspect extraction, topology, provenance and limitations.
-- **Developers/researchers:** reproduce pipeline stages and evaluate model or graph changes.
-
-## Current product capabilities
-
-| ID | Requirement | Current state |
+| ID | Requirement | Acceptance |
 |---|---|---|
-| **FR1** | Run an end-to-end imagery→mask→graph→analysis pipeline | Shipped via `src.pipeline.run_pipeline` |
-| **FR2** | Accept local raster imagery, including georeferenced RGB/multiband/one-band GeoTIFF/PAN | Shipped for batch/local inference |
-| **FR3** | Accept bounded PNG/JPEG imagery in the public dashboard | Shipped through authenticated Modal P1 |
-| **FR4** | Fine-tune pretrained PyTorch road models; never train a backbone from scratch | Shipped; v3.2 remains deployed |
-| **FR5** | Preserve mask alignment, optional probabilities and model provenance | Shipped |
-| **FR6** | Convert masks to a routable MultiGraph and improve fragmentation without forcing false full connectivity | Shipped |
-| **FR7** | Preserve parallel edges, geometry, inferred-edge flags, confidence when available and positive metric lengths | Shipped |
-| **FR8** | Rank critical nodes and expose articulation points/bridges | Shipped |
-| **FR9** | Simulate single-junction and area/compound failures | Shipped, including drawn flood polygons and keyboard alternatives |
-| **FR10** | Report a finite, bounded Resilience Index based on baseline-normalized global efficiency | Shipped for single-scenario and multi-step paths; failed nodes preserve the baseline universe |
-| **FR11** | Show rerouting, criticality, resilience curves and rankings in an accessible map-led web experience | Shipped in the current Streamlit/Folium baseline; full replacement authorized for F9 |
-| **FR12** | Export the current graph and a concise visual summary | Shipped as GeoJSON and PNG |
-| **FR13** | Evaluate routing/topology with a common-unit protocol and paired uncertainty | Shipped for v3.2 vs A18 research comparisons |
+| FR1 | Load a committed sample AOI | Panaji metadata, graph, criticality, curve, and manifest load without GPU/checkpoint |
+| FR2 | Explore critical junctions | Map and semantic ranking select the same junction and expose rank/role |
+| FR3 | Run node-failure scenarios | API returns bounded RI, efficiency loss, component fractions, sampling disclosure, and route/disconnection evidence |
+| FR4 | Compare baseline/scenario | Same graph supports legible comparison without a duplicate payload |
+| FR5 | Recover failures | Removed junctions can be restored in criticality order with deterministic recalculation |
+| FR6 | Preserve/share state | Mode, selected junction, and failed set survive reload through the URL |
+| FR7 | Export current evidence | GeoJSON and criticality CSV reflect the current scenario |
+| FR8 | Analyze uploaded imagery | Validated PNG/JPEG → Modal mask → queued CPU P2/P3 → status/result/image-space graph |
+| FR9 | Recover queued work | Filesystem queue survives a normal process restart and cleans stale artifacts |
+| FR10 | Explain methodology | Metric, sample/model provenance, coordinate policy, sampling, and limitations are public |
+| FR11 | Fail honestly | Tile, API, upload, configuration, and analysis failures show actionable safe states; no fabricated output |
 
 ## Quality requirements
 
-- **Honesty:** distinguish observed, predicted and healed roads; state benchmark and sensor limitations next to claims.
-- **Reproducibility:** record checkpoint checksum, architecture, threshold, Git revision, config and stage signatures.
-- **Correctness:** metric coordinates when georeference exists; positive edge lengths; graph/file round trips; bounded RI.
-- **Performance:** P2/P3/dashboard remain CPU-capable; hosted P1 uses a scale-to-zero GPU; large operations use measured sampling/caching.
-- **Accessibility:** important map interactions have labeled, keyboard-accessible alternatives; color is never the only signal.
-- **Reliability:** queued uploads survive normal app reruns/restarts on the single host; production deploys use immutable refs, health checks and rollback.
-- **Privacy/security:** no user accounts or permanent upload library; source bytes are processed in memory, while derived queue artifacts are age-cleaned; service authentication and size validation fail closed.
+| ID | Requirement | Acceptance |
+|---|---|---|
+| QR1 | Correctness | Baseline-normalized global efficiency preserves the baseline node universe and is finite in `[0,1]` |
+| QR2 | Graph fidelity | Parallel edges, closed rings, positive lengths, coordinate metadata, and GraphML/GeoJSON agreement are tested |
+| QR3 | Accessibility | WCAG 2.2 AA; zero serious/critical axe findings; keyboard completion; 44 px primary targets; reduced motion |
+| QR4 | Responsiveness | No horizontal overflow and usable flows at 375, 768, 1024, and 1440 px; 200% zoom remains usable |
+| QR5 | Performance | Static bundle/payload budgets pass; live p75 target LCP ≤2.5 s, INP ≤200 ms, CLS ≤0.1 |
+| QR6 | Security | Upload type/signature/size/dimension validation, explicit processing consent, rate limits, trusted hosts, safe errors, loopback app port |
+| QR7 | Reproducibility | Seeds, sample size/method, versions, immutable release ref, artifact hashes, and evidence are recorded |
+| QR8 | Operability | One-worker Uvicorn, Caddy TLS/compression/body limit, systemd hardening, health checks, automatic rollback |
 
-## Evidence and success criteria
+## Evidence and model policy
 
-| Area | Promotion/success criterion |
-|---|---|
-| Mask model | Report IoU/Dice on a named development/evaluation unit at the model’s deploy protocol; pass anti-forgetting and runtime/checkpoint gates |
-| Routing model | Improve strict common-unit chip APLS with complete coverage and a paired interval excluding zero; also improve the absolute share of achievable routing |
-| Graph healing | Improve connectivity/routing evidence without unacceptable false bridges; keep inferred edges inspectable |
-| Resilience | Targeted failures degrade baseline-normalized global efficiency faster than matched random failures on the evaluated graph; RI remains in `[0,1]` |
-| Generalization | Final claims require an untouched geography/sensor; Mumbai alone is development evidence |
-| Product | A non-technical user can understand the baseline, run a scenario or upload, interpret limitations and export a result without developer assistance |
-| Operations | The approved immutable ref is live and the public sample/upload flows pass an operator smoke test |
+- Production P1 remains the licensed PyTorch `a4-roadseg-v3.2` checkpoint at threshold `0.52` until a replacement passes the frozen promotion protocol and license review.
+- The SAM-Road++ graph-first candidate won the registered routing comparison but cannot be shipped because no usable upstream license is published.
+- SpaceNet-5 Mumbai is a repeatedly consulted development benchmark, not an untouched final test set.
+- The product does not claim demonstrated generalization to every city, sensor, weather condition, or road class.
+- Sample and live metrics come from Python domain code; the React client only formats and visualizes them.
 
-## Current evidence
+## Release definition
 
-- v3.2 is the best deployed **mask** model on the repeatedly consulted SpaceNet-5 Mumbai development benchmark.
-- Heavy TTA, stronger occlusion fine-tuning, clDice-first fine-tuning, Massachusetts mixing, OSM mean-teacher self-training, foreground-biased crops and SDT-BCE did not produce a safe routing promotion.
-- A18 SAM-Road++ and its LoRA variant beat v3.2 on the same chip/vector-GT routing frame, validating graph-first research. Absolute routing remains too low for deployment.
-- Real Cartosat PAN and new-geography generalization remain unproven.
+A release is complete only when:
 
-`Evaluation.md` owns exact numbers and protocols; `Research.md` owns experiment rationale and negative results.
-
-## Current scope
-
-In scope:
-
-- Single-AOI research analysis from committed sample artifacts or one uploaded/local image.
-- Pretrained PyTorch model fine-tuning and graph-first research.
-- Classical CPU graph construction, healing, criticality and global-efficiency scenarios.
-- Public map-led demonstration on a single Oracle host with Modal P1 (currently Streamlit/Folium; replacement approved for F9).
-- Reproducible files, evaluation and exports.
-
-Out of scope:
-
-- Certified navigation, emergency dispatch or claims of complete road-map accuracy.
-- Accounts, collaborative projects, permanent storage, database or multi-tenant platform.
-- Live traffic/GPS feeds and lane-level travel-time modeling.
-- National-scale serving or horizontally distributed queue workers.
-- Native mobile application.
-- Final sensor/geographic claims before new held-out evidence exists.
-
-## Next product gates
-
-1. A44 documentation and evidence coherence.
-2. A45 code simplification/performance with preserved contracts.
-3. A46 graph-first absolute-routing improvement plus licensing/reproducibility resolution.
-4. F9 researched web-stack replacement on the stable domain architecture.
-5. O1 live deployment reconciliation and X1 final capture.
-
-The ordered execution plan lives in `Implementation.md`; live status lives only in `Tracker.md`.
+1. Python unit/integration tests and production-dependency smoke pass.
+2. TypeScript typecheck, lint, unit tests, static build, and bundle budgets pass.
+3. Browser stress/upload/export/responsive/axe journeys pass.
+4. Independent code, Python, security, and UI reviews have no unresolved blocking findings.
+5. The PR is approved and merged into `dev`, never `main`.
+6. An immutable full SHA/tag is deployed; live home, health, simulation, upload validation, authenticated upload, firewall, and rollback checks pass.
+7. The deployed SHA, Modal checkpoint checksum/ref, time, and evidence are recorded in `docs/Tracker.md`.

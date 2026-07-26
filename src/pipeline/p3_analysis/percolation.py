@@ -36,13 +36,24 @@ def degree_demand(graph) -> dict[int, float]:
 def spatial_demand(graph, corner: str = "se", sigma_frac: float = 0.33) -> dict[int, float]:
     """A Gaussian demand bump centred at a bbox ``corner`` — a synthetic population
     centre. ``sigma_frac`` is the falloff as a fraction of the AOI extent."""
-    xs = [d["x"] for _, d in graph.nodes(data=True)]
-    ys = [d["y"] for _, d in graph.nodes(data=True)]
+    if graph.number_of_nodes() == 0:
+        raise ValueError("spatial demand requires at least one node")
+    if not math.isfinite(sigma_frac) or sigma_frac <= 0:
+        raise ValueError("sigma_frac must be a finite positive number")
+    try:
+        xs = [float(d["x"]) for _, d in graph.nodes(data=True)]
+        ys = [float(d["y"]) for _, d in graph.nodes(data=True)]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("every node must have finite numeric x/y coordinates") from exc
+    if not all(math.isfinite(value) for value in (*xs, *ys)):
+        raise ValueError("every node must have finite numeric x/y coordinates")
     corners = {
         "se": (max(xs), min(ys)), "sw": (min(xs), min(ys)),
         "ne": (max(xs), max(ys)), "nw": (min(xs), max(ys)),
         "centre": ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2),
     }
+    if corner not in corners:
+        raise ValueError(f"corner must be one of {sorted(corners)}, got {corner!r}")
     px, py = corners[corner]
     sigma = sigma_frac * max(max(xs) - min(xs), max(ys) - min(ys)) or 1.0
     return {n: math.exp(-(((d["x"] - px) ** 2 + (d["y"] - py) ** 2) / (2 * sigma * sigma)))
@@ -53,6 +64,14 @@ def percolation_centrality(graph, states: dict[int, float], weight: str = "lengt
     """Demand-weighted betweenness via ``nx.percolation_centrality`` (states = demand)."""
     import networkx as nx
 
+    if set(states) != set(graph.nodes):
+        raise ValueError("states must provide a value for every graph node")
+    if not all(math.isfinite(value) and 0.0 <= value <= 1.0 for value in states.values()):
+        raise ValueError("percolation states must be finite values in [0, 1]")
+    if graph.number_of_nodes() < 3:
+        return {node: 0.0 for node in graph}
+    if sum(value > 0.0 for value in states.values()) < 2:
+        raise ValueError("percolation states must contain at least two positive values")
     return nx.percolation_centrality(graph, states=states, weight=weight)
 
 
@@ -65,17 +84,29 @@ def compare_centralities(graph, states: dict[int, float], weight: str = "length_
     """
     from scipy.stats import spearmanr
 
+    if graph.number_of_nodes() == 0:
+        raise ValueError("centrality comparison requires at least one node")
+    if top_n < 0:
+        raise ValueError("top_n must be non-negative")
+    top_n = min(top_n, graph.number_of_nodes())
     bc = compute_betweenness(graph, weight=weight)
     pc = percolation_centrality(graph, states, weight=weight)
     nodes = list(graph.nodes)
-    rho = float(spearmanr([bc[n] for n in nodes], [pc[n] for n in nodes]).statistic)
+    bc_values = [bc[n] for n in nodes]
+    pc_values = [pc[n] for n in nodes]
+    constant_ranking = len(set(bc_values)) < 2 or len(set(pc_values)) < 2
+    rho = None if constant_ranking else float(spearmanr(bc_values, pc_values).statistic)
 
     top_bc = sorted(bc, key=bc.get, reverse=True)[:top_n]
     top_pc = sorted(pc, key=pc.get, reverse=True)[:top_n]
     overlap = len(set(top_bc) & set(top_pc)) / top_n if top_n else 1.0
     promoted = [int(n) for n in top_pc if n not in top_bc]  # rose into top-N under demand
     return {
-        "spearman": round(rho, 4),
+        "spearman": round(rho, 4) if rho is not None else None,
+        "spearman_defined": rho is not None,
+        "spearman_reason": (
+            None if rho is not None else "undefined because at least one ranking is constant"
+        ),
         "top_n": top_n,
         "top_n_overlap": round(overlap, 3),
         "top_betweenness": [int(n) for n in top_bc],
@@ -94,10 +125,15 @@ def run(aoi: str, sample_dir: Path = Path("data/sample"),
 
     out = sample_dir / f"{aoi}_percolation.json"
     out.write_text(json.dumps(result, indent=2))
+    spearman = (
+        f"{result['spearman']:.3f}"
+        if result["spearman_defined"]
+        else result["spearman_reason"]
+    )
     print(
         f"\n=== Demand-weighted criticality — {aoi} ===\n"
         f"demand: synthetic population @ {corner} corner\n"
-        f"Spearman(betweenness, percolation) = {result['spearman']:.3f} | "
+        f"Spearman(betweenness, percolation) = {spearman} | "
         f"top-{top_n} overlap {result['top_n_overlap']:.0%}\n"
         f"  top betweenness: {result['top_betweenness'][:5]}\n"
         f"  top percolation: {result['top_percolation'][:5]}\n"

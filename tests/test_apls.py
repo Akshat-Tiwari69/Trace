@@ -25,7 +25,7 @@ def _line_graph(n: int = 5) -> nx.Graph:
 
 def test_apls_identical_is_one():
     g = _line_graph()
-    result = apls(g, g.copy(), n_samples=50, tol_m=20.0)
+    result = apls(g, g.copy(), coordinate_system="geographic", n_samples=50, tol_m=20.0)
     assert result["apls"] == pytest.approx(1.0, abs=1e-9)
 
 
@@ -33,7 +33,7 @@ def test_apls_drops_when_proposal_breaks_a_path():
     gt = _line_graph(5)
     prop = gt.copy()
     prop.remove_edge(2, 3)               # split the chain → some pairs unrouteable
-    result = apls(gt, prop, n_samples=300, tol_m=20.0)
+    result = apls(gt, prop, coordinate_system="geographic", n_samples=300, tol_m=20.0)
     assert result["apls"] < 1.0
 
 
@@ -42,7 +42,7 @@ def test_apls_zero_without_correspondence():
     prop = _line_graph(4)
     for n in prop.nodes:                 # move the proposal ~100 km away
         prop.nodes[n]["x"] += 1.0
-    result = apls(gt, prop, n_samples=50, tol_m=20.0)
+    result = apls(gt, prop, coordinate_system="geographic", n_samples=50, tol_m=20.0)
     assert result["apls"] == 0.0         # nothing snaps within tolerance
 
 
@@ -52,7 +52,7 @@ def test_apls_detour_scores_between_zero_and_one():
     prop = _line_graph(3)
     # make the 1—2 leg much longer in the proposal (a detour), keep it routable
     prop.edges[1, 2]["length_m"] = SEG_M * 5
-    result = apls(gt, prop, n_samples=200, tol_m=20.0)
+    result = apls(gt, prop, coordinate_system="geographic", n_samples=200, tol_m=20.0)
     assert 0.0 < result["apls"] < 1.0
 
 
@@ -61,7 +61,9 @@ def test_apls_penalizes_fragmented_identical_graph():
     for i in range(20):
         g.add_node(i, x=73.82 + i * SPACING_DEG, y=15.49)
     g.add_edge(0, 1, length_m=SEG_M)
-    result = apls(g, g.copy(), n_samples=5000, interval_m=1000.0)
+    result = apls(
+        g, g.copy(), coordinate_system="geographic", n_samples=5000, interval_m=1000.0
+    )
     assert result["apls"] < 0.05
     assert result["reachable_pair_fraction_gt"] == pytest.approx(2 / (20 * 19), abs=1e-4)
 
@@ -99,3 +101,44 @@ def test_apls_oneway_reuses_shortest_paths_by_source(monkeypatch):
 
     assert _apls_oneway(graph, graph, snap, n_samples, "length_m", seed) == 1.0
     assert calls == expected_calls
+
+
+def test_apls_empty_proposal_is_explicit_zero_result():
+    result = apls(
+        _line_graph(), nx.Graph(), coordinate_system="geographic", n_samples=20
+    )
+    assert result["apls"] == result["apls_gt_to_prop"] == 0.0
+    assert result["apls_prop_to_gt"] == 0.0
+    assert result["reachable_pair_fraction_prop"] == 0.0
+    assert result["coordinate_system"] == "geographic"
+
+
+def test_apls_projected_coordinates_are_not_reprojected_or_guessed():
+    gt = nx.path_graph(2)
+    prop = nx.path_graph(2)
+    for graph, offset in ((gt, 0.0), (prop, 0.001)):
+        graph.nodes[0].update(x=offset, y=0.0)
+        graph.nodes[1].update(x=10.0 + offset, y=0.0)
+        graph.edges[0, 1]["length_m"] = 10.0
+
+    projected = apls(
+        gt, prop, coordinate_system="projected", n_samples=20, tol_m=1.0, interval_m=100.0
+    )
+    geographic = apls(
+        gt, prop, coordinate_system="geographic", n_samples=20, tol_m=1.0, interval_m=100.0
+    )
+    assert projected["apls"] == 1.0
+    assert geographic["apls"] == 0.0
+
+
+def test_apls_rejects_implicit_or_invalid_coordinate_mode():
+    with pytest.raises(TypeError):
+        apls(_line_graph(), _line_graph())
+    with pytest.raises(ValueError, match="coordinate_system"):
+        apls(_line_graph(), _line_graph(), coordinate_system="guess")
+    for tol_m in (0.0, float("nan")):
+        with pytest.raises(ValueError, match="tol_m"):
+            apls(
+                _line_graph(), _line_graph(),
+                coordinate_system="geographic", tol_m=tol_m,
+            )

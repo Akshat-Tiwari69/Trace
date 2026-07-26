@@ -53,7 +53,7 @@ class PipelineConfig:
     min_edge_len_m: float = 1.0
     simplify: bool = True
     min_stub_len_m: float = 15.0
-    consolidate: bool = True
+    consolidate: bool = False
     consolidate_tol_m: float = 10.0
     simplify_geom: bool = True
     geom_tol_m: float = 1.5

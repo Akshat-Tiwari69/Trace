@@ -58,10 +58,9 @@ def test_loader_rejects_zero_length_edges(tmp_path):
     g.add_node(2, x=0.0, y=0.0)
     g.add_edge(1, 2, length_m=0.0, geometry=[[0.0, 0.0], [0.0, 0.0]], is_bridged=False)
     path = tmp_path / "bad.graphml"
-    save_graphml(g, path)
-
-    with pytest.raises(ValueError, match="length_m"):
-        load_graphml(path)
+    with pytest.raises(ValueError, match="positive route weight"):
+        save_graphml(g, path)
+    assert not path.exists()
 
 
 # --------------------------------------------------------------------------- #
@@ -211,3 +210,19 @@ def test_geographic_raster_transform_is_converted_to_metres():
     pixel_m = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
     assert 0.8 < pixel_m < 1.3
     assert metric_crs.is_projected
+
+
+def test_projected_feet_transform_is_converted_to_metres():
+    from affine import Affine
+    from pyproj import CRS
+
+    from src.pipeline.p2_graph.skeleton_graph import ensure_metric_transform
+
+    feet = Affine(10.0, 0.0, 2_000_000.0, 0.0, -10.0, 14_000_000.0)
+    metric, metric_crs = ensure_metric_transform(
+        feet, "EPSG:2277", width=100, height=100)
+    x0, y0 = metric * (50, 50)
+    x1, y1 = metric * (51, 50)
+    pixel_m = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+    assert 2.9 < pixel_m < 3.2
+    assert CRS.from_user_input(metric_crs).axis_info[0].unit_conversion_factor == pytest.approx(1.0)

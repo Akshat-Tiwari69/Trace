@@ -197,10 +197,10 @@ def _two_parallel_edge_features():
 
 
 def test_graph_from_features_keeps_parallel_edges_and_uses_shorter_for_path_length():
-    from src.app.app import graph_from_features, path_length
+    from src.app.service import graph_from_features, path_length
 
     features = _two_parallel_edge_features()
-    graph = graph_from_features("test-fingerprint", features)
+    graph = graph_from_features(features)
 
     assert graph.is_multigraph()
     assert graph.number_of_edges() == 2

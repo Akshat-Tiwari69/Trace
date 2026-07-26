@@ -38,6 +38,8 @@ rollback() {
     echo "$(date -Is) ERROR: deploy transaction failed @ ${TARGET:0:8}; rolling back to ${LOCAL:0:8}" >&2
     git reset --hard --quiet "$LOCAL"
     ./.venv/bin/pip install -q -r deploy/requirements-app.txt || true
+    npm ci --prefix web --no-audit --no-fund >/dev/null 2>&1 || true
+    npm run build --prefix web >/dev/null 2>&1 || true
     systemctl --user restart roadresilience.service || true
 }
 trap rollback ERR
@@ -47,15 +49,19 @@ git reset --hard --quiet "$TARGET"
 
 # refresh deps (cheap no-op when already satisfied)
 ./.venv/bin/pip install -q -r deploy/requirements-app.txt
+npm ci --prefix web --no-audit --no-fund
+npm run build --prefix web
+test -f web/out/index.html
 
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 systemctl --user restart roadresilience.service
 
-# Health gate: poll Streamlit's health endpoint (~30 s max), roll back on failure.
+# Health gate: poll FastAPI (~30 s max), roll back on failure.
 healthy() {
     for _ in 1 2 3 4 5 6; do
         sleep 5
-        if curl -fsS http://127.0.0.1:8501/_stcore/health >/dev/null 2>&1; then
+        if curl -fsS http://127.0.0.1:8000/healthz >/dev/null 2>&1 \
+            && curl -fsS http://127.0.0.1:8000/ >/dev/null 2>&1; then
             return 0
         fi
     done
@@ -69,6 +75,9 @@ else
     echo "$(date -Is) ERROR: health check FAILED @ ${TARGET:0:8} — ROLLING BACK to ${LOCAL:0:8}" >&2
     git reset --hard --quiet "$LOCAL"
     ./.venv/bin/pip install -q -r deploy/requirements-app.txt
+    npm ci --prefix web --no-audit --no-fund
+    npm run build --prefix web
+    test -f web/out/index.html
     systemctl --user restart roadresilience.service
     if healthy; then
         echo "$(date -Is) rollback to ${LOCAL:0:8} is up — investigate ${TARGET:0:8} before re-deploying" >&2

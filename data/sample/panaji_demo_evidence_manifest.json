@@ -2,28 +2,28 @@
   "schema_version": 1,
   "input": {
     "path": "panaji_demo_graph.geojson",
-    "sha256": "cde6543f97e790c3e1f78cabb11c1a3c269c9fea9c1df67ebc9f43ea70560d85"
+    "sha256": "15dbf0d453f8676000bb49927157b218d41e57ef0a83e844008f4cd991d5fe61"
   },
   "artifacts": {
     "panaji_demo_flood_curve.png": {
-      "sha256": "96f11be89c143e1d284e185ee6cd4b05bd11358486bf9270a3ba9ea8b736891b",
+      "sha256": "5e866ce6d4d9082a64d29ff927f8f77cfc9ec5fd7b0ac035af61449df92d32e0",
       "command": "python -m src.pipeline.p3_analysis.flood --aoi panaji_demo --sample-dir data/sample --processed-dir data/processed"
     },
     "panaji_demo_graph_eval.json": {
-      "sha256": "cb694b78caba9b5ca4caea13711cfff90c867705f5dbc00d8bdd2fccebbbb9a4",
+      "sha256": "420a0db075fc121b95977edf557b0d2b1e4f783e706a6214b5f6db268c2bf044",
       "command": "python -m src.pipeline.p3_analysis.evaluate --aoi panaji_demo --sample-dir data/sample --curve-steps 40 --top-n 5"
     },
     "panaji_demo_percolation.json": {
-      "sha256": "dc8eee18e670b5f54c38be86919e6fa5e903a27c54f82920301ebfec004231d1",
+      "sha256": "e51d645267efd1ddfd9348a69c0ebdb9ab297ba55d7d59640741ac81b1cfd9c0",
       "command": "python -m src.pipeline.p3_analysis.percolation --aoi panaji_demo --sample-dir data/sample --corner se --top-n 10"
     },
     "panaji_demo_resilience.csv": {
-      "sha256": "abe4729e9231969f077ebae1820aaf02a452b43e9406b6400f6246d60a7945e0",
+      "sha256": "32f71d4de18df9cb340b72ec8174a7544ad6670955d2a2b9d505d2e6af29db76",
       "command": "python -m src.pipeline.p3_analysis.analyze --aoi panaji_demo --critical-fraction 0.10 --curve-steps 25",
       "copy_from": "data/processed/panaji_demo_resilience.csv"
     },
     "panaji_demo_resilience_curve.png": {
-      "sha256": "62444c37e267ad527b77f76b4d67d0117b0046d4e4b151ed5598097ad30e594d",
+      "sha256": "24c0443ce48102fadb63d81764d4888d1d10184db4b5ba384f5bac6868c1d729",
       "command": "python -m src.pipeline.p3_analysis.evaluate --aoi panaji_demo --sample-dir data/sample --curve-steps 40 --top-n 5"
     }
   }

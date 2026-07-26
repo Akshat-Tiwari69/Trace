@@ -23,11 +23,56 @@ def test_skeleton_graph_records_width_from_distance():
     mask = np.zeros((40, 40), np.uint8)
     mask[18:23, 4:36] = 1
     skel, dist = mask_to_skeleton_with_distance(mask)
+    assert dist.dtype == np.float32
     g = skeleton_to_graph(skel, transform=None, resolution_m=1.0, distance=dist)
 
     widths = [d["width_m"] for _, _, d in g.edges(data=True) if "width_m" in d]
     assert widths, "no width_m recorded"
     assert 3.0 <= max(widths) <= 7.0  # ~5 m road, sampled along the centreline
+
+
+def test_all_foreground_distance_is_finite_and_bounded():
+    from src.pipeline.p2_graph.skeleton_graph import mask_to_skeleton_with_distance
+
+    _, distance = mask_to_skeleton_with_distance(np.ones((20, 20), dtype=np.uint8))
+    assert np.isfinite(distance).all()
+    assert float(distance.max()) <= 10.0
+
+
+def test_rotated_metric_grid_keeps_nonzero_road_width():
+    from affine import Affine
+
+    from src.pipeline.p2_graph.skeleton_graph import (
+        mask_to_skeleton_with_distance,
+        skeleton_to_graph,
+    )
+
+    mask = np.zeros((20, 20), np.uint8)
+    mask[8:13, 2:18] = 1
+    skeleton, distance = mask_to_skeleton_with_distance(mask)
+    graph = skeleton_to_graph(
+        skeleton, transform=Affine(0, -1, 100, 1, 0, 200), distance=distance
+    )
+    widths = [data["width_m"] for _, _, data in graph.edges(data=True)]
+    assert widths and all(0 < width < 20 for width in widths)
+
+
+def test_skeleton_graph_preserves_a_closed_ring_as_routable_edges():
+    from src.pipeline.p2_graph.skeleton_graph import (
+        mask_to_skeleton,
+        skeleton_to_graph,
+    )
+
+    mask = np.zeros((32, 32), np.uint8)
+    mask[8, 8:24] = 1
+    mask[23, 8:24] = 1
+    mask[8:24, 8] = 1
+    mask[8:24, 23] = 1
+    graph = skeleton_to_graph(mask_to_skeleton(mask), resolution_m=1.0)
+
+    assert graph.number_of_nodes() >= 2
+    assert graph.number_of_edges() >= 2
+    assert sum(data["length_m"] for _, _, data in graph.edges(data=True)) > 40.0
 
 
 def test_skeleton_graph_omits_width_without_distance():

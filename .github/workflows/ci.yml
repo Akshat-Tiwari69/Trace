@@ -41,10 +41,38 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -q
 
-      - name: Import smoke (dashboard module)
-        # src/app/app.py keeps all Streamlit calls inside main(), so a bare
-        # import must succeed without a Streamlit runtime.
-        run: python -c "import src.app.app"
+      - name: Import smoke (production API)
+        run: python -c "import src.app.api"
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Static production build and bundle budgets
+        run: |
+          npm run build
+          npm run budget
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+      - name: Browser, responsive, and accessibility tests
+        run: npm run test:e2e
 
   app-graph-smoke:
     runs-on: ubuntu-latest

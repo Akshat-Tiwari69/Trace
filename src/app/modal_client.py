@@ -8,10 +8,12 @@ import os
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
 MODAL_SEG_URL = os.environ.get("MODAL_SEG_URL")
+MAX_MODAL_RESPONSE_BYTES = 24 * 1024 * 1024
 _MAX_INFLIGHT = 2
 _semaphore = threading.BoundedSemaphore(_MAX_INFLIGHT)
 
@@ -22,23 +24,39 @@ class EndpointBusyError(RuntimeError):
 
 def post_once(body: bytes) -> dict:
     """Send one authenticated request and parse its JSON response."""
+    parsed = urllib.parse.urlsplit(MODAL_SEG_URL or "")
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise RuntimeError("MODAL_SEG_URL must be an HTTPS endpoint")
+    key = os.environ.get("MODAL_SEG_KEY", "")
+    if not key:
+        raise RuntimeError("MODAL_SEG_KEY is not configured")
     req = urllib.request.Request(
         MODAL_SEG_URL,
         data=body,
         headers={
             "Content-Type": "application/json",
-            "X-API-Key": os.environ.get("MODAL_SEG_KEY", ""),
+            "X-API-Key": key,
         },
     )
     with urllib.request.urlopen(req, timeout=120) as response:
         status = getattr(response, "status", 200)
         if status != 200:
             raise RuntimeError(f"endpoint returned HTTP {status}")
-        raw = response.read()
+        raw = response.read(MAX_MODAL_RESPONSE_BYTES + 1)
+        if len(raw) > MAX_MODAL_RESPONSE_BYTES:
+            raise RuntimeError("endpoint response exceeded the size limit")
     try:
-        return json.loads(raw)
+        output = json.loads(raw)
     except json.JSONDecodeError as error:
         raise RuntimeError("endpoint returned a non-JSON response") from error
+    if not isinstance(output, dict):
+        raise RuntimeError("endpoint returned an invalid JSON response")
+    return output
 
 
 def _is_retryable(error: Exception) -> bool:

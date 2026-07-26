@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-07-16 · **Phase:** A46/P2/P3 verification active · **Overall:** core product working; corrected contracts and authorized web replacement remain
+**Last updated:** 2026-07-22 · **Phase:** A47/A48 verification and F9 active · **Overall:** corrected core contracts are being integrated into the authorized web replacement
 
 ---
 
@@ -14,9 +14,9 @@ At the beginning of a session, identify the team member you are working for. If 
 
 | Team member | Default ownership | Current next task |
 |---|---|---|
-| **Akshat** | `src/pipeline/p1_segment/`, data tooling, notebooks, integration, shared configuration and coordination | **A46** graph-first model improvement |
-| **Shaivi** | `src/pipeline/p2_graph/`, `src/pipeline/p3_analysis/` | Support **A46** routing-based selection and calibration |
-| **Saanvi** | current `src/app/`, product design and future web frontend | **F9** web-experience replacement after A45/A46 |
+| **Akshat** | `src/pipeline/p1_segment/`, data tooling, notebooks, integration, shared configuration and coordination | **F9/O1** integration and release closure |
+| **Shaivi** | `src/pipeline/p2_graph/`, `src/pipeline/p3_analysis/` | Close **A47/A48** contract verification |
+| **Saanvi** | current `src/app/`, product design and future web frontend | Finish **F9** web-experience replacement |
 
 **Current coordinator authorization:** Akshat authorized the active agent to work across **the whole project/all three lanes**. On 2026-07-14 he explicitly superseded the Streamlit/Folium stack lock and authorized selection of a replacement web stack for F9. Keep cross-lane and architecture changes reviewable and record them here; this authorization does not remove code review or artifact-contract checks.
 
@@ -131,6 +131,8 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **A44** | ✅ | Reconcile and simplify all documentation | Akshat/coordinator | — | Current docs agree with code/evidence, historical audit archived, sample graph/APLS evidence refreshed, links/JSON/mirrors checked, 284 tests green; PR opened into `dev` |
 | **A45** | ✅ | Repository-wide correctness, simplification and performance refactor | Coordinator across all lanes | A44 | Baseline-universe resilience, one probability inference protocol, evaluator labels, immutable deploy refs and CLI precedence corrected; duplicated/dead logic reduced; focused benchmarks improved; 318 tests green |
 | **A46** | ✅ | Graph-first model improvement program | Akshat | A44; use A45 foundations where relevant | Registered 102-chip selection and one 127-chip comparison complete; metric gate passed; deployment correctly blocked by missing upstream license; licensed next experiment recorded |
+| **A47** | 🔄 | P2 topology and artifact-contract hardening | Akshat/coordinator | A45 | Destructive consolidation opt-in; rings/geometry/metric CRS preserved; validated GraphML/GeoJSON pair writes; Panaji evidence regenerated; full suite green |
+| **A48** | 🔄 | P3 correctness and CPU-performance hardening | Akshat/coordinator | A47 | Independent seeds and disclosed sampled efficiency; APLS/percolation/reuse edge cases fixed; full sample evidence and focused/full suites green |
 | **O1** | ⏳ | Close production operator checklist | Akshat | approved release ref | Modal/app redeployed from an immutable ref; port 8501 closed; service/Caddy/journald config installed; live upload smoke passes; rate limiting decision recorded |
 | **F9** | 🔄 | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; bundle/payload/Web-Vitals/map budgets pass; old presentation removed |
 | **X1** | 🔒 | Final backup demo capture | All | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
@@ -205,6 +207,12 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-07-22 (Akshat/coordinator — A47/A48 integration evidence)**
+
+- Regenerated the Panaji graph at 573 nodes/828 edges with 24 retained closed rings, then resaved matched annotated graph artifacts after P3. Exact APLS remains `0.5534`; the graph has 100 articulation points and 90 structural bridges.
+- Registered interactive efficiency at stable-node `k=256` with source seed `42`, independently from seed-43 random removal. Across full 25-step targeted/random curves, maximum RI error stayed within `0.008899`/`0.017329` on Panaji and `0.003961`/`0.007349` on a 17x17 grid; the Panaji pair was **2.25x faster** than exact in the focused local run.
+- Current product analysis reports 25-removal targeted/random RI `0.678843`/`0.857574`; the separate exact 40-step evidence reports mean/end `0.7526`/`0.5532` versus `0.8912`/`0.6917`. Random curves are explicitly seeded references, not typical-outcome claims.
 
 **2026-07-18 (Akshat/coordinator — A46 closed honestly; F9 unblocked)**
 

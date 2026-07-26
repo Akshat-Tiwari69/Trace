@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import numpy as np
+
 from src.pipeline.p2_graph import healing, simplify, skeleton_graph
 from src.pipeline.p2_graph.config import GraphConfig
 
 
+def validate_binary_mask(mask, source: object = "mask") -> np.ndarray:
+    """Return a normalized {0,1} mask, rejecting non-binary inputs."""
+    array = np.asarray(mask)
+    if array.ndim != 2:
+        raise ValueError(f"{source} must be a 2-D binary mask, got shape {array.shape}")
+    values = set(np.unique(array).tolist())
+    if not values.issubset({0, 1, 255}):
+        raise ValueError(f"{source} must be binary (0/1 or 0/255), got values {sorted(values)!r}")
+    return (array > 0).astype(np.uint8)
+
+
 def construct_graph(mask, cfg: GraphConfig, *, transform=None, prob=None, metric_to_pixel=None):
     """Build, heal, and simplify a graph from one binary road mask."""
+    mask = validate_binary_mask(mask)
     skeleton, distance = skeleton_graph.mask_to_skeleton_with_distance(mask)
     graph = skeleton_graph.skeleton_to_graph(
         skeleton, transform=transform, resolution_m=cfg.resolution_m, distance=distance)

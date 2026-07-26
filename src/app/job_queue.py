@@ -1,16 +1,15 @@
-"""Filesystem-backed FIFO job queue for A39 upload analysis.
+"""Filesystem-backed FIFO job queue for uploaded-image analysis.
 
 A37 (upload_analysis.py) added a `BoundedSemaphore(1)` as an interim guard: a
 second concurrent upload lost the race and got an outright "busy, retry"
 warning. This queues that upload instead, and — the actual restart-survival
 win over the semaphore — persists to disk under `data/outputs/upload_jobs/`
-so a Streamlit process restart (deploy, crash) mid-analysis doesn't silently
+so an application restart (deploy, crash) mid-analysis doesn't silently
 strand the job: `ensure_worker()` re-queues anything left `running` from a
 dead process on the next start.
 
-Kept free of Streamlit imports (pure Python) so it's unit-testable without a
-UI runtime; app.py drives it from session_state (submit -> poll status/position
--> pull result).
+Kept free of web-framework imports so the API can submit, poll, and retrieve
+jobs without coupling the worker to the presentation layer.
 """
 
 from __future__ import annotations
@@ -28,9 +27,7 @@ import numpy as np
 
 from src.pipeline.p2_graph.graph_io import atomic_write
 
-# src/app/job_queue.py -> parents[2] is the repo root; the file's location is
-# fixed within the repo so this is simpler than app.py's Tracker.md-marker
-# scan (which lives in app.py, and importing that would drag in streamlit).
+# src/app/job_queue.py -> parents[2] is the fixed repository root.
 JOBS_DIR = Path(__file__).resolve().parents[2] / "data" / "outputs" / "upload_jobs"
 
 # FIFO order key, separate from created_utc: created_utc is second-precision
@@ -166,6 +163,15 @@ def position(job_id: str) -> int:
     return ahead
 
 
+def pending_count() -> int:
+    """Return queued plus running jobs for the public backlog guard."""
+    return sum(
+        state.get("status") in {"queued", "running"}
+        for job_id in _iter_job_ids()
+        if (state := _try_read_state(job_id)) is not None
+    )
+
+
 def result(job_id: str) -> Any:
     """Return the finished AnalysisResult. Raises RuntimeError if not done yet."""
     state = status(job_id)
@@ -236,7 +242,7 @@ def _process_one() -> bool:
 
     try:
         with open(_mask_path(job_id), "rb") as f:
-            mask = np.load(f)
+            mask = np.load(f, allow_pickle=False)
         analysis_result = analyze_mask(mask, resolution_m=state["resolution_m"])
     except Exception as exc:  # noqa: BLE001 — any failure (incl. AnalysisBusyError,
         # which shouldn't occur since this worker is the only app-path caller

@@ -5,10 +5,8 @@ you still route A→B?), which is what the resilience goal actually needs. Per t
 we skeletonise the predicted mask and the GT mask into graphs and score their
 routing similarity with S7's `p3_analysis.apls.apls`.
 
-Coordinate note: `skeleton_to_graph(resolution_m=GSD)` yields **metric** x,y +
-`length_m`; S7's `apls` expects lon/lat node coords (it projects with `_to_metres`),
-so we rescale x,y into the equivalent degrees (length_m stays metric). No edits to
-Shaivi's apls.
+Coordinate note: `skeleton_to_graph(resolution_m=GSD)` yields **metric** x/y and
+`length_m`; callers declare that projected-metre frame explicitly to S7 APLS.
 
     python -m src.pipeline.p1_segment.apls_eval \
         --checkpoints models/road_spacenet.pt models/deepglobe_mit_b3_scse_512px_best.pt \
@@ -27,10 +25,6 @@ from src.pipeline.p1_segment.eval_spacenet import (
     DEFAULT_CORPUS, DEFAULT_MANIFEST, chip_of, heldout_pairs, load_or_make_heldout)
 
 GSD_M = 0.5            # SpaceNet dg_format ground sampling distance
-_DEG_X = 111_320.0     # metres per degree lon near the equator
-_DEG_Y = 110_540.0     # metres per degree lat
-
-
 def _write_report(path: Path | str, report: dict) -> None:
     """Write JSON after ensuring a caller-supplied output directory exists."""
     out = Path(path)
@@ -39,17 +33,14 @@ def _write_report(path: Path | str, report: dict) -> None:
 
 
 def mask_to_apls_graph(mask01: np.ndarray, gsd_m: float = GSD_M):
-    """Skeletonise a binary mask into an apls-ready graph (metric length_m,
-    node x,y rescaled to the degrees S7's apls projects back to metres)."""
+    """Skeletonise a binary mask into an APLS graph in projected metres."""
     from skimage.morphology import skeletonize
 
     from src.pipeline.p2_graph.skeleton_graph import skeleton_to_graph
 
-    g = skeleton_to_graph(skeletonize(mask01.astype(bool)), transform=None, resolution_m=gsd_m)
-    for _, d in g.nodes(data=True):
-        d["x"] = d["x"] / _DEG_X
-        d["y"] = d["y"] / _DEG_Y
-    return g
+    return skeleton_to_graph(
+        skeletonize(mask01.astype(bool)), transform=None, resolution_m=gsd_m
+    )
 
 
 def tile_apls(
@@ -70,7 +61,10 @@ def tile_apls(
         return float("nan")             # GT skeletonised to ~nothing -> skip
     if pred_g.number_of_nodes() < 2:
         return 0.0                      # GT has roads, prediction has none -> worst APLS
-    return apls(gt_g, pred_g, n_samples=n_samples, tol_m=tol_m)["apls"]
+    return apls(
+        gt_g, pred_g, coordinate_system="projected",
+        n_samples=n_samples, tol_m=tol_m,
+    )["apls"]
 
 
 def apls_on_heldout(checkpoint: Path, n_tiles: int | None = 80, threshold: float | None = None,

@@ -13,7 +13,7 @@ decision needs both models on a common unit vs the same GT -- this module.
 
 Common frame: **400px chip pixels -> metres** at the chip's *anisotropic* GSD
 (separate eff_x/eff_y from the GeoTIFF geotransform; EPSG:4326 gives ~5-6% x/y
-anisotropy at Mumbai latitude), then rescaled to apls' degree convention. All
+anisotropy at Mumbai latitude). All
 three graph sources live in this one frame with one ``(x=col, y=row)`` convention
 -- the coordinate contract fixed in A18 (raster row/col, NOT Cartesian y=400-row).
 
@@ -58,8 +58,6 @@ import time
 from pathlib import Path
 
 import numpy as np
-
-from src.pipeline.p1_segment.apls_eval import _DEG_X, _DEG_Y
 
 ROOT = Path(__file__).resolve().parents[3]
 SRC_RGB = ROOT / "data/raw/spacenet/SN5_roads_train_AOI_8_Mumbai/PS-RGB"
@@ -294,8 +292,8 @@ def adj_to_apls_graph(adj: dict, eff_x: float, eff_y: float):
     """adj-dict ``{(r,c): [(r,c), ...]}`` (400px) -> apls-ready graph.
 
     Node ``x, y`` use the ``(x=col, y=row)`` contract in metres (anisotropic
-    eff_x/eff_y), then rescaled to the degrees apls projects back. Edge ``length_m``
-    is the true anisotropic metric length. GT-vector and A18-prediction graphs both
+    eff_x/eff_y). Edge ``length_m`` is the true anisotropic metric length.
+    GT-vector and A18-prediction graphs both
     flow through here, guaranteeing an identical frame to the v3.2 mask graph.
     """
     import networkx as nx
@@ -308,7 +306,7 @@ def adj_to_apls_graph(adj: dict, eff_x: float, eff_y: float):
             i = len(idx)
             idx[rc] = i
             r, c = rc
-            g.add_node(i, x=(c * eff_x) / _DEG_X, y=(r * eff_y) / _DEG_Y)
+            g.add_node(i, x=c * eff_x, y=r * eff_y)
         return idx[rc]
 
     for a, nbrs in adj.items():
@@ -325,21 +323,18 @@ def adj_to_apls_graph(adj: dict, eff_x: float, eff_y: float):
 def mask_to_apls_graph_aniso(mask01: np.ndarray, eff_x: float, eff_y: float):
     """Skeletonise a binary mask into an apls-ready graph with anisotropic metres.
 
-    Uses ``skeleton_to_graph`` with ``Affine(eff_x,0,0, 0,eff_y,0)`` so node x,y and
-    edge length_m are true metres (col*eff_x, row*eff_y), then rescales node metres
-    to the same degree convention as :func:`adj_to_apls_graph`.
+    Uses ``skeleton_to_graph`` with ``Affine(eff_x,0,0, 0,eff_y,0)`` so node x/y
+    and edge ``length_m`` are true metres (col*eff_x, row*eff_y).
     """
     from affine import Affine
     from skimage.morphology import skeletonize
 
     from src.pipeline.p2_graph.skeleton_graph import skeleton_to_graph
 
-    g = skeleton_to_graph(skeletonize(mask01.astype(bool)),
-                          transform=Affine(eff_x, 0.0, 0.0, 0.0, eff_y, 0.0))
-    for _, d in g.nodes(data=True):
-        d["x"] = d["x"] / _DEG_X
-        d["y"] = d["y"] / _DEG_Y
-    return g
+    return skeleton_to_graph(
+        skeletonize(mask01.astype(bool)),
+        transform=Affine(eff_x, 0.0, 0.0, 0.0, eff_y, 0.0),
+    )
 
 
 def chip_apls(pred_g, gt_g, n_samples: int = GATE_N_SAMPLES, tol_m: float = 15.0) -> float:
@@ -352,7 +347,10 @@ def chip_apls(pred_g, gt_g, n_samples: int = GATE_N_SAMPLES, tol_m: float = 15.0
         return float("nan")
     if pred_g.number_of_nodes() < 2:
         return 0.0
-    return apls(gt_g, pred_g, n_samples=n_samples, tol_m=tol_m)["apls"]
+    return apls(
+        gt_g, pred_g, coordinate_system="projected",
+        n_samples=n_samples, tol_m=tol_m,
+    )["apls"]
 
 
 def v32_chip_graph(model, bands: np.ndarray, thr: float, eff_x: float, eff_y: float,

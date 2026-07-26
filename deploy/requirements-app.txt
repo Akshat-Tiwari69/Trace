@@ -1,8 +1,8 @@
-# Public Streamlit app plus the CPU mask-to-graph upload path (no Torch/model).
+# Public FastAPI/static web app plus the CPU mask-to-graph path (no Torch/model).
 
 -r ../requirements-core.txt
 
-streamlit==1.38.0
-folium==0.17.0
-streamlit-folium==0.23.1
-branca==0.7.2
+fastapi==0.139.0
+uvicorn==0.51.0
+python-multipart==0.0.32
+opencv-python-headless==4.10.0.84

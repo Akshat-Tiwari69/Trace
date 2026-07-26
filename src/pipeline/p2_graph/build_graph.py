@@ -17,13 +17,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import numpy as np
 
 from src.pipeline.p2_graph.config import GraphConfig
-from src.pipeline.p2_graph.construction import construct_graph
-from src.pipeline.p2_graph.graph_io import save_geojson, save_graphml
+from src.pipeline.p2_graph.construction import construct_graph, validate_binary_mask
+from src.pipeline.p2_graph.graph_io import save_graph_pair
 from src.pipeline.p2_graph.healing import HealReport, sample_prob_along_polyline
 from src.pipeline.p2_graph.skeleton_graph import (
     build_metric_to_pixel,
@@ -41,11 +42,12 @@ def _load_mask(path: Path) -> np.ndarray:
             f"mask not found: {path}\n"
             "  Run the OSM spike (S1) or wait for the P1 model mask (S2)."
         )
-    arr = np.asarray(Image.open(path).convert("L"))
-    return (arr > 0).astype(np.uint8)
+    with Image.open(path) as image:
+        arr = np.asarray(image.convert("L"))
+    return validate_binary_mask(arr, path)
 
 
-def _load_prob(path: Path) -> np.ndarray | None:
+def _load_prob(path: Path, mask_shape: tuple[int, int]) -> np.ndarray | None:
     """Load P1's probability map as a float [0,1] array, or ``None``.
 
     Present only when P1 ran the blended inference path; a mask-only input
@@ -56,10 +58,17 @@ def _load_prob(path: Path) -> np.ndarray | None:
         return None
     from PIL import Image
 
-    return np.asarray(Image.open(path).convert("L"), dtype=np.float32) / 255.0
+    with Image.open(path) as image:
+        probability = np.asarray(image.convert("L"), dtype=np.float32) / 255.0
+    if probability.shape != mask_shape:
+        raise ValueError(
+            f"probability map {path} dimensions {probability.shape} do not match "
+            f"mask dimensions {mask_shape}"
+        )
+    return probability
 
 
-def _load_alignment(manifest_path: Path):
+def _load_alignment(manifest_path: Path, mask_shape: tuple[int, int]):
     """Return ``(transform, crs)`` from the mask manifest, or ``(None, None)``.
 
     Without a manifest the graph is built in pixel space (still valid, just not
@@ -69,16 +78,45 @@ def _load_alignment(manifest_path: Path):
         return None, None
     from affine import Affine
 
-    meta = json.loads(manifest_path.read_text())
-    transform = Affine(*meta["transform"]) if "transform" in meta else None
-    crs = meta.get("crs")
-    return transform, crs
+    try:
+        meta = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"invalid alignment manifest {manifest_path}: {exc}") from exc
+    required = {"crs", "transform", "resolution_m", "width", "height"}
+    missing = sorted(required - set(meta))
+    if missing:
+        raise ValueError(f"alignment manifest {manifest_path} is missing {missing}")
+    transform_values = meta["transform"]
+    if (not isinstance(transform_values, list) or len(transform_values) != 6
+            or not all(not isinstance(value, bool)
+                       and isinstance(value, (int, float)) and math.isfinite(value)
+                       for value in transform_values)):
+        raise ValueError(f"alignment manifest {manifest_path} needs six finite transform values")
+    if transform_values[0] * transform_values[4] - transform_values[1] * transform_values[3] == 0:
+        raise ValueError(f"alignment manifest {manifest_path} transform must be invertible")
+    if not isinstance(meta["crs"], str) or not meta["crs"].strip():
+        raise ValueError(f"alignment manifest {manifest_path} needs a non-empty CRS")
+    resolution = meta["resolution_m"]
+    if (isinstance(resolution, bool) or not isinstance(resolution, (int, float))
+            or not math.isfinite(resolution) or resolution <= 0):
+        raise ValueError(f"alignment manifest {manifest_path} needs resolution_m > 0")
+    width, height = meta["width"], meta["height"]
+    if (not isinstance(width, int) or isinstance(width, bool) or width < 1
+            or not isinstance(height, int) or isinstance(height, bool) or height < 1):
+        raise ValueError(f"alignment manifest {manifest_path} needs positive integer dimensions")
+    expected_height, expected_width = mask_shape
+    if (height, width) != (expected_height, expected_width):
+        raise ValueError(
+            f"alignment manifest {manifest_path} dimensions {(height, width)} do not "
+            f"match mask dimensions {mask_shape}"
+        )
+    return Affine(*transform_values), meta["crs"]
 
 
 def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
     """Run mask → skeleton → graph → heal → reproject → save. Returns (graph, report)."""
     mask = _load_mask(cfg.mask_path)
-    transform, crs = _load_alignment(cfg.manifest_path)
+    transform, crs = _load_alignment(cfg.manifest_path, mask.shape)
     if transform is None:
         print(f"[{cfg.aoi}] WARNING: no alignment manifest at {cfg.manifest_path} — "
               f"graph is built in PIXEL space (resolution_m={cfg.resolution_m}); "
@@ -90,7 +128,7 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
     # path persisted one; mask-only input (upload/OSM spike/old artifact) heals
     # exactly as before. Loudly log which mode is active — silent behaviour
     # change here would be a nasty surprise for a resilience number.
-    prob = _load_prob(cfg.prob_path)
+    prob = _load_prob(cfg.prob_path, mask.shape)
     corridor_on = prob is not None and cfg.min_corridor_support > 0
     if corridor_on:
         print(f"[{cfg.aoi}] healing: probability-map corridor check ON "
@@ -167,9 +205,22 @@ def build_graph(cfg: GraphConfig) -> tuple[object, HealReport]:
 
     if crs is not None:
         reproject_graph_to_wgs84(graph, crs)
+        graph.graph["coordinate_frame"] = {
+            "coordinates": "wgs84",
+            "crs": "EPSG:4326",
+            "axis_order": "x,y",
+            "length_unit": "metre",
+        }
+    else:
+        graph.graph["coordinate_frame"] = {
+            "coordinates": "pixel_scaled_by_resolution_m",
+            "crs": None,
+            "axis_order": "x,y",
+            "length_unit": "metre_estimate",
+            "resolution_m": float(cfg.resolution_m),
+        }
 
-    save_graphml(graph, cfg.graphml_path)
-    save_geojson(graph, cfg.geojson_path)
+    save_graph_pair(graph, cfg.graphml_path, cfg.geojson_path)
 
     simplify_line = ""
     if simplify_report is not None:
