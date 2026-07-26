@@ -103,6 +103,20 @@ def test_simulation_preserves_finite_baseline_universe(client: TestClient) -> No
     assert "representative_route" in payload
 
 
+def test_zero_removal_simulation_is_identity(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/simulations",
+        json={"aoi": "panaji_demo", "removed_node_ids": []},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["resilience_index"] == pytest.approx(1.0)
+    assert payload["efficiency_loss"] == pytest.approx(0.0)
+    assert payload["baseline_efficiency"] == pytest.approx(
+        payload["perturbed_efficiency"]
+    )
+
+
 def test_simulation_rejects_unknown_or_unbounded_node_sets(client: TestClient) -> None:
     unknown = client.post(
         "/api/v1/simulations",

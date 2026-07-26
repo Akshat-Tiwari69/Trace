@@ -16,7 +16,7 @@ from typing import Any
 import networkx as nx
 from shapely.geometry import shape
 
-from src.pipeline.p3_analysis.resilience import resilience_index
+from src.pipeline.p3_analysis.resilience import global_efficiency, resilience_index
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -286,6 +286,16 @@ def sample_dataset() -> AoiDataset:
     seed = resilience_curve[0].get("efficiency_seed") if sample_size else None
     if sample_size is not None and (sample_size <= 0 or seed is None):
         raise ValueError("sample resilience sampling metadata is incomplete")
+    simulation_baseline = _finite(
+        global_efficiency(
+            graph,
+            k=sample_size,
+            seed=seed if seed is not None else DEFAULT_EFFICIENCY_SEED,
+        ),
+        "simulation_baseline_efficiency",
+    )
+    if simulation_baseline <= 0:
+        raise ValueError("sample graph simulation baseline efficiency is invalid")
     return AoiDataset(
         graph=graph,
         graph_bytes=graph_bytes,
@@ -294,7 +304,7 @@ def sample_dataset() -> AoiDataset:
         resilience_curve=resilience_curve,
         bounds=(min(xs), min(ys), max(xs), max(ys)),
         baseline_efficiency=baseline,
-        simulation_baseline_efficiency=baseline,
+        simulation_baseline_efficiency=simulation_baseline,
         simulation_sample_size=sample_size,
         simulation_seed=seed,
         evidence=_json_file(SAMPLE_DIR / "panaji_demo_evidence_manifest.json"),
@@ -335,7 +345,11 @@ def _simulate_cached(aoi: str, removed_node_ids: tuple[int, ...]) -> dict:
         "k": dataset.simulation_sample_size,
     }
     if "seed" in inspect.signature(resilience_index).parameters:
-        kwargs["seed"] = dataset.simulation_seed or DEFAULT_EFFICIENCY_SEED
+        kwargs["seed"] = (
+            dataset.simulation_seed
+            if dataset.simulation_seed is not None
+            else DEFAULT_EFFICIENCY_SEED
+        )
     metrics = resilience_index(dataset.graph, removed, **kwargs)
     ri = _unit_interval(metrics["resilience_index"], "resilience_index")
     active_nodes = [node for node in dataset.graph if node not in removed]

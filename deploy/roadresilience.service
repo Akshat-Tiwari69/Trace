@@ -17,7 +17,7 @@ RestartSec=5
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
-PrivateDevices=true
+# PrivateDevices is unavailable in this unprivileged Oracle user manager.
 ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=%h/Trace/data/outputs

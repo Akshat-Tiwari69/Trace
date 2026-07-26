@@ -5,3 +5,4 @@ Description=Route Resilience — deploy approved immutable release
 Type=oneshot
 EnvironmentFile=%h/.config/roadresilience/deploy.env
 ExecStart=%h/Trace/deploy/update.sh
+TimeoutStartSec=20min
