@@ -90,8 +90,7 @@ def test_runtime_units_bind_fastapi_to_loopback_and_caddy():
     update_unit = (root / "deploy" / "roadresilience-update.service").read_text()
     assert "ExecStart=/usr/bin/bash %h/Trace/deploy/update.sh" in update_unit
     assert "TimeoutStartSec=20min" in update_unit
-    assert "@invalid_host not host trace.tiwaribabu.in" in caddy
-    assert "respond @invalid_host 421" in caddy
+    assert "strict_sni_host on" in caddy
     assert "reverse_proxy 127.0.0.1:8000" in caddy
     assert "Strict-Transport-Security" in caddy
     assert "8501" not in unit + caddy

@@ -1,8 +1,11 @@
 # Route Resilience public TLS entrypoint. Port 8000 stays loopback-only.
-trace.tiwaribabu.in {
-	@invalid_host not host trace.tiwaribabu.in
-	respond @invalid_host 421
+{
+	servers {
+		strict_sni_host on
+	}
+}
 
+trace.tiwaribabu.in {
 	request_body {
 		max_size 12MB
 	}
