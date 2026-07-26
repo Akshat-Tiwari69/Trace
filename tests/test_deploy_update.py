@@ -88,6 +88,7 @@ def test_runtime_units_bind_fastapi_to_loopback_and_caddy():
     assert "ReadWritePaths=%h/Trace/data/outputs" in unit
     assert "PrivateDevices=" not in unit
     update_unit = (root / "deploy" / "roadresilience-update.service").read_text()
+    assert "ExecStart=/usr/bin/bash %h/Trace/deploy/update.sh" in update_unit
     assert "TimeoutStartSec=20min" in update_unit
     assert "reverse_proxy 127.0.0.1:8000" in caddy
     assert "Strict-Transport-Security" in caddy
