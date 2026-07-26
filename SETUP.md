@@ -6,6 +6,7 @@
 
 - Git
 - Python **3.11** for development and CI parity
+- Node.js **22** and npm for the static web build
 - Optional NVIDIA GPU for training/heavy evaluation
 - No remote access to a teammate’s machine; each contributor uses these reproducible paths
 
@@ -34,24 +35,28 @@ python -m pip install --upgrade pip==24.2
 Choose the smallest dependency role that matches the work:
 
 - `requirements-core.txt` — shared CPU geospatial, graph and image-processing runtime.
-- `deploy/requirements-app.txt` — core plus the hosted dashboard only; no Torch or training stack.
+- `deploy/requirements-app.txt` — core plus the hosted application API only; no Torch or training stack.
 - `requirements-train.txt` — core plus raster/model training and evaluation packages; install Torch separately first.
 - `requirements-dev.txt` — additive test/notebook tooling; install it alongside a runtime role, or use the aggregate.
 - `requirements.txt` — aggregate app + training + development environment used by CI and full-repository work.
 
-## Path A — Sample dashboard and CPU upload analysis
+## Path A — Sample field atlas and CPU upload analysis
 
 Use this when you need the app, sample graph or P2/P3 upload-analysis path but not P1 inference/training:
 
 ```bash
 python -m pip install -r deploy/requirements-app.txt
-python -c "import streamlit, folium, networkx, geopandas, skimage, sknw; print('app/graph env OK')"
-streamlit run src/app/app.py
+cd web
+npm ci
+npm run build
+cd ..
+python -c "import fastapi, networkx, geopandas, skimage, sknw; import src.app.api; print('app/graph env OK')"
+python -m uvicorn src.app.api:app --host 127.0.0.1 --port 8000
 ```
 
 The committed Panaji sample works without a checkpoint, GPU, Modal URL or secret.
 
-The **Your imagery** tab is enabled only when both `MODAL_SEG_URL` and `MODAL_SEG_KEY` are present in the environment. Local sample exploration remains available when they are absent.
+**Analyze imagery** requires both `MODAL_SEG_URL` and `MODAL_SEG_KEY`. Local sample exploration remains available when they are absent.
 
 ## Path B — Full development on CPU
 
@@ -66,8 +71,18 @@ python -m pip check
 This mirrors CI. Verify:
 
 ```bash
-python -c "import torch, streamlit, rasterio, geopandas, osmnx, sknw; print('full CPU env OK', torch.__version__)"
+python -c "import torch, fastapi, rasterio, geopandas, osmnx, sknw; print('full CPU env OK', torch.__version__)"
 python -m pytest tests/ -q
+cd web
+npm ci
+npm run typecheck
+npm run lint
+npm test
+npm run build
+npm run budget
+npx playwright install chromium
+npm run test:e2e
+cd ..
 ```
 
 PyPI wheels cover the supported rasterio/geopandas/pyogrio path on common Windows/macOS/Linux Python versions. If a platform tries to compile GDAL-family packages and fails, use a clean conda-forge Python 3.11 environment for the geospatial packages, then install the remaining requirements. Direct system GDAL installation is not the normal project path.
@@ -110,13 +125,16 @@ Cloud GPU is the hardware-agnostic training path. Accelerator names, quotas and 
 
 Download the intended deployed mask checkpoint from [`a4-roadseg-v3.2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) as `models/road_pan.pt`. Verify release/checksum guidance before production use.
 
-## Run the sample dashboard
+## Run the sample field atlas
 
 ```bash
-streamlit run src/app/app.py
+cd web
+npm run build
+cd ..
+python -m uvicorn src.app.api:app --host 127.0.0.1 --port 8000
 ```
 
-Open the displayed local URL. Start in Briefing/Analysis; upload remains optional.
+Open `http://127.0.0.1:8000`. Start in Explore, then Stress a ranked junction; upload remains optional.
 
 ## Run P1 locally
 
@@ -142,7 +160,7 @@ python -m src.pipeline.run_pipeline \
   --postprocess
 ```
 
-The runner performs P1→P2→P3, verifies the dashboard artifact seam and writes `data/processed/<id>_run.json` only after success. Use `--force` or `--from-stage` deliberately; normal reuse is based on input/config signatures.
+The runner performs P1→P2→P3, verifies the P4 artifact seam and writes `data/processed/<id>_run.json` only after success. Use `--force` or `--from-stage` deliberately; normal reuse is based on input/config signatures.
 
 ## Evaluation commands
 
@@ -169,8 +187,8 @@ Read `docs/Evaluation.md` before interpreting or comparing outputs; the chip and
 - **Torch pulled the wrong build:** recreate the venv and install the intended CPU/GPU Torch wheels before `requirements.txt`.
 - **GPU unavailable/unsupported capability:** select a compatible current official PyTorch/CUDA wheel; do not proceed on silent CPU fallback.
 - **Geospatial wheel build failure:** use a clean Python 3.11 environment and common supported platform; fall back to conda-forge rather than hand-building GDAL.
-- **Dashboard sample missing:** verify `data/sample/panaji_demo_graph.geojson`, `_criticality.csv` and `_resilience.csv` exist.
-- **Upload tab disabled:** set both Modal environment variables or use sample mode.
+- **Field atlas sample missing:** verify `data/sample/panaji_demo_graph.geojson`, `_criticality.csv` and `_resilience.csv` exist, then rebuild `web/out`.
+- **Imagery analysis unavailable:** set both Modal environment variables or use sample mode.
 - **Local environment has unrelated dependency conflicts:** recreate it by role; clean CI and the commands above are the reference.
 
 Production setup is intentionally separate: see `deploy/README.md`.

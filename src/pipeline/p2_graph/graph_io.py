@@ -7,7 +7,7 @@ both consume it. We persist it two ways:
   GraphML only stores scalar attributes, so the edge polyline ``geometry`` is
   serialised to a JSON string and restored on load.
 * **GeoJSON** (``{aoi}_graph.geojson``) — a map-ready ``FeatureCollection`` of
-  node Points and edge LineStrings (WGS84 lon/lat) that the Folium dashboard and
+  node Points and edge LineStrings (WGS84 lon/lat) that the web API and
   the committed ``data/sample/`` set use directly.
 
 Coordinates are expected in WGS84 lon/lat by the time this runs (call

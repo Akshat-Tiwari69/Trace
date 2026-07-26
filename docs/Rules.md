@@ -8,7 +8,7 @@
 - Match the existing style: PEP 8, type hints and short docstrings on public functions.
 - Keep functions focused and names explicit. Do not compress code merely to reduce line count.
 - Centralize configuration and paths; avoid duplicated thresholds and hidden defaults.
-- Put reusable logic in modules, not notebooks or Streamlit render functions.
+- Put reusable logic in Python/TypeScript modules, not notebooks or page render functions.
 - Quarantine rejected experiments from production imports.
 - Refactors require characterization tests and, for performance claims, before/after measurements.
 
@@ -16,10 +16,10 @@
 
 - Stable domain seam: P1 mask/probability/provenance → P2 MultiGraph → P3 criticality/resilience → presentation/API adapters.
 - The batch pipeline communicates through §4 file artifacts. The hosted upload path may call the authenticated Modal P1 endpoint and run P2/P3 on the CPU host.
-- Streamlit/Folium remains only the current deployed presentation until F9 replaces it. Akshat authorized a modern web frontend and a thin Python application API; the migration must preserve domain logic and artifact contracts instead of reimplementing them in the client.
+- Next.js/React/MapLibre owns presentation and FastAPI is the thin application API; Python domain logic and artifact contracts stay authoritative instead of being reimplemented in the client.
 - No database or user-login product is added without a separate requirement and recorded contract/security decision.
 - The resilience metric is baseline-normalized global efficiency and must preserve the baseline node universe so it remains finite and in `[0, 1]`. Any path that shrinks the denominator is a correctness defect.
-- CPU is the deployment target for P2/P3/dashboard; GPU is optional for local inference and required only for training/remote P1.
+- CPU is the deployment target for P2/P3 and the application host; GPU is optional for local inference and required only for training/remote P1.
 
 ## Documentation
 
@@ -35,7 +35,7 @@
 ## Testing and evidence
 
 - Unit-test deterministic graph, metric, IO, queue and inference-contract behavior.
-- Keep an end-to-end sample pipeline test, dashboard import smoke and a local upload-analysis contract smoke under production dependencies.
+- Keep an end-to-end sample pipeline test, production app/graph smoke and local upload-analysis contract coverage under production dependencies.
 - Validate binary masks, coordinate frames, positive edge lengths, graph/GeoJSON round trips, bounded metrics and required artifact columns.
 - Use visual/geospatial QC for alignment and topology; numerical scores alone cannot expose every frame error.
 - Model promotion requires the frozen protocol in `Evaluation.md`, full coverage and paired uncertainty.

@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-07-22 · **Phase:** A47/A48 verification and F9 active · **Overall:** corrected core contracts are being integrated into the authorized web replacement
+**Last updated:** 2026-07-26 · **Phase:** O1 release rollout · **Overall:** the verified field-atlas release candidate is awaiting immutable production rollout
 
 ---
 
@@ -14,9 +14,9 @@ At the beginning of a session, identify the team member you are working for. If 
 
 | Team member | Default ownership | Current next task |
 |---|---|---|
-| **Akshat** | `src/pipeline/p1_segment/`, data tooling, notebooks, integration, shared configuration and coordination | **F9/O1** integration and release closure |
-| **Shaivi** | `src/pipeline/p2_graph/`, `src/pipeline/p3_analysis/` | Close **A47/A48** contract verification |
-| **Saanvi** | current `src/app/`, product design and future web frontend | Finish **F9** web-experience replacement |
+| **Akshat** | `src/pipeline/p1_segment/`, data tooling, notebooks, integration, shared configuration and coordination | **O1** immutable rollout and release closure |
+| **Shaivi** | `src/pipeline/p2_graph/`, `src/pipeline/p3_analysis/` | Review post-release graph evidence |
+| **Saanvi** | `src/app/`, `web/`, product design and accessibility | Review post-release web behavior |
 
 **Current coordinator authorization:** Akshat authorized the active agent to work across **the whole project/all three lanes**. On 2026-07-14 he explicitly superseded the Streamlit/Folium stack lock and authorized selection of a replacement web stack for F9. Keep cross-lane and architecture changes reviewable and record them here; this authorization does not remove code review or artifact-contract checks.
 
@@ -47,10 +47,10 @@ For each still-open PR, inspect both reviews and inline review comments. Address
 
 ## §2 · Ground Rules
 
-- **Product stack:** the deployed baseline remains Streamlit/Folium until F9 reaches verified parity. F9 is authorized to replace it with a performance-budgeted web frontend and thin Python API while preserving the Python ML/graph core and §4 contracts. A database/login product remains out of scope unless separately justified and recorded.
+- **Product stack:** the repository release is a performance-budgeted Next.js/React/MapLibre frontend served by a thin FastAPI application boundary. The Python ML/graph core and §4 contracts remain authoritative. A database/login product remains out of scope unless separately justified and recorded.
 - **GPU boundary:** uploaded imagery is sent to the authenticated Modal segmentation endpoint; P2/P3 and simulations remain CPU-capable on the application host.
 - **ML:** fine-tune pretrained models only; PyTorch only. Training may use Colab, Kaggle, or an optional local NVIDIA GPU.
-- **Runtime:** graph analysis and the dashboard must remain CPU-capable. Committed `data/sample/` artifacts keep the demo runnable without a checkpoint.
+- **Runtime:** graph analysis and the application host must remain CPU-capable. Committed `data/sample/` artifacts keep the demo runnable without a checkpoint.
 - **Metric:** Resilience Index is the ratio of global efficiency to the baseline graph. It must remain finite and bounded in `[0, 1]`; never substitute raw average path length. Single-scenario and multi-step paths preserve the baseline node universe; failed nodes remain as isolates.
 - **Evidence:** do not invent metrics, citations, deployment state, or generalization claims. Negative results are first-class results.
 - **Benchmark honesty:** SpaceNet-5 Mumbai is a repeatedly consulted **development benchmark**, not an untouched final test set.
@@ -64,21 +64,21 @@ For each still-open PR, inspect both reviews and inline review comments. Address
 
 Route Resilience turns satellite imagery into a road-resilience analysis:
 
-`imagery → P1 segmentation → probability/mask → P2 MultiGraph + healing → P3 criticality/resilience → P4 dashboard`
+`imagery → P1 segmentation → probability/mask → P2 MultiGraph + healing → P3 criticality/resilience → P4 field atlas`
 
 Two entry paths share the same P2/P3 logic:
 
 1. **Batch/local:** `python -m src.pipeline.run_pipeline` executes P1–P3 and verifies the P4 artifact seam.
-2. **Hosted upload:** Streamlit sends image bytes to an authenticated Modal GPU endpoint for P1, then queues CPU P2/P3 work on the Oracle host.
+2. **Hosted upload:** FastAPI validates and sends image bytes to the authenticated Modal GPU endpoint for P1, then persists queued CPU P2/P3 work on the Oracle host.
 
 Current release state:
 
-- Public dashboard: `https://trace.tiwaribabu.in`
+- Public application: `https://trace.tiwaribabu.in`; O1 must verify the exact live ref
 - Repository/intended production segmentation model: `a4-roadseg-v3.2` (`road_pan.pt`, threshold `0.52`); O1 must verify the live Modal checksum
 - Current research direction: graph-first SAM-Road++/A18, validated by a common-unit chip APLS gate but not deploy-ready
-- Test state at A44 start: 284 local tests passed; remote `dev` CI green
+- Release candidate: PR #132; Python, app-graph and web CI checks green
 
-Approved target direction: F9 will replace only the presentation/application boundary after A45/A46. The current app remains the parity oracle until the new browser flows, upload recovery, accessibility, performance and deployment checks pass; then the Streamlit/Folium presentation is removed rather than maintained in parallel.
+F9 implementation result: the replacement changes only the presentation/application boundary, retains Python P1–P3 logic and file artifacts, passes browser/accessibility/performance gates, and removes the Streamlit/Folium presentation instead of maintaining two stacks.
 
 ---
 
@@ -114,7 +114,7 @@ Default ownership remains useful for review even during coordinator-authorized w
 
 - Akshat reviews ML, data, integration, dependencies, deployment wiring, and shared contracts.
 - Shaivi reviews graph construction, graph IO, centrality, APLS, and resilience semantics.
-- Saanvi reviews dashboard behavior, accessibility, and visual design.
+- Saanvi reviews web/API behavior, accessibility, and visual design.
 
 Shared files include `requirements*.txt`, `SETUP.md`, deployment files, `src/pipeline/config.py`, and this Tracker. A change that crosses a §4 seam must name both producer and consumer tests in its PR.
 
@@ -131,10 +131,10 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **A44** | ✅ | Reconcile and simplify all documentation | Akshat/coordinator | — | Current docs agree with code/evidence, historical audit archived, sample graph/APLS evidence refreshed, links/JSON/mirrors checked, 284 tests green; PR opened into `dev` |
 | **A45** | ✅ | Repository-wide correctness, simplification and performance refactor | Coordinator across all lanes | A44 | Baseline-universe resilience, one probability inference protocol, evaluator labels, immutable deploy refs and CLI precedence corrected; duplicated/dead logic reduced; focused benchmarks improved; 318 tests green |
 | **A46** | ✅ | Graph-first model improvement program | Akshat | A44; use A45 foundations where relevant | Registered 102-chip selection and one 127-chip comparison complete; metric gate passed; deployment correctly blocked by missing upstream license; licensed next experiment recorded |
-| **A47** | 🔄 | P2 topology and artifact-contract hardening | Akshat/coordinator | A45 | Destructive consolidation opt-in; rings/geometry/metric CRS preserved; validated GraphML/GeoJSON pair writes; Panaji evidence regenerated; full suite green |
-| **A48** | 🔄 | P3 correctness and CPU-performance hardening | Akshat/coordinator | A47 | Independent seeds and disclosed sampled efficiency; APLS/percolation/reuse edge cases fixed; full sample evidence and focused/full suites green |
-| **O1** | ⏳ | Close production operator checklist | Akshat | approved release ref | Modal/app redeployed from an immutable ref; port 8501 closed; service/Caddy/journald config installed; live upload smoke passes; rate limiting decision recorded |
-| **F9** | 🔄 | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; bundle/payload/Web-Vitals/map budgets pass; old presentation removed |
+| **A47** | ✅ | P2 topology and artifact-contract hardening | Akshat/coordinator | A45 | Destructive consolidation opt-in; rings/geometry/metric CRS preserved; validated GraphML/GeoJSON pair writes; Panaji evidence regenerated; full suite green |
+| **A48** | ✅ | P3 correctness and CPU-performance hardening | Akshat/coordinator | A47 | Independent seeds and disclosed sampled efficiency; APLS/percolation/reuse edge cases fixed; full sample evidence and focused/full suites green |
+| **O1** | 🔄 | Close production operator checklist | Akshat | approved release ref | Modal/app redeployed from an immutable ref; port 8501 closed; service/Caddy/journald config installed; live upload smoke passes; rate limiting decision recorded |
+| **F9** | ✅ | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; static bundle/payload budgets pass; old presentation removed; O1 owns live Web Vitals/map-frame checks |
 | **X1** | 🔒 | Final backup demo capture | All | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
@@ -174,7 +174,7 @@ flowchart LR
 - A44 may document code problems but does not silently refactor them.
 - A45 establishes a smaller, measured codebase before more model or UI complexity is added.
 - A46 may run research in parallel with later A45 work, but deployment integration waits for A45 contracts to settle.
-- F9 is intentionally last: replace the presentation around stable domain/model outputs, using the current app as a temporary parity oracle.
+- F9 completed around the stable domain/model outputs; O1 now verifies the exact candidate in production.
 - O1 requires access to the live services; repository work alone cannot prove it complete.
 
 ---
@@ -197,16 +197,22 @@ flowchart LR
 
 ## §9 · Status Snapshot
 
-- **Product:** end-to-end batch and hosted-upload paths exist; sample dashboard and CPU analysis are runnable.
-- **Quality:** 318 local tests pass after A45; CI covers the full suite and the production dependency smoke.
-- **Deployment:** public dashboard responds, but the repository cannot prove the operator checklist or latest Modal/app rollout is complete.
+- **Product:** end-to-end batch and hosted-upload paths exist; the sample field atlas and CPU analysis are runnable.
+- **Quality:** PR #132 has green Python, production graph and web CI; local browser, accessibility and bundle-budget gates pass.
+- **Deployment:** SSH access is verified and the host is running; O1 must still apply and prove the exact immutable release.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** finish the researched F9 web replacement and O1 deployment closure before X1.
+- **Immediate work:** finish O1 deployment closure, then capture X1 from the verified public release.
 
 ---
 
 ## §10 · Daily Log
+
+**2026-07-26 (Akshat/coordinator — F9 release candidate verified)**
+
+- Replaced Streamlit/Folium with a static Next.js/React/MapLibre field atlas served by FastAPI while preserving the authenticated Modal P1 boundary, CPU P2/P3 logic and file-artifact contracts.
+- Verified responsive Explore/Stress/Compare/Recover, imagery queue, exports, accessibility and production build/bundle budgets; PR #132 is green for Python, app-graph and web CI.
+- Confirmed production SSH reachability and host identity. O1 remains active until the exact merged ref, public flows, services, ports and rollback path are verified live.
 
 **2026-07-22 (Akshat/coordinator — A47/A48 integration evidence)**
 
