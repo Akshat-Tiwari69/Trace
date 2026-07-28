@@ -41,6 +41,6 @@
 
 1. New-geography/sensor evidence before any final model claim.
 2. A18 licensing before redistribution or deployment.
-3. O1 GitHub release closure and public cost monitoring.
+3. Public analysis cost monitoring.
 4. A45 complexity reduction without contract or performance regressions.
-5. O1 public browser/accessibility regression coverage.
+5. X1 public browser/accessibility regression coverage.
