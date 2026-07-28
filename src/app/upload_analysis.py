@@ -3,11 +3,10 @@
 The dashboard's upload flow previously dead-ended at a mask preview. A39 closes
 that loop by turning the extracted mask into a graph and resilience score.
 This module runs the existing **CPU** P2→P3 pipeline in-process on an uploaded
-mask and returns the same analysis the demo AOI ships with — turning the app
-from "viewer of one canned city" into "analyse your own imagery".
+mask and returns the same analysis contract the demo AOI ships with.
 
-Kept free of Streamlit imports so it is unit-testable without a UI runtime; the
-app layer handles rendering. Coordinates stay in **image space** (pixels scaled
+Kept free of web-framework imports so it is unit-testable without a UI runtime.
+Coordinates stay in **image space** (pixels scaled
 by ``resolution_m``): an uploaded neighbourhood capture is not georeferenced, so
 the honest presentation is an overlay on the image itself, not a fake world-map
 placement.
@@ -25,19 +24,18 @@ import pandas as pd
 # One heavy CPU analysis (skeletonize -> heal -> simplify -> betweenness) at a
 # time: this runs in-process on a 4-core ARM box (A36), and a single
 # pass already uses multiple cores itself, so N concurrent uploads would
-# starve every other session rather than just queue behind one job. Mirrors
-# app.py's `_modal_semaphore` GPU-concurrency guard (A36) but tighter
-# (1 vs 2) since this is the CPU every other Streamlit session also depends
-# on. `acquire(blocking=False)` so a saturated box surfaces an explicit
+# starve the public application rather than queue behind one job. This is
+# tighter than the two-request GPU guard because all CPU analyses share one
+# host. `acquire(blocking=False)` so a saturated box surfaces an explicit
 # "busy, retry" message instead of silently queuing behind the scenes.
 # The public upload path uses the filesystem queue. Keep this semaphore for
 # direct callers and tests so two analyses cannot saturate one worker.
 _ANALYSIS_MAX_INFLIGHT = 1
 _analysis_semaphore = threading.BoundedSemaphore(_ANALYSIS_MAX_INFLIGHT)
 
-# Reject masks larger than this before the CPU pipeline runs — same ceiling as
-# app.py's `Image.MAX_IMAGE_PIXELS` decompression-bomb guard (4096x4096), kept
-# in sync so an upload that passed the earlier PIL check doesn't blow up the
+# Reject masks larger than this before the CPU pipeline runs. It matches the
+# API's 4096×4096 decompression ceiling so an upload that passed the earlier
+# PIL check cannot blow up the
 # skeletonize/betweenness pass instead.
 MAX_MASK_PIXELS = 4096 * 4096
 
@@ -98,7 +96,10 @@ def analyze_mask(
             annotate_cut_structure,
             rank_table,
         )
-        from src.pipeline.p3_analysis.resilience import global_efficiency, resilience_index
+        from src.pipeline.p3_analysis.resilience import (
+            efficiency_sampling_policy,
+            resilience_index,
+        )
 
         binary = (mask01 > 0).astype(np.uint8)
         graph_cfg = GraphConfig(
@@ -121,12 +122,14 @@ def analyze_mask(
         # Headline number: how much routing efficiency the worst single junction
         # loss costs — the product's core "resilience" statement for the
         # uploaded network.
-        base_eff = global_efficiency(graph)
+        efficiency_policy = efficiency_sampling_policy(graph)
         top_node = int(criticality.iloc[0]["node_id"]) if not criticality.empty else None
-        if top_node is not None and base_eff > 0:
-            ri = resilience_index(
-                graph, [top_node], baseline_efficiency=base_eff
-            )["resilience_index"]
+        if top_node is not None:
+            metrics = resilience_index(
+                graph, [top_node], k=efficiency_policy["k"],
+                seed=efficiency_policy["seed"],
+            )
+            ri = metrics["resilience_index"]
         else:
             ri = 1.0
         ri = float(max(0.0, min(1.0, ri)))
@@ -144,45 +147,10 @@ def analyze_mask(
                 "articulation_points": int(criticality["is_articulation"].sum())
                 if "is_articulation" in criticality else 0,
                 "worst_junction": top_node,
+                "efficiency_method": efficiency_policy["method"],
+                "efficiency_k": efficiency_policy["k"],
+                "efficiency_seed": efficiency_policy["seed"],
             },
         )
     finally:
         _analysis_semaphore.release()
-
-
-def render_graph_overlay(image_rgb: np.ndarray, result: AnalysisResult):
-    """Draw the extracted network over the uploaded image (image-space, honest).
-
-    Returns a matplotlib ``Figure`` — roads as thin links, junctions coloured by
-    criticality, the #1 chokepoint ringed — so the user sees *their* network, not
-    a world-map guess. Imported lazily so headless analysis needs no matplotlib.
-    """
-    from matplotlib.figure import Figure
-
-    inv = 1.0 / max(result.resolution_m, 1e-9)  # metres → pixels for plotting
-    fig = Figure(figsize=(7, 7), dpi=110)
-    ax = fig.add_subplot(111)
-    ax.imshow(image_rgb)
-    ax.set_axis_off()
-
-    for _u, _v, data in result.graph.edges(data=True):
-        geom = data.get("geometry")
-        if not geom:
-            continue
-        xs = [p[0] * inv for p in geom]
-        ys = [p[1] * inv for p in geom]
-        ax.plot(xs, ys, color="#0EA5E9", linewidth=1.0, alpha=0.7)
-
-    crit = result.criticality
-    if not crit.empty:
-        ax.scatter(crit["x"] * inv, crit["y"] * inv, s=8, c="#94A3B8", alpha=0.6, zorder=3)
-        hot = crit[crit["is_critical"].astype(bool)]
-        ax.scatter(hot["x"] * inv, hot["y"] * inv, s=26, c="#F59E0B", zorder=4,
-                   label="critical junction")
-        if result.top_node is not None:
-            top = crit[crit["node_id"] == result.top_node]
-            ax.scatter(top["x"] * inv, top["y"] * inv, s=90, facecolors="none",
-                       edgecolors="#EF4444", linewidths=2, zorder=5, label="#1 chokepoint")
-        ax.legend(loc="upper right", fontsize=8, framealpha=0.7)
-    fig.tight_layout(pad=0.2)
-    return fig

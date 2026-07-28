@@ -108,7 +108,27 @@ def _densify(graph, interval_m: float):
     return dense
 
 
-def _snap_map(src, dst, lon0: float, lat0: float, tol_m: float) -> dict:
+def _metric_xy(
+    xy: np.ndarray,
+    coordinate_system: str,
+    lon0: float,
+    lat0: float,
+) -> np.ndarray:
+    if coordinate_system == "geographic":
+        return _to_metres(xy, lon0, lat0)
+    if coordinate_system == "projected":
+        return xy
+    raise ValueError("coordinate_system must be 'geographic' or 'projected'")
+
+
+def _snap_map(
+    src,
+    dst,
+    lon0: float,
+    lat0: float,
+    tol_m: float,
+    coordinate_system: str,
+) -> dict:
     """Map each ``src`` node to the nearest ``dst`` node within ``tol_m`` (or None)."""
     from scipy.spatial import cKDTree
 
@@ -116,11 +136,14 @@ def _snap_map(src, dst, lon0: float, lat0: float, tol_m: float) -> dict:
     if not dst_nodes:
         return {n: None for n in src.nodes}
     dst_xy = np.array([[dst.nodes[n]["x"], dst.nodes[n]["y"]] for n in dst_nodes])
-    tree = cKDTree(_to_metres(dst_xy, lon0, lat0))
+    tree = cKDTree(_metric_xy(dst_xy, coordinate_system, lon0, lat0))
 
     src_nodes = list(src.nodes)
     src_xy = np.array([[src.nodes[n]["x"], src.nodes[n]["y"]] for n in src_nodes])
-    dists, idxs = tree.query(_to_metres(src_xy, lon0, lat0), distance_upper_bound=tol_m)
+    dists, idxs = tree.query(
+        _metric_xy(src_xy, coordinate_system, lon0, lat0),
+        distance_upper_bound=tol_m,
+    )
 
     out: dict = {}
     for n, dist, idx in zip(src_nodes, dists, idxs):
@@ -185,6 +208,8 @@ def _reachable_pair_fraction(graph) -> float:
 def apls(
     gt,
     prop,
+    *,
+    coordinate_system: str,
     n_samples: int = 600,
     tol_m: float = 15.0,
     interval_m: float = 10.0,
@@ -193,23 +218,49 @@ def apls(
 ) -> dict:
     """Symmetric APLS between ground-truth ``gt`` and proposal ``prop`` graphs.
 
-    Both graphs are densified to ≈``interval_m`` spacing first (so the score is
-    independent of how finely each is noded). Returns a dict with the two one-way
-    scores and their harmonic mean ``apls``.
+    ``coordinate_system`` is mandatory: ``geographic`` projects declared lon/lat
+    coordinates to local metres, while ``projected`` uses x/y as metres directly.
+    No coordinate-magnitude guessing is permitted. Both graphs are densified to
+    ≈``interval_m`` spacing first. Returns the two one-way scores and harmonic mean.
     """
+    if coordinate_system not in {"geographic", "projected"}:
+        raise ValueError("coordinate_system must be 'geographic' or 'projected'")
+    if n_samples <= 0:
+        raise ValueError("n_samples must be positive")
+    if not math.isfinite(tol_m) or tol_m <= 0:
+        raise ValueError("tol_m must be a finite positive number")
+
+    common = {
+        "n_samples": n_samples,
+        "snap_tol_m": tol_m,
+        "coordinate_system": coordinate_system,
+    }
     if gt.number_of_nodes() == 0:
-        return {"apls": 0.0, "apls_gt_to_prop": 0.0, "apls_prop_to_gt": 0.0,
-                "n_samples": n_samples, "snap_tol_m": tol_m,
-                "reachable_pair_fraction_gt": 0.0,
-                "reachable_pair_fraction_prop": _reachable_pair_fraction(prop)}
+        return {
+            "apls": 0.0,
+            "apls_gt_to_prop": 0.0,
+            "apls_prop_to_gt": 0.0,
+            **common,
+            "reachable_pair_fraction_gt": 0.0,
+            "reachable_pair_fraction_prop": _reachable_pair_fraction(prop),
+        }
+    if gt.number_of_nodes() >= 2 and prop.number_of_nodes() < 2:
+        return {
+            "apls": 0.0,
+            "apls_gt_to_prop": 0.0,
+            "apls_prop_to_gt": 0.0,
+            **common,
+            "reachable_pair_fraction_gt": round(_reachable_pair_fraction(gt), 4),
+            "reachable_pair_fraction_prop": 0.0,
+        }
 
     gt = _densify(gt, interval_m)
     prop = _densify(prop, interval_m)
     lat0 = float(np.mean([gt.nodes[n]["y"] for n in gt.nodes]))
     lon0 = float(np.mean([gt.nodes[n]["x"] for n in gt.nodes]))
 
-    gt_to_prop = _snap_map(gt, prop, lon0, lat0, tol_m)
-    prop_to_gt = _snap_map(prop, gt, lon0, lat0, tol_m)
+    gt_to_prop = _snap_map(gt, prop, lon0, lat0, tol_m, coordinate_system)
+    prop_to_gt = _snap_map(prop, gt, lon0, lat0, tol_m, coordinate_system)
     a = _apls_oneway(gt, prop, gt_to_prop, n_samples, weight, seed)
     b = _apls_oneway(prop, gt, prop_to_gt, n_samples, weight, seed)
     harmonic = 0.0 if (a + b) == 0 else 2 * a * b / (a + b)
@@ -217,8 +268,7 @@ def apls(
         "apls": round(harmonic, 4),
         "apls_gt_to_prop": round(a, 4),
         "apls_prop_to_gt": round(b, 4),
-        "n_samples": n_samples,
-        "snap_tol_m": tol_m,
+        **common,
         "reachable_pair_fraction_gt": round(_reachable_pair_fraction(gt), 4),
         "reachable_pair_fraction_prop": round(_reachable_pair_fraction(prop), 4),
     }
@@ -288,7 +338,10 @@ def validate(
     prop = load_geojson_graph(sample_dir / f"{aoi}_graph.geojson")
     truth = _load_or_build_truth(bbox, sample_dir / f"{aoi}_osm_truth.geojson")
 
-    result = apls(truth, prop, n_samples=n_samples, tol_m=tol_m)
+    result = apls(
+        truth, prop, coordinate_system="geographic",
+        n_samples=n_samples, tol_m=tol_m,
+    )
     result["aoi"] = aoi
     result["graph_nodes"] = prop.number_of_nodes()
     result["osm_truth_nodes"] = truth.number_of_nodes()

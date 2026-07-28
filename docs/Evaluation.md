@@ -110,25 +110,25 @@ Reproducibility limitation: the inspected upstream snapshot lacks a clear licens
 
 ## Current Panaji sample evidence
 
-The sample graph/evidence was regenerated during A45 after the resilience-normalization correction.
+The sample graph/evidence was regenerated during A47 after the P2 artifact and topology hardening. Destructive junction consolidation is now opt-in, 24 positive-length closed rings are retained as routable keyed edges, and the committed GraphML/GeoJSON seam is geometry-validated before replacement.
 
 Sources: `panaji_demo_graph.geojson`, `panaji_demo_graph_eval.json`, `panaji_demo_apls.json`, `panaji_demo_resilience.csv`, `panaji_demo_percolation.json`, the two current curve plots and `panaji_demo_evidence_manifest.json`. The manifest records the source-graph SHA-256, artifact hashes and exact regeneration commands.
 
 | Property | Current value |
 |---|---:|
-| Nodes / edges | 364 / 500 |
+| Nodes / edges | 573 / 828 |
 | Components during build healing | 8 → 3 |
-| Connectivity-ratio change | +8.32% |
+| Connectivity-ratio change | +8.92% |
 | Bridges added during build | 5 |
 | Surviving final `is_bridged` edges | 4 |
-| Final articulation nodes / structural bridges | 79 / 92 |
-| Top critical node | 278 (`betweenness=0.3307`) |
-| APLS vs cached OSM truth | **0.5369** |
-| APLS directions | GT→proposal `0.4709`; proposal→GT `0.6242` |
-| Reachable pair fraction | GT `0.9769`; proposal `0.9774` |
-| 40-step targeted RI mean / end | `0.6800` / `0.4477` |
-| 40-step random RI mean / end | `0.8105` / `0.6135` |
-| 25-removal targeted / random RI | `0.576689` / `0.770555` |
+| Final articulation nodes / structural bridges | 100 / 90 |
+| Top critical node | 278 (`betweenness=0.2671`) |
+| APLS vs cached OSM truth | **0.5534** |
+| APLS directions | GT→proposal `0.4824`; proposal→GT `0.6490` |
+| Reachable pair fraction | GT `0.9769`; proposal `0.9786` |
+| 40-step targeted RI mean / end | `0.7526` / `0.5532` |
+| 40-step seed-43 random RI mean / end | `0.8912` / `0.6917` |
+| 25-removal targeted / seed-43 random RI | `0.678843` / `0.857574` |
 
 `graph_eval.json` now separates the five bridges added during build-time healing from the four final edges that still carry `is_bridged`; it does not conflate construction history with final graph state. Targeted failures degrade this sample faster than the seeded random baseline. These are demonstration-graph results, not a citywide generalization claim.
 
@@ -147,6 +147,42 @@ All timings below are local focused benchmarks, not production-SLA claims. Each 
 The blended-inference change streams batches instead of retaining every window and probability. Its measured CPU time was effectively flat across 512²–4,096² inputs (worst observed change `+6.8%`), so the supported claim is lower memory, not higher throughput.
 
 Fine-tune threshold selection, clean/gray checks, forget gates and synthetic-occlusion evaluation now share the labeled `hann_blended_probability_v1` probability protocol. Resume rejects histories without that label, preventing a mixed-protocol run. Historical A6–A41 training histories predate the label and remain historical evidence; they are not silently reinterpreted. A46 must establish its own baseline and candidate under the labeled protocol.
+
+## A48 P3 correctness and CPU evidence
+
+P3 continues to define RI as baseline-normalized global efficiency over the
+unchanged baseline node universe. Product outputs now distinguish the largest
+component's share of the baseline universe from its share of still-active nodes;
+an efficiency loss is not relabeled as travel time, a cut route is reported as a
+disconnection, and the random curve is labeled as one seeded reference rather
+than a typical outcome. Random removal order uses seed `43`; sampled-efficiency
+sources independently use seed `42`.
+
+Interactive efficiency is exact through 256 active nodes and uses one fixed,
+stable-node source sample above that threshold. The calibration covers complete
+25-removal targeted and seed-43 random curves on the regenerated 573-node Panaji
+sample and a 17x17 grid. `k=224` missed the frozen `<=0.02` maximum RI-error
+budget on Panaji's random curve (`0.023076`). The smallest tested passing value,
+`k=256`, bounded maximum error to `0.008899`/`0.017329` on Panaji and
+`0.003961`/`0.007349` on the grid (targeted/random respectively). On the two
+Panaji curves, one local CPU run measured `67.394 s` exact versus `29.940 s`
+sampled, a **2.25x speedup**. These are focused local measurements, not a
+production SLA.
+
+The current product analysis discloses `sampled`, `k=256`, source seed `42` in
+every CSV row; after 25 removals its targeted/seed-43 random RI is
+`0.678843`/`0.857574`. The exact 40-step evidence remains separate and reports
+targeted mean/end `0.7526`/`0.5532` versus seed-43 random
+`0.8912`/`0.6917`.
+
+APLS now requires callers to declare geographic versus projected-metre
+coordinates and returns an explicit zero result when a nontrivial ground-truth
+graph has an empty proposal. Invalid zero/non-finite snap tolerances fail early.
+Percolation rejects incomplete, out-of-range, all-zero, and one-positive-node
+state sets; constant rankings are reported as explicitly undefined instead of
+serializing `NaN`. P3 stage reuse fingerprints the criticality/resilience CSV
+pair and both annotated graph artifacts, preserving the prior analysis summary
+when every stage is reused.
 
 ## Experiment ledger
 

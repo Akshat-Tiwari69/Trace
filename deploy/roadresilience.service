@@ -1,5 +1,5 @@
 [Unit]
-Description=Route Resilience — Streamlit dashboard (public)
+Description=Route Resilience — FastAPI and static web app
 After=network-online.target
 Wants=network-online.target
 
@@ -7,11 +7,23 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=%h/Trace
 Environment=PYTHONPATH=%h/Trace
-# Bind to loopback ONLY — Caddy (80/443) is the sole public entrypoint and
-# proxies to 127.0.0.1:8501. Never bind 0.0.0.0 / open 8501 publicly.
-ExecStart=%h/Trace/.venv/bin/streamlit run src/app/app.py --server.port 8501 --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=%h/.config/roadresilience/env
+# One worker owns the CPU queue; Caddy is the only public entrypoint.
+ExecStart=%h/Trace/.venv/bin/uvicorn src.app.api:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers --forwarded-allow-ips=127.0.0.1
 Restart=on-failure
 RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+# PrivateDevices is unavailable in this unprivileged Oracle user manager.
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/Trace/data/outputs
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]
 WantedBy=default.target

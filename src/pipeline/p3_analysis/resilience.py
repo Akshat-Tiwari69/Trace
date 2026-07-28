@@ -29,6 +29,54 @@ if TYPE_CHECKING:
     import networkx as nx
 
 
+AUTO_EFFICIENCY_NODE_THRESHOLD = 256
+# Stable-node, seed-42 calibration across full 25-removal targeted and random
+# curves: k=224 missed the frozen <=0.02 RI-error budget; k=256 passed.
+AUTO_EFFICIENCY_SAMPLES = 256
+EFFICIENCY_SEED = 42
+RANDOM_REMOVAL_SEED = 43
+
+
+def _stable_nodes(graph: "nx.Graph") -> list:
+    """Node order that is reproducible across equivalent graph insert orders."""
+    return sorted(graph.nodes, key=lambda node: (type(node).__name__, repr(node)))
+
+
+def efficiency_sampling_policy(
+    graph: "nx.Graph",
+    k: int | None = None,
+    seed: int = EFFICIENCY_SEED,
+    exact: bool = False,
+) -> dict:
+    """Resolve and disclose the interactive global-efficiency policy.
+
+    Offline evaluators still call :func:`global_efficiency` directly for exact
+    results. Interactive/API analysis uses exact routing through 256 active nodes
+    and a fixed, deterministic source sample above that threshold.
+    """
+    if k is not None and k <= 0:
+        raise ValueError("k must be a positive sample size (or None for automatic)")
+    active_nodes = sum(1 for _, degree in graph.degree() if degree > 0)
+    n = graph.number_of_nodes()
+    resolved = None if exact else k
+    if resolved is None and not exact and active_nodes > AUTO_EFFICIENCY_NODE_THRESHOLD:
+        resolved = min(AUTO_EFFICIENCY_SAMPLES, n)
+    if resolved is not None:
+        resolved = min(resolved, n)
+        if resolved >= n:
+            resolved = None
+    return {
+        "method": "sampled" if resolved is not None else "exact",
+        "k": resolved,
+        "seed": seed,
+        "active_nodes": active_nodes,
+    }
+
+
+def _sample_sources(graph: "nx.Graph", k: int, seed: int) -> list:
+    return random.Random(seed).sample(_stable_nodes(graph), k)
+
+
 def global_efficiency(
     graph: "nx.Graph",
     weight: str = "length_m",
@@ -63,13 +111,15 @@ def global_efficiency(
     if n < 2:
         return 0.0
 
-    nodes = list(graph.nodes)
+    nodes = _stable_nodes(graph)
     if sources is not None:
         if not sources:
             return 0.0
+        if len(set(sources)) != len(sources) or not set(sources).issubset(graph):
+            raise ValueError("sources must be unique nodes from the graph")
         norm = len(sources) * (n - 1)
     elif k is not None and k < n:
-        sources = random.Random(seed).sample(nodes, k)
+        sources = _sample_sources(graph, k, seed)
         norm = k * (n - 1)  # unbiased estimate: mean per-source efficiency
     else:
         sources = nodes
@@ -90,6 +140,7 @@ def resilience_index(
     weight: str = "length_m",
     baseline_efficiency: float | None = None,
     k: int | None = None,
+    seed: int = EFFICIENCY_SEED,
 ) -> dict:
     """Resilience after removing ``removed_nodes``: ``E(perturbed)/E(baseline)``.
 
@@ -102,8 +153,14 @@ def resilience_index(
     node order and seed select the same sources for both efficiencies. A supplied
     ``baseline_efficiency`` must use the same sampling protocol.
     """
+    removed_nodes = _validated_removals(graph, removed_nodes)
+    fixed_sources = (
+        _sample_sources(graph, k, seed)
+        if k is not None and k < graph.number_of_nodes()
+        else None
+    )
     base = (
-        global_efficiency(graph, weight, k=k)
+        global_efficiency(graph, weight, sources=fixed_sources)
         if baseline_efficiency is None
         else baseline_efficiency
     )
@@ -127,42 +184,50 @@ def resilience_index(
         else:
             failed_edges.extend(perturbed.edges(node))
     perturbed.remove_edges_from(failed_edges)
-    eff = global_efficiency(perturbed, weight, k=k)
+    eff = global_efficiency(perturbed, weight, sources=fixed_sources)
 
     ri = eff / base
+    policy = {
+        "method": "sampled" if fixed_sources is not None else "exact",
+        "k": len(fixed_sources) if fixed_sources is not None else None,
+        "seed": seed,
+    }
     return {
         "removed": list(removed_nodes),
         "n_removed": len(removed_nodes),
         "baseline_efficiency": base,
         "perturbed_efficiency": eff,
         "resilience_index": ri,
-        "travel_time_delta_pct": _travel_time_delta_pct(ri),
+        "efficiency_loss_pct": 100.0 * (1.0 - ri),
         "largest_cc_fraction": _largest_cc_fraction(perturbed),
+        "active_largest_cc_fraction": _largest_cc_fraction(
+            perturbed, graph.number_of_nodes() - len(removed_nodes)
+        ),
+        "efficiency_method": policy["method"],
+        "efficiency_k": policy["k"],
+        "efficiency_seed": policy["seed"],
     }
 
 
-def _largest_cc_fraction(graph: "nx.Graph") -> float:
-    """Fraction of nodes in the largest connected component (0–1)."""
+def _validated_removals(graph: "nx.Graph", removed_nodes: list) -> list:
+    removed = list(removed_nodes)
+    if len(set(removed)) != len(removed):
+        raise ValueError("removed_nodes contains duplicate nodes")
+    unknown = [node for node in removed if node not in graph]
+    if unknown:
+        raise ValueError(f"removed_nodes contains unknown nodes: {unknown}")
+    return removed
+
+
+def _largest_cc_fraction(graph: "nx.Graph", denominator: int | None = None) -> float:
+    """Largest component divided by the baseline or caller-supplied universe."""
     import networkx as nx
 
-    n = graph.number_of_nodes()
+    n = graph.number_of_nodes() if denominator is None else denominator
     if n == 0:
         return 0.0
     largest = max((len(c) for c in nx.connected_components(graph)), default=0)
     return largest / n
-
-
-def _travel_time_delta_pct(resilience_index: float) -> float:
-    """Rough average travel-time increase implied by an efficiency drop.
-
-    Efficiency is the mean of inverse path lengths, so its reciprocal tracks
-    mean travel time: a drop to ``RI`` implies ~``(1/RI - 1)`` longer trips. A
-    readable headline number for the dashboard (``docs/UserJourney.md`` Flow B);
-    the exact per-route delta is computed live on click by P4.
-    """
-    if resilience_index <= 0:
-        return float("inf")
-    return 100.0 * (1.0 / resilience_index - 1.0)
 
 
 @dataclasses.dataclass
@@ -173,6 +238,7 @@ class AblationPoint:
     efficiency: float
     resilience_index: float
     largest_cc_fraction: float
+    active_largest_cc_fraction: float
 
 
 def ablation_curve(
@@ -182,6 +248,7 @@ def ablation_curve(
     steps: int | None = None,
     weight: str = "length_m",
     seed: int = 42,
+    source_seed: int | None = None,
     k: int | None = None,
     sequence: list[int] | None = None,
 ) -> list[AblationPoint]:
@@ -193,6 +260,8 @@ def ablation_curve(
     ``order`` is then ignored). The targeted-vs-random pair is the sanity check in
     ``docs/Evaluation.md``. ``k`` forwards to :func:`global_efficiency` for
     k-sample estimation, so the per-step recompute stays cheap on large graphs.
+    ``seed`` controls random removal order; ``source_seed`` independently controls
+    sampled efficiency sources (and defaults to ``seed`` for compatibility).
 
     Failed nodes remain as isolates, preserving the baseline node universe and
     normaliser at every step. When ``k`` is set, the source nodes are sampled
@@ -202,13 +271,17 @@ def ablation_curve(
     """
     import networkx as nx
 
-    nodes = list(graph.nodes)
+    nodes = _stable_nodes(graph)
+    if steps is not None and steps < 0:
+        raise ValueError("steps must be non-negative or None")
 
     # Fixed source set for k-sampling: drawn once, reused (minus removed nodes)
     # at every step so successive efficiencies are comparable estimates.
     fixed_sources: list | None = None
     if k is not None and 0 < k < len(nodes):
-        fixed_sources = random.Random(seed).sample(nodes, k)
+        fixed_sources = _sample_sources(
+            graph, k, seed if source_seed is None else source_seed
+        )
 
     def _efficiency(g: "nx.Graph") -> float:
         if fixed_sources is None:
@@ -223,7 +296,7 @@ def ablation_curve(
         )
 
     if sequence is not None:
-        sequence = list(sequence)
+        sequence = _validated_removals(graph, sequence)
     elif order == "targeted":
         if betweenness is None:
             raise ValueError("order='targeted' requires a betweenness dict")
@@ -238,7 +311,12 @@ def ablation_curve(
     if steps is not None:
         sequence = sequence[:steps]
 
-    curve = [AblationPoint(0, base, 1.0 if base > 0 else 0.0, _largest_cc_fraction(graph))]
+    baseline_fraction = _largest_cc_fraction(graph)
+    curve = [
+        AblationPoint(
+            0, base, 1.0 if base > 0 else 0.0, baseline_fraction, baseline_fraction
+        )
+    ]
     working = graph.copy()
     for i, node in enumerate(sequence, start=1):
         incident = (
@@ -254,6 +332,9 @@ def ablation_curve(
                 efficiency=eff,
                 resilience_index=(eff / base) if base > 0 else 0.0,
                 largest_cc_fraction=_largest_cc_fraction(working),
+                active_largest_cc_fraction=_largest_cc_fraction(
+                    working, graph.number_of_nodes() - i
+                ),
             )
         )
     return curve

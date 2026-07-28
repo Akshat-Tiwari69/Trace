@@ -19,7 +19,12 @@ import sys
 import numpy as np
 
 from src.pipeline.p1_segment.osm_mask import save_binary_png
-from src.pipeline.run_pipeline import DASHBOARD_CRITICALITY_COLUMNS, run
+from src.pipeline.run_pipeline import (
+    DASHBOARD_CRITICALITY_COLUMNS,
+    _file_identity,
+    _stage_is_current,
+    run,
+)
 
 
 def _fake_segment(image_path, checkpoint, aoi, interim_dir, tile_size, threshold, device, tta=False,
@@ -37,6 +42,8 @@ def _fake_segment(image_path, checkpoint, aoi, interim_dir, tile_size, threshold
 
 
 def test_walking_skeleton_flows_p1_to_p4(tmp_path):
+    from src.pipeline.p2_graph.graph_io import load_geojson_graph, load_graphml
+
     res = run(
         "unused.jpg", "unused.pt", "a5test",
         interim_dir=tmp_path / "interim", processed_dir=tmp_path / "processed",
@@ -50,6 +57,16 @@ def test_walking_skeleton_flows_p1_to_p4(tmp_path):
     assert (tmp_path / "processed" / "a5test_criticality.csv").exists()
     assert (tmp_path / "processed" / "a5test_resilience.csv").exists()
     assert (tmp_path / "processed" / "a5test_graph.geojson").exists()
+    graphml = load_graphml(tmp_path / "processed" / "a5test_graph.graphml")
+    geojson = load_geojson_graph(tmp_path / "processed" / "a5test_graph.geojson")
+    graphml_scores = {
+        node: float(data["betweenness"]) for node, data in graphml.nodes(data=True)
+    }
+    geojson_scores = {
+        node: float(data["betweenness"]) for node, data in geojson.nodes(data=True)
+    }
+    assert graphml_scores == geojson_scores
+    assert max(graphml_scores.values()) > 0.0
 
     # P4 seam: the criticality CSV matches the dashboard's column contract
     assert res["p4"]["columns_match"] is True
@@ -57,11 +74,34 @@ def test_walking_skeleton_flows_p1_to_p4(tmp_path):
 
     # analysis summary came through
     assert "targeted_end_ri" in res["analysis"]
+    assert res["analysis"]["efficiency_method"] in {"exact", "sampled"}
+    resilience_header = (
+        tmp_path / "processed" / "a5test_resilience.csv"
+    ).read_text().splitlines()[0]
+    assert {"random_seed", "targeted_active_largest_cc_fraction"} <= set(
+        resilience_header.split(",")
+    )
 
 
 def test_dashboard_contract_columns_are_stable():
     # guard against a silent drift of the P4 contract
     assert DASHBOARD_CRITICALITY_COLUMNS == ["node_id", "betweenness", "rank", "is_critical", "x", "y"]
+
+
+def test_stage_reuse_requires_every_declared_output(tmp_path):
+    primary = tmp_path / "criticality.csv"
+    resilience = tmp_path / "resilience.csv"
+    geojson = tmp_path / "graph.geojson"
+    signature = {"version": 1, "stage": "p3"}
+    outputs = [primary, resilience, geojson]
+    for path in outputs:
+        path.write_text("complete")
+    manifest = {**signature, "outputs": [_file_identity(path) for path in outputs]}
+    primary.with_name(f"{primary.name}.stage.json").write_text(json.dumps(manifest))
+
+    assert _stage_is_current(primary, signature, outputs)
+    resilience.write_text("different but still non-empty")
+    assert not _stage_is_current(primary, signature, outputs)
 
 
 def test_pipeline_signature_invalidates_p1_on_config_change(tmp_path):
@@ -84,6 +124,23 @@ def test_pipeline_signature_invalidates_p1_on_config_change(tmp_path):
     assert changed["stages"][0]["ran"] is True
     assert unchanged["stages"][0]["ran"] is False
     assert unchanged["stages"][0]["reason"] == "signature-match"
+    assert unchanged["analysis"] is not None
+    assert unchanged["analysis"] == changed["analysis"]
+
+
+def test_p2_freshness_requires_the_paired_geojson(tmp_path):
+    common = dict(
+        image_path="unused.jpg", checkpoint="unused.pt", aoi="paired",
+        interim_dir=tmp_path / "interim", processed_dir=tmp_path / "processed",
+        curve_steps=2, segment_fn=_fake_segment,
+    )
+    run(**common)
+    skipped = run(**common)
+    assert next(s for s in skipped["stages"] if s["stage"] == "p2")["ran"] is False
+
+    (tmp_path / "processed" / "paired_graph.geojson").unlink()
+    rebuilt = run(**common)
+    assert next(s for s in rebuilt["stages"] if s["stage"] == "p2")["ran"] is True
 
 
 def test_cli_config_preserves_unspecified_values(tmp_path, monkeypatch):
@@ -206,8 +263,18 @@ def test_run_hashes_unchanged_p1_inputs_once(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "open", count_path_open)
     monkeypatch.setattr(builtins, "open", count_builtin_open)
     monkeypatch.setattr("src.pipeline.p1_segment.predict.run_inference", fake_inference)
-    monkeypatch.setattr(run_pipeline, "build_graph", lambda _cfg: None)
-    monkeypatch.setattr(run_pipeline, "analyze", lambda *_args, **_kwargs: {})
+    def fake_build(cfg):
+        cfg.graphml_path.parent.mkdir(parents=True, exist_ok=True)
+        cfg.graphml_path.write_text("graph")
+        cfg.geojson_path.write_text("geojson")
+
+    def fake_analyze(cfg, **_kwargs):
+        (cfg.processed_dir / f"{cfg.aoi}_criticality.csv").write_text("criticality")
+        (cfg.processed_dir / f"{cfg.aoi}_resilience.csv").write_text("resilience")
+        return {}
+
+    monkeypatch.setattr(run_pipeline, "build_graph", fake_build)
+    monkeypatch.setattr(run_pipeline, "analyze", fake_analyze)
     monkeypatch.setattr(run_pipeline, "_load_graph_for_summary", lambda _cfg: nx.path_graph(2))
     monkeypatch.setattr(run_pipeline, "verify_dashboard_ready", lambda _cfg: {
         "columns_match": True, "geojson_exists": True,

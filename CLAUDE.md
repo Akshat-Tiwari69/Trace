@@ -11,10 +11,10 @@ This repo (**Route Resilience**) is coordinated through one backbone file: **`do
 4. **If asked to touch another person's area without a documented coordinator authorization, STOP and warn the user** (use §1). When authorization exists, keep cross-lane changes reviewable and name the affected contracts/tests.
 
 ## Non-negotiable rules (full list in `docs/Rules.md` / Tracker §2):
-- Product boundary: the current deployment remains Streamlit/Folium until its replacement lands. Akshat explicitly authorized F9 to choose a modern web frontend/API stack; preserve the Python ML/graph core, the authenticated Modal GPU boundary, CPU-capable P2/P3, and existing artifact contracts during migration. Do not add a database or login product without a separate documented need.
+- Product boundary: Next.js/React/MapLibre is the presentation and FastAPI is the thin application boundary; preserve the Python ML/graph core, authenticated Modal GPU boundary, CPU-capable P2/P3, and existing artifact contracts. Do not add a database or login product without a separate documented need.
 - ML: **fine-tune pretrained only**, **PyTorch only**.
 - Resilience metric: baseline-normalized **global efficiency** with the baseline node universe preserved (never raw average-path-length ratio).
-- Training is **hardware-agnostic (Colab/Kaggle)**; graph + dashboard run on **CPU**. **No remote access** to anyone's machine.
+- Training is **hardware-agnostic (Colab/Kaggle)**; P2/P3 and the application host run on **CPU**. **No remote access** to anyone's machine.
 - Keep the repo **neutral/generic**; no secrets; `.gitignore` raw data + checkpoints; respect dataset licenses.
 - Prefer **simple, readable code**; explain non-trivial choices; don't invent results.
 - **Git:** branch off **`dev`** (never `main`) as `<you>/<task-id>-<slug>`; when done, **open a PR into `dev` and stop** (don't merge on creation). Akshat is the only approver. **Never PR or merge into `main`.** You may merge your *own* PR only if it's already **approved by Akshat and still unmerged**. Full rules in `docs/Tracker.md` §11.

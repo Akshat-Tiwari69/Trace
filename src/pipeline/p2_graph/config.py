@@ -9,7 +9,9 @@ P2 code path is identical, only the input mask differs.
 from __future__ import annotations
 
 import dataclasses
+import math
 import re
+from numbers import Real
 from pathlib import Path
 
 # AOI ids are interpolated into artifact filenames (mask/graph/CSV paths), so
@@ -64,7 +66,7 @@ class GraphConfig:
     min_stub_len_m: float = 15.0       # trim degree-1 spurs shorter than this
 
     # --- consolidation (S4): merge near-duplicate junctions -------------------
-    consolidate: bool = True           # merge node clusters joined by sub-tol edges
+    consolidate: bool = False          # destructive merge; opt in only after AOI-specific QC
     consolidate_tol_m: float = 10.0    # junctions joined by an edge shorter than this
 
     # --- polyline simplification (S5): lighter geometry, shape preserved ------
@@ -79,14 +81,38 @@ class GraphConfig:
     processed_dir: Path = Path("data/processed")
 
     def __post_init__(self) -> None:
-        """Guard every path-interpolating consumer: reject unsafe AOI ids."""
+        """Validate path and numeric trust-boundary inputs once."""
         sanitize_aoi(self.aoi)
-        if not 0.0 <= self.min_corridor_support <= 1.0:
-            raise ValueError(
-                f"min_corridor_support must be in [0, 1], got {self.min_corridor_support!r}"
+        bounds = {
+            "gap_max_m": (0.0, None, True),
+            "angle_max_deg": (0.0, 180.0, True),
+            "angle_penalty_factor": (0.0, None, True),
+            "min_edge_len_m": (0.0, None, False),
+            "min_corridor_support": (0.0, 1.0, True),
+            "min_stub_len_m": (0.0, None, True),
+            "consolidate_tol_m": (0.0, None, True),
+            "geom_tol_m": (0.0, None, True),
+            "resolution_m": (0.0, None, False),
+        }
+        for name, (minimum, maximum, inclusive_minimum) in bounds.items():
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)):
+                raise TypeError(f"{name} must be a finite number, got {value!r}")
+            if ((value < minimum if inclusive_minimum else value <= minimum)
+                    or (maximum is not None and value > maximum)):
+                interval = f"[{minimum}, {maximum}]" if maximum is not None else (
+                    f">= {minimum}" if inclusive_minimum else f"> {minimum}"
+                )
+                raise ValueError(f"{name} must be {interval}, got {value!r}")
+        if isinstance(self.corridor_samples, bool) or not isinstance(self.corridor_samples, int):
+            raise TypeError(
+                f"corridor_samples must be an integer >= 2, got {self.corridor_samples!r}"
             )
-        if self.corridor_samples < 1:
-            raise ValueError(f"corridor_samples must be >= 1, got {self.corridor_samples!r}")
+        if self.corridor_samples < 2:
+            raise ValueError(f"corridor_samples must be >= 2, got {self.corridor_samples!r}")
+        for name in ("simplify", "consolidate", "simplify_geom"):
+            if not isinstance(getattr(self, name), bool):
+                raise TypeError(f"{name} must be bool, got {getattr(self, name)!r}")
 
     @property
     def mask_path(self) -> Path:

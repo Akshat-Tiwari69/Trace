@@ -1,6 +1,7 @@
 """Tests for A26 georeferenced/PAN inference reader (`p1_segment/raster_io.py`)."""
 import json
 import numpy as np
+import pytest
 from src.pipeline.p1_segment.raster_io import read_image_any, write_manifest
 
 
@@ -40,8 +41,24 @@ def test_manifest_roundtrips_via_p2_affine(tmp_path):
     from affine import Affine
     from rasterio.transform import from_origin
     t = from_origin(72.8, 19.1, 0.5, 0.5)
-    m = write_manifest("mytile", tmp_path, t, "EPSG:4326")
+    m = write_manifest("mytile", tmp_path, t, "EPSG:4326", width=40, height=32)
     meta = json.loads(m.read_text())
     assert meta["crs"] == "EPSG:4326"
+    assert (meta["width"], meta["height"]) == (40, 32)
     assert Affine(*meta["transform"]) == t         # exactly how P2's _load_alignment rebuilds it
-    assert write_manifest("x", tmp_path, None, None) is None
+    assert write_manifest("x", tmp_path, None, None, width=40, height=32) is None
+
+
+def test_rotated_manifest_has_nonzero_scale_and_loads_in_p2(tmp_path):
+    from affine import Affine
+
+    from src.pipeline.p2_graph.build_graph import _load_alignment
+
+    transform = Affine(0, -1, 100, 1, 0, 200)
+    manifest = write_manifest(
+        "rotated", tmp_path, transform, "EPSG:32643", width=40, height=32
+    )
+    payload = json.loads(manifest.read_text())
+    loaded, crs = _load_alignment(manifest, (32, 40))
+    assert payload["resolution_m"] == pytest.approx(1.0)
+    assert loaded == transform and crs == "EPSG:32643"

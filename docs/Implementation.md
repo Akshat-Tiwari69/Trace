@@ -9,10 +9,10 @@ The original build is complete:
 - P1 segments imagery with the deployed v3.2 checkpoint and preserves georeference/provenance plus an optional probability sidecar when blended inference produces it.
 - P2 produces a healed, simplified NetworkX MultiGraph with geometry, inferred-edge annotations and confidence when a probability map is available.
 - P3 computes criticality, articulation/bridge evidence, global-efficiency resilience and failure scenarios; APLS is a separate evaluation path.
-- P4 is a deployed Streamlit/Folium application with a committed sample path and an upload path backed by Modal P1 plus queued in-process P2/P3 analysis.
-- CI runs the full test suite, dashboard import smoke and a local mask-to-resilience contract smoke under the production dependency set.
+- P4 is a static Next.js/React/MapLibre field atlas served by FastAPI, with a committed sample path and an upload path backed by Modal P1 plus queued in-process P2/P3 analysis.
+- CI runs the Python suite and production graph smoke plus web type, lint, unit, production-build and bundle-budget checks.
 
-The project is therefore in **consolidation and evidence improvement**, not initial construction.
+The release candidate is complete; the current phase is **immutable rollout and live verification**.
 
 ## Team and review ownership
 
@@ -20,7 +20,7 @@ The project is therefore in **consolidation and evidence improvement**, not init
 |---|---|
 | ML, data, evaluation, integration, deployment coordination | Akshat |
 | Graph extraction, graph IO, APLS, criticality and resilience | Shaivi |
-| Dashboard behavior, accessibility and visual design | Saanvi |
+| Web/API behavior, accessibility and visual design | Saanvi |
 
 Akshat authorized repository-wide coordinator changes for the A44–A46/F9 program on 2026-07-13. Primary reviewers still review their areas.
 
@@ -77,20 +77,20 @@ Required gates:
 
 ### F9 — web experience replacement
 
-The overhaul happens after architecture and model outputs settle. Akshat explicitly superseded the Streamlit/Folium stack lock: F9 will replace it with a researched, performance-budgeted web frontend and the thinnest Python API boundary that exposes the maintained P1–P3 capabilities. The current app remains the behavioral reference until parity is verified, then its presentation code and dependencies are removed.
+F9 replaced Streamlit/Folium with a researched, performance-budgeted Next.js/React/MapLibre frontend and the thinnest FastAPI boundary that exposes the maintained P1–P3 capabilities. The old presentation code and dependencies are removed; domain logic remains in Python.
 
-Required gates:
+Implementation gates:
 
 - Browser-verified desktop and narrow-screen flows.
 - Keyboard-accessible alternatives for map-only interactions.
 - Clear separation of sample exploration, uploaded-image jobs, method/evidence and exports.
 - No regression in job recovery, map state, scenario correctness or production dependency smoke.
-- Measured Core Web Vitals, JavaScript bundle and map-frame budgets; heavy map code loads only where needed.
+- Static JavaScript/CSS/font bundle budgets pass; O1 measures live Core Web Vitals and map-frame behavior from the public deployment.
 - Updated `Design.md` and `UserJourney.md` in the same PR.
 
 ### O1/X1 — Operational closeout
 
-O1 applies and verifies the immutable release on the live services. X1 captures the final approved sample and upload flows only after O1 and F9 are complete.
+O1 applies and verifies the immutable release on the live services. X1 captures the final approved sample and upload flows after O1 is complete.
 
 ## Release and branch policy
 

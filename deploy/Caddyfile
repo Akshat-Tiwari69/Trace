@@ -1,16 +1,22 @@
-# Route Resilience — public HTTPS reverse proxy (Caddy, on the Oracle box).
-# Auto-provisions a Let's Encrypt cert for the domain and proxies to the
-# Streamlit dashboard on 127.0.0.1:8501 (websockets handled transparently).
-# Install: place at /etc/caddy/Caddyfile, then `sudo systemctl restart caddy`.
-# Needs 80 + 443 open in BOTH the Oracle Security List and the box iptables.
-# Caddy is the ONLY public entrypoint — port 8501 must NOT be opened anywhere.
+# Route Resilience public TLS entrypoint. Port 8000 stays loopback-only.
+{
+	servers {
+		strict_sni_host on
+	}
+}
+
 trace.tiwaribabu.in {
-    # Cap request bodies (image uploads are a few MB; blocks memory abuse).
-    request_body {
-        max_size 20MB
-    }
-    reverse_proxy localhost:8501
-    # NOTE: per-IP rate limiting requires the non-standard caddy-ratelimit
-    # module (github.com/mholt/caddy-ratelimit), not present in the stock
-    # Debian/Ubuntu caddy package. Recommended follow-up — see deploy/README.md.
+	request_body {
+		max_size 12MB
+	}
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8000
 }

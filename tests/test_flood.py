@@ -79,6 +79,7 @@ def test_flood_comparison_returns_three_curves():
     result = flood_comparison(g, flooded)
     assert set(result["curves"]) == {"flood", "targeted", "random"}
     assert len(result["curves"]["flood"]) == len(flooded) + 1   # baseline + one per removal
+    assert result["random_seed"] == 43
     assert set(result["end_ri"]) == {"flood", "targeted", "random"}
     # damage ranking lists all three, most-damaging (lowest RI) first
     assert set(result["damage_ranking"]) == {"flood", "targeted", "random"}

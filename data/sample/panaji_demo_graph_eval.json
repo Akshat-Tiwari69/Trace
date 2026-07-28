@@ -1,64 +1,61 @@
 {
   "aoi": "panaji_demo",
   "graph": {
-    "nodes": 364,
-    "edges": 500,
+    "nodes": 573,
+    "edges": 828,
     "bridged_edges": 4,
-    "bridged_pct": 0.8
+    "bridged_pct": 0.48
   },
   "simplify": {
-    "nodes_before": 605,
-    "nodes_after": 533,
-    "node_reduction_pct": 11.9,
+    "nodes_before": 629,
+    "nodes_after": 573,
+    "node_reduction_pct": 8.9,
     "stubs_pruned": 25,
-    "nodes_collapsed": 47
+    "nodes_collapsed": 31
   },
-  "consolidate": {
-    "nodes_before": 533,
-    "nodes_after": 364,
-    "nodes_merged": 160
-  },
+  "consolidate": null,
   "healing": {
     "bridges_added": 5,
     "components_before_heal": 8,
     "components_after_heal": 3,
-    "connectivity_ratio_pct": 8.32,
+    "connectivity_ratio_pct": 8.92,
     "source": "build-time"
   },
   "criticality": {
     "top_nodes": [
       {
         "node_id": 278,
-        "betweenness": 0.3307
-      },
-      {
-        "node_id": 261,
-        "betweenness": 0.2642
+        "betweenness": 0.2671
       },
       {
         "node_id": 86,
-        "betweenness": 0.2567
+        "betweenness": 0.2364
       },
       {
-        "node_id": 199,
-        "betweenness": 0.2534
+        "node_id": 67,
+        "betweenness": 0.2329
       },
       {
-        "node_id": 274,
-        "betweenness": 0.2483
+        "node_id": 66,
+        "betweenness": 0.2306
+      },
+      {
+        "node_id": 308,
+        "betweenness": 0.2239
       }
     ],
-    "max_betweenness": 0.3307,
-    "mean_betweenness": 0.040776
+    "max_betweenness": 0.2671,
+    "mean_betweenness": 0.044016
   },
   "resilience": {
-    "baseline_global_efficiency": 0.001507,
+    "baseline_global_efficiency": 0.001991,
     "ablation_steps": 40,
-    "targeted_ri_end": 0.4477,
-    "random_ri_end": 0.6135,
-    "targeted_minus_random_gap": 0.1658,
-    "targeted_mean_ri": 0.68,
-    "random_mean_ri": 0.8105,
+    "random_seed": 43,
+    "targeted_ri_end": 0.5532,
+    "random_ri_end": 0.6917,
+    "targeted_minus_random_gap": 0.1384,
+    "targeted_mean_ri": 0.7526,
+    "random_mean_ri": 0.8912,
     "targeted_degrades_faster": true
   }
 }

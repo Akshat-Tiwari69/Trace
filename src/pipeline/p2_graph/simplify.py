@@ -156,6 +156,8 @@ def prune_short_stubs(graph: "nx.Graph", min_stub_len_m: float, max_iter: int = 
     Leaves longer dead-ends (real cul-de-sacs) untouched. Warns when the
     iteration cap is hit, so "done" is distinguishable from "gave up early".
     """
+    import networkx as nx
+
     removed = 0
     truncated = True
     multi = graph.is_multigraph()
@@ -174,8 +176,22 @@ def prune_short_stubs(graph: "nx.Graph", min_stub_len_m: float, max_iter: int = 
         if not stubs:
             truncated = False
             break
+        # Do not erase a whole connected component merely because every route
+        # in it is shorter than the pruning threshold. Keep its final connected
+        # core; this also prevents the last pruning batch from exposing an
+        # orphan node.
+        candidates = set(stubs)
+        for component in nx.connected_components(graph):
+            if len(set(component) - candidates) < 2:
+                candidates.difference_update(component)
+        stubs = sorted(candidates)
+        if not stubs:
+            truncated = False
+            break
         graph.remove_nodes_from(stubs)
-        removed += len(stubs)
+        isolates = [node for node in graph if graph.degree(node) == 0]
+        graph.remove_nodes_from(isolates)
+        removed += len(stubs) + len(isolates)
     if truncated:
         print(f"[simplify] WARNING: prune_short_stubs hit max_iter={max_iter} — "
               "pruning may be incomplete (deeper stub chains remain)")

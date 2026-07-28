@@ -1,7 +1,8 @@
 [Unit]
-Description=Route Resilience — pull latest from GitHub and restart if changed
+Description=Route Resilience — deploy approved immutable release
 
 [Service]
 Type=oneshot
-EnvironmentFile=-%h/.config/roadresilience/deploy.env
-ExecStart=%h/Trace/deploy/update.sh
+EnvironmentFile=%h/.config/roadresilience/deploy.env
+ExecStart=/usr/bin/bash %h/Trace/deploy/update.sh
+TimeoutStartSec=20min

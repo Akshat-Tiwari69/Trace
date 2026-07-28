@@ -29,6 +29,7 @@ MODEL_PATH = "/model/road_pan.pt"
 # byte limit; derive the base64 ceiling so transport expansion cannot disagree.
 MAX_SOURCE_BYTES = 11 * 1024 * 1024
 MAX_B64_LEN = 4 * ((MAX_SOURCE_BYTES + 2) // 3)
+MAX_REQUEST_BYTES = MAX_B64_LEN + 1024
 MAX_IMAGE_PIXELS = 4096 * 4096  # PIL decompression-bomb ceiling
 
 
@@ -141,6 +142,7 @@ class Segmenter:
         import base64
         import binascii
         import hmac
+        import json
         import os
 
         from fastapi import HTTPException
@@ -152,9 +154,14 @@ class Segmenter:
         if not hmac.compare_digest(request.headers.get("x-api-key", ""), expected_key):
             raise HTTPException(status_code=401, detail="unauthorized")
 
+        body = bytearray()
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > MAX_REQUEST_BYTES:
+                raise HTTPException(status_code=413, detail="request too large")
+            body.extend(chunk)
         try:
-            item = await request.json()
-        except Exception as exc:
+            item = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
             raise HTTPException(status_code=400, detail="invalid JSON") from exc
         if not isinstance(item, dict):
             raise HTTPException(status_code=400, detail="invalid JSON object")

@@ -14,8 +14,10 @@ def _cross() -> np.ndarray:
 def test_mask_to_apls_graph_has_nodes_and_edges():
     g = mask_to_apls_graph(_cross())
     assert g.number_of_nodes() > 0 and g.number_of_edges() > 0
-    # coords were rescaled to ~degrees (tiny), length_m stays metric (>0)
-    assert all(abs(d["x"]) < 1 and abs(d["y"]) < 1 for _, d in g.nodes(data=True))
+    # The evaluator now keeps the skeleton's declared projected-metre frame.
+    assert all(0 <= d["x"] < 64 and 0 <= d["y"] < 64 for _, d in g.nodes(data=True))
+    assert max(d["x"] for _, d in g.nodes(data=True)) > 1
+    assert all(d["length_m"] > 0 for *_, d in g.edges(data=True))
 
 
 def test_mask_to_apls_graph_respects_configured_gsd():

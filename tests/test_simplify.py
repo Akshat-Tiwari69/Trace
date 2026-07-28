@@ -119,6 +119,20 @@ def test_prune_is_iterative():
     assert set(g.nodes) == {0, 1}
 
 
+def test_prune_removes_isolate_exposed_by_same_batch():
+    g = nx.Graph()
+    _edge(g, 0, (0, 0), 1, (1, 0))
+    _edge(g, 1, (1, 0), 2, (2, 0))
+    _annotate_degree_and_type(g)
+
+    prune_short_stubs(g, min_stub_len_m=10.0)
+    assert graph_isolate_count(g) == 0
+
+
+def graph_isolate_count(graph):
+    return sum(1 for node in graph if graph.degree(node) == 0)
+
+
 # --------------------------------------------------------------------------- #
 # simplify_graph (combined) — never disconnects
 # --------------------------------------------------------------------------- #

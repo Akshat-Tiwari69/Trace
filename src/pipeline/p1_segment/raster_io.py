@@ -10,6 +10,7 @@ and writes the alignment manifest P2's `build_graph` already consumes
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 
@@ -162,7 +163,16 @@ def read_image_any(path: str | Path) -> tuple[np.ndarray, object, str | None]:
     return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB), None, None
 
 
-def write_manifest(aoi: str, interim_dir: str | Path, transform, crs, *, prob_png: bool = False) -> Path | None:
+def write_manifest(
+    aoi: str,
+    interim_dir: str | Path,
+    transform,
+    crs,
+    *,
+    width: int,
+    height: int,
+    prob_png: bool = False,
+) -> Path | None:
     """Write P2's alignment manifest if the source is georeferenced; else no-op.
 
     ``transform`` is a rasterio/affine ``Affine`` (its first 6 params are stored,
@@ -174,18 +184,26 @@ def write_manifest(aoi: str, interim_dir: str | Path, transform, crs, *, prob_pn
     """
     if transform is None or crs is None:
         return None
+    if width < 1 or height < 1:
+        raise ValueError(f"manifest dimensions must be positive, got {width}x{height}")
     out_dir = Path(interim_dir) / aoi
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest = out_dir / "manifest.json"
+    a, b, _, d, e, _ = list(transform)[:6]
+    pixel_scale = math.sqrt(abs(float(a) * float(e) - float(b) * float(d)))
+    if not math.isfinite(pixel_scale) or pixel_scale <= 0:
+        raise ValueError("alignment transform must be finite and invertible")
     payload = json.dumps({
         "crs": str(crs),
         "transform": list(transform)[:6],
-        "resolution_m": abs(float(transform[0])),
+        "resolution_m": pixel_scale,
+        "width": int(width),
+        "height": int(height),
         **({"prob_png": True} if prob_png else {}),
     }, indent=2)
     # Atomic (A36): temp + os.replace, so a crash mid-write can't leave a
     # truncated manifest that silently drops P2 into pixel space.
     tmp = manifest.with_name(manifest.name + ".tmp")
-    tmp.write_text(payload)
+    tmp.write_text(payload, encoding="utf-8")
     os.replace(tmp, manifest)
     return manifest

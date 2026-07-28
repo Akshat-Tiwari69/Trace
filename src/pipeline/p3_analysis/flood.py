@@ -24,7 +24,7 @@ import numpy as np
 
 from src.pipeline.p2_graph.graph_io import load_geojson_graph
 from src.pipeline.p3_analysis.criticality import compute_betweenness
-from src.pipeline.p3_analysis.resilience import ablation_curve
+from src.pipeline.p3_analysis.resilience import RANDOM_REMOVAL_SEED, ablation_curve
 
 
 def nodes_in_polygon(graph, polygon: list) -> list[int]:
@@ -66,7 +66,7 @@ def flood_order(graph, flooded: list[int], attr: str = "elevation") -> list[int]
 
 
 def flood_comparison(graph, flooded: list[int], weight: str = "length_m",
-                     seed: int = 42, bc: dict | None = None) -> dict:
+                     seed: int = RANDOM_REMOVAL_SEED, bc: dict | None = None) -> dict:
     """Three-way RI curves over ``len(flooded)`` removals: flood vs targeted vs random.
 
     Returns the curves plus a summary (final RI of each, and the damage ranking).
@@ -86,6 +86,7 @@ def flood_comparison(graph, flooded: list[int], weight: str = "length_m",
     ranked = sorted(ends, key=ends.get)  # most damaging (lowest RI) first
     return {
         "n_flooded": steps,
+        "random_seed": seed,
         "curves": {"flood": flood, "targeted": targeted, "random": random_curve},
         "end_ri": {k: round(v, 4) for k, v in ends.items()},
         "damage_ranking": ranked,  # most → least damaging
@@ -123,7 +124,7 @@ def _plot(result: dict, aoi: str, path: Path) -> None:
     fig, ax = plt.subplots(figsize=(7, 4.5))
     styles = {"flood": ("#2a9d8f", "Flood (spatial cluster)"),
               "targeted": ("#d1495b", "Targeted (betweenness)"),
-              "random": ("#30638e", "Random")}
+              "random": ("#30638e", f"Seeded random (seed {result['random_seed']})")}
     for key, (colour, label) in styles.items():
         curve = result["curves"][key]
         ax.plot([p.n_removed for p in curve], [p.resilience_index for p in curve],

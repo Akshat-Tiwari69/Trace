@@ -18,6 +18,7 @@ from typing import Any, Callable
 from src.pipeline.config import PipelineConfig
 from src.pipeline.p2_graph.build_graph import build_graph
 from src.pipeline.p2_graph.config import GraphConfig
+from src.pipeline.p2_graph.graph_io import graph_artifacts_match
 from src.pipeline.p3_analysis.analyze import analyze
 
 log = logging.getLogger("trace.pipeline")
@@ -114,12 +115,24 @@ def _stage_manifest_path(output: Path) -> Path:
     return output.with_name(f"{output.name}.stage.json")
 
 
-def _stage_is_current(output: Path, signature: dict) -> bool:
+def _stage_is_current(
+    output: Path,
+    signature: dict,
+    required_outputs: list[Path] | None = None,
+    hashes: dict[tuple[str, int, int], str] | None = None,
+) -> bool:
     manifest = _stage_manifest_path(output)
-    if not output.exists() or not manifest.exists():
+    outputs = required_outputs or [output]
+    if (
+        not manifest.exists()
+        or any(not path.is_file() or path.stat().st_size == 0 for path in outputs)
+    ):
         return False
     try:
-        return json.loads(manifest.read_text(encoding="utf-8")) == signature
+        expected = dict(signature)
+        if required_outputs is not None:
+            expected["outputs"] = [_file_identity(path, hashes) for path in outputs]
+        return json.loads(manifest.read_text(encoding="utf-8")) == expected
     except (OSError, json.JSONDecodeError):
         return False
 
@@ -182,19 +195,35 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
     hashes: dict[tuple[str, int, int], str] = {}
 
     def _run_stage(name: str, output: Path, inputs: list[Path],
-                   settings: dict[str, Any], fn: Callable[[], Any]) -> Any:
+                   settings: dict[str, Any], fn: Callable[[], Any],
+                   required_outputs: list[Path] | None = None,
+                   outputs_ready: Callable[[], bool] | None = None) -> Any:
         """Run unless output has an exact input/config content signature."""
         forced = _stage_enabled(name, from_stage, force)
         signature = _stage_signature(name, inputs, settings, hashes)
-        if not forced and _stage_is_current(output, signature):
+        if (
+            not forced
+            and _stage_is_current(output, signature, required_outputs, hashes)
+            and (outputs_ready is None or outputs_ready())
+        ):
             log.info("[%s] skip '%s' — %s signature matches", name.upper(), config.aoi, output.name)
             stages.append({"stage": name, "ran": False, "reason": "signature-match", "seconds": 0.0})
             return None
         t0 = time.perf_counter()
         result = fn()
+        outputs = required_outputs or [output]
+        missing = [
+            str(path) for path in outputs
+            if not path.is_file() or path.stat().st_size == 0
+        ]
+        if missing:
+            raise RuntimeError(f"{name.upper()} completed without required outputs: {missing}")
         # Recompute after the stage because upstream callbacks may create inputs
         # (notably injected test segmenters); persist only a completed run.
-        _write_stage_manifest(output, _stage_signature(name, inputs, settings, hashes))
+        completed = _stage_signature(name, inputs, settings, hashes)
+        if required_outputs is not None:
+            completed["outputs"] = [_file_identity(path, hashes) for path in outputs]
+        _write_stage_manifest(output, completed)
         dt = round(time.perf_counter() - t0, 3)
         log.info("[%s] done in %ss", name.upper(), dt)
         stages.append({"stage": name, "ran": True, "seconds": dt})
@@ -232,7 +261,10 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
         "resolution_m", "gap_max_m", "angle_max_deg", "angle_penalty_factor", "min_edge_len_m",
         "simplify", "min_stub_len_m", "consolidate", "consolidate_tol_m",
         "simplify_geom", "geom_tol_m", "min_corridor_support", "corridor_samples")}
-    _run_stage("p2", cfg.graphml_path, p2_inputs, p2_settings, _p2)
+    _run_stage(
+        "p2", cfg.graphml_path, p2_inputs, p2_settings, _p2,
+        outputs_ready=lambda: graph_artifacts_match(cfg.graphml_path, cfg.geojson_path),
+    )
 
     # Copy the P1 provenance next to the processed artifacts (best-effort).
     from src.pipeline.p1_segment.provenance import read_provenance, write_provenance
@@ -244,8 +276,40 @@ def run(image_path: str | Path, checkpoint: str | Path, aoi: str,
     def _p3() -> Any:
         return analyze(cfg, curve_steps=config.curve_steps)
 
-    analysis = _run_stage("p3", cfg.processed_dir / f"{config.aoi}_criticality.csv",
-                          [cfg.graphml_path], {"curve_steps": config.curve_steps}, _p3)
+    criticality_path = cfg.processed_dir / f"{config.aoi}_criticality.csv"
+    resilience_path = cfg.processed_dir / f"{config.aoi}_resilience.csv"
+    analysis = _run_stage(
+        "p3", criticality_path, [cfg.graphml_path],
+        {"curve_steps": config.curve_steps, "analysis_version": 2}, _p3,
+        required_outputs=[
+            criticality_path, resilience_path, cfg.graphml_path, cfg.geojson_path,
+        ],
+    )
+    if analysis is None:
+        run_summary_path = cfg.processed_dir / f"{config.aoi}_run.json"
+        try:
+            analysis = json.loads(run_summary_path.read_text(encoding="utf-8")).get("analysis")
+        except (OSError, json.JSONDecodeError, AttributeError):
+            analysis = None
+        if analysis is None:
+            import csv
+
+            with resilience_path.open(newline="", encoding="utf-8") as handle:
+                rows = list(csv.DictReader(handle))
+            if not rows:
+                raise RuntimeError("P3 artifacts are current but resilience metadata is empty")
+            last = rows[-1]
+            efficiency_k = last.get("efficiency_k")
+            analysis = {
+                "criticality_path": str(criticality_path),
+                "resilience_path": str(resilience_path),
+                "targeted_end_ri": float(last["targeted_resilience_index"]),
+                "random_end_ri": float(last["random_resilience_index"]),
+                "random_seed": int(last["random_seed"]),
+                "efficiency_method": last["efficiency_method"],
+                "efficiency_k": int(efficiency_k) if efficiency_k else None,
+                "efficiency_seed": int(last["efficiency_seed"]),
+            }
 
     # P4 — dashboard contract check (fail-loud)
     graph = _load_graph_for_summary(cfg)

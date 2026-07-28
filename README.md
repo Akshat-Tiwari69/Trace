@@ -6,7 +6,7 @@ Route Resilience converts satellite imagery into a routable road graph, flags in
 
 [Open the public dashboard](https://trace.tiwaribabu.in) · [Setup](SETUP.md) · [Evaluation](docs/Evaluation.md) · [Current work](docs/Tracker.md)
 
-> **Status (2026-07-14):** the P1→P4 product and public sample dashboard are working. A45 is complete: multi-step resilience is corrected, validation inference is unified, repeated logic is reduced and 318 tests pass. Mask model v3.2 remains the intended production checkpoint. A18-LoRA validates a graph-first research direction but is not deploy-ready. The exact live Oracle/Modal ref/checksum still requires the O1 operator audit.
+> **Status (2026-07-28):** the Next.js/React field atlas and thin FastAPI boundary are live on Oracle at `4493f97` with Modal v3.2. Strict Host/SNI enforcement, the public sample API and a consented upload-to-export run are verified. P2/P3 evidence was regenerated from a 573-node/828-edge MultiGraph, and v3.2 remains production because the higher-scoring graph-first candidate lacks a deployable upstream license. O1 is complete; X1 final demo capture is next.
 
 ## What it does
 
@@ -15,13 +15,13 @@ flowchart LR
     A[Imagery] --> B["P1 · road evidence"]
     B --> C["P2 · MultiGraph + explicit healing"]
     C --> D["P3 · criticality + resilience"]
-    D --> E["P4 · Streamlit/Folium dashboard"]
+    D --> E["P4 · Next.js field atlas + FastAPI"]
 ```
 
 - **P1:** pretrained PyTorch road segmentation with tiled/Hann inference, GeoTIFF/PAN reading, optional probability maps and provenance.
 - **P2:** skeletonization, parallel-edge-preserving MultiGraph extraction, simplification and probability/geometry-aware gap healing.
 - **P3:** betweenness, articulation points/bridges and global-efficiency failure analysis.
-- **P4:** Briefing, Analysis, uploaded imagery and Methodology views with junction/area scenarios, rerouting and exports.
+- **P4:** a responsive MapLibre field atlas with Explore/Stress/Compare/Recover modes, rerouting, exports, methodology, and queued imagery analysis.
 
 The system is designed to recover useful continuity under occlusion and fragmentation, but it does not claim literal knowledge of every hidden road. Inferred links are marked and model evidence is reported with its limitations.
 
@@ -47,17 +47,17 @@ Do not compare those absolute chip scores to the legacy tile-mask APLS column ab
 
 ### Current committed Panaji sample
 
-- 364 nodes / 500 edges
+- 573 nodes / 828 edges; 24 closed rings retained
 - build-time healing: 8 → 3 components; five bridges added, four surviving final inferred edges
-- 79 articulation nodes / 92 structural bridges
-- APLS vs cached OSM truth: `0.5369`
-- 40-step targeted RI: mean `0.6800`, end `0.4477`; seeded-random mean `0.8105`, end `0.6135`
+- 100 articulation nodes / 90 structural bridges
+- APLS vs cached OSM truth: `0.5534`
+- 40-step targeted RI: mean `0.7526`, end `0.5532`; seed-43 random reference mean `0.8912`, end `0.6917`
 
 Multi-step failure now isolates failed nodes while preserving the baseline node universe, so RI remains comparable and bounded. The current graph, resilience, flood and percolation evidence is regenerated and fingerprinted in `data/sample/panaji_demo_evidence_manifest.json`; older curve artifacts are superseded.
 
-## Quickstart — sample dashboard
+## Quickstart — sample field atlas
 
-Python 3.11:
+Python 3.11 and Node.js 22:
 
 ```bash
 python -m venv .venv
@@ -65,10 +65,14 @@ python -m venv .venv
 # Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip==24.2
 python -m pip install -r deploy/requirements-app.txt
-streamlit run src/app/app.py
+cd web
+npm ci
+npm run build
+cd ..
+python -m uvicorn src.app.api:app --host 127.0.0.1 --port 8000
 ```
 
-The committed sample needs no model, GPU or Modal secret. The **Your imagery** tab is enabled only when `MODAL_SEG_URL` and `MODAL_SEG_KEY` are configured.
+Open `http://127.0.0.1:8000`. The committed sample needs no model, GPU, or Modal secret. **Analyze imagery** requires `MODAL_SEG_URL` and `MODAL_SEG_KEY`.
 
 ## Run your own image through P1→P3
 
@@ -119,7 +123,8 @@ src/pipeline/p1_segment/   model, inference, data, training and evaluation
 src/pipeline/p2_graph/     skeleton/MultiGraph, simplification, healing and IO
 src/pipeline/p3_analysis/  criticality, resilience, APLS and scenarios
 src/pipeline/run_pipeline.py
-src/app/                   Streamlit/Folium app, Modal client and upload queue/analysis
+src/app/                   FastAPI, domain service, Modal client and upload queue/analysis
+web/                       Next.js/React/MapLibre field atlas and browser tests
 data/sample/               committed demo contracts and evidence
 deploy/                    Oracle/Modal/Caddy/systemd configuration
 docs/                      product, architecture, evidence, research and coordination
@@ -128,7 +133,7 @@ tests/                     CPU/unit/contract/application tests
 
 ## Product boundaries
 
-- Streamlit/Folium is the current deployed presentation only. F9 is authorized to replace it with a performance-budgeted web frontend and thin Python API while keeping the Python domain pipeline and artifacts authoritative.
+- Next.js/React owns presentation; FastAPI exposes the maintained Python domain pipeline and serves the static export.
 - No database or user-login product without a separate demonstrated need.
 - PyTorch and pretrained fine-tuning only.
 - Resilience is based on global efficiency and must preserve the baseline node universe.
@@ -142,15 +147,15 @@ tests/                     CPU/unit/contract/application tests
 python -m pytest tests/ -q
 ```
 
-A44 baseline: **284 passed** locally. Current A45 state: **318 passed** locally; remote `dev` CI also runs dashboard import and a clean local mask-to-resilience contract smoke under production dependencies.
+CI runs Python tests and production dependency smoke plus TypeScript, lint, unit, static-build, bundle-budget, Playwright, responsive, and axe gates.
 
 ## Current roadmap
 
 1. **A44 (complete):** reconcile documentation and evidence.
 2. **A45 (complete):** fix resilience/inference protocol correctness, simplify code and measure performance.
-3. **A46:** improve graph-first absolute routing and resolve license/reproducibility/new-geography gates.
-4. **F9:** replace Streamlit/Folium with the researched high-design web experience after architecture/model outputs stabilize.
-5. **O1/X1:** immutable live rollout verification and final demo capture.
+3. **A46 (complete):** graph-first candidate passed the routing gate but was blocked from deployment by its missing upstream license.
+4. **F9 (complete):** the Next.js/React/MapLibre experience and FastAPI replacement are live.
+5. **O1 (complete) → X1 (ready):** capture the final backup demo from the approved release.
 
 See [Tracker.md](docs/Tracker.md) for status and [bugs.md](bugs.md) for the current issue ledger.
 

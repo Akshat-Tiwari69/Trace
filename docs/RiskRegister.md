@@ -12,20 +12,19 @@
 | **M-4** | The inspected SAM-Road++ snapshot has no clear license or reproducible dependency lock | H | H | Research locally only; do not redistribute upstream code/derived weights until licensing is clarified | Akshat |
 | **G-1** | Graph simplification/healing can create plausible but false connections | M | H | Preserve probability support, crossing/angle checks, inferred-edge flags and APLS/fragmentation evaluation | Shaivi |
 | **G-2** | Exact centrality/efficiency remains expensive on city-scale graphs | M | M | Use fixed-source sampling and caches; benchmark A45 changes on large synthetic graphs | Shaivi |
-| **P-1** | Repository deploy hardening may be ahead of the live Oracle/Modal configuration | M | H | Complete O1 operator checklist and verify the upload flow from the public URL | Akshat |
-| **P-2** | Public endpoint has no verified rate limiting | M | M | Decide/install Caddy rate-limit module or document an alternative control; retain Modal concurrency/cost caps | Akshat |
+| **P-2** | Public analysis remains cost-bearing even with verified application throttles | M | M | The O1 live smoke accepted 12 simulation requests and returned 429 on request 13 even while forwarded IP headers changed; retain queue/Modal caps, watch usage, and add a Caddy rate module only if measured abuse requires it | Akshat |
 | **P-3** | Filesystem queue is appropriate for one host but not horizontal scale | L | M | Keep single-host scope explicit; preserve atomic claim/lease/JSON recovery tests | Saanvi/Akshat |
 | **C-1** | Large modules and accumulated experiment paths increase change risk | H | M | A45 characterization tests, responsibility splits and dead-path quarantine; measure complexity before/after | Coordinator |
 | **C-2** | Local GPU environment contains dependency conflicts despite passing tests | M | M | Use documented isolated environments; CI is the clean reference; avoid mixing TensorFlow/Google stacks | Akshat |
-| **U-1** | Replacing Streamlit can regress mature analysis, recovery or accessibility behavior | M | H | Treat the current app as a parity oracle until browser flows, job recovery, keyboard paths and API contracts pass | Saanvi/coordinator |
-| **U-2** | A richer frontend can trade visual spectacle for bundle, map or interaction latency | M | H | Lock budgets before implementation; route-split/dynamically load map code; test Web Vitals and representative graph payloads | Saanvi/coordinator |
+| **U-1** | The live web rollout can still expose recovery or accessibility regressions missed locally | M | H | API, upload, export and edge gates pass live; repeat the keyboard/browser journeys against the public deployment | Saanvi/coordinator |
+| **U-2** | A richer frontend can trade visual spectacle for bundle, map or interaction latency | M | H | Enforce the committed JS/CSS/font budgets in CI and recheck representative graph payloads after dependency changes | Saanvi/coordinator |
 | **D-1** | Documentation can drift faster than code and misroute agents/operators | M | H | A44 reduces duplication; Tracker holds current state, topic docs hold details, CI/docs checks added where practical | Coordinator |
 
 ## Accepted constraints
 
-- Training needs GPU access; Colab/Kaggle and optional local NVIDIA GPUs are supported. P2/P3/dashboard remain CPU-capable.
+- Training needs GPU access; Colab/Kaggle and optional local NVIDIA GPUs are supported. P2/P3 and the application host remain CPU-capable.
 - The public demo is a single-host research prototype, not a multi-tenant production platform.
-- Akshat authorized a modern web frontend/API replacement; a database and user accounts remain out of scope unless separately justified.
+- The repository replacement is Next.js/React/MapLibre plus FastAPI; a database and user accounts remain out of scope unless separately justified.
 - SpaceNet/DeepGlobe/OSM/Cartosat licensing constrains data and model redistribution.
 
 ## Closed or materially reduced risks
@@ -34,7 +33,7 @@
 - Phase integration: the P1–P4 seam and end-to-end runner exist and fail loudly.
 - Stale stage reuse: content/config signatures replaced mtime-only checks.
 - Multi-step resilience normalization: failed nodes remain in the baseline universe; corrected sample curves are regenerated and fingerprinted.
-- Deployment rollback/health transaction and immutable-ref enforcement: implemented in repository code. O1 still must prove the exact live host configuration/ref.
+- Deployment rollback/health transaction and immutable-ref enforcement: implemented and live at `4493f974539c2b129e16511864b6231112aa23b6`; strict Host/SNI rejection and the public upload/export flow pass.
 - Missing production dependencies: CI installs `deploy/requirements-app.txt` and exercises mask-to-resilience.
 - Queue duplicate/recovery hazards: atomic claims, owner leases, persistent ordering and JSON results are tested for the single-host design.
 
@@ -42,6 +41,6 @@
 
 1. New-geography/sensor evidence before any final model claim.
 2. A18 licensing before redistribution or deployment.
-3. O1 live-service reconciliation and rate limiting.
+3. Public analysis cost monitoring.
 4. A45 complexity reduction without contract or performance regressions.
-5. F9 browser/accessibility regression coverage.
+5. X1 public browser/accessibility regression coverage.

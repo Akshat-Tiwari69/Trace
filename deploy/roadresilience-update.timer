@@ -1,5 +1,5 @@
 [Unit]
-Description=Route Resilience — poll GitHub for updates every 2 minutes
+Description=Route Resilience — poll approved immutable release every 2 minutes
 
 [Timer]
 OnBootSec=2min

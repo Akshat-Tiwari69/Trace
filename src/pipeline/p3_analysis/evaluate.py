@@ -25,7 +25,11 @@ from pathlib import Path
 
 from src.pipeline.p2_graph.graph_io import load_geojson_graph
 from src.pipeline.p3_analysis.criticality import compute_betweenness
-from src.pipeline.p3_analysis.resilience import ablation_curve, global_efficiency
+from src.pipeline.p3_analysis.resilience import (
+    RANDOM_REMOVAL_SEED,
+    ablation_curve,
+    global_efficiency,
+)
 
 
 def _largest_cc(graph) -> int:
@@ -78,7 +82,9 @@ def _resilience_metrics(graph, bc: dict, curve_steps: int) -> tuple[dict, list, 
     """Targeted vs. random ablation; returns (summary, targeted_curve, random_curve)."""
     steps = min(curve_steps, max(0, graph.number_of_nodes() - 1))
     targeted = ablation_curve(graph, "targeted", betweenness=bc, steps=steps)
-    random_curve = ablation_curve(graph, "random", steps=steps)
+    random_curve = ablation_curve(
+        graph, "random", steps=steps, seed=RANDOM_REMOVAL_SEED
+    )
 
     def mean_ri(curve) -> float:  # area under the RI curve (robustness summary)
         return sum(p.resilience_index for p in curve) / len(curve)
@@ -86,6 +92,7 @@ def _resilience_metrics(graph, bc: dict, curve_steps: int) -> tuple[dict, list, 
     summary = {
         "baseline_global_efficiency": round(global_efficiency(graph), 6),
         "ablation_steps": steps,
+        "random_seed": RANDOM_REMOVAL_SEED,
         "targeted_ri_end": round(targeted[-1].resilience_index, 4),
         "random_ri_end": round(random_curve[-1].resilience_index, 4),
         "targeted_minus_random_gap": round(
@@ -109,7 +116,8 @@ def _plot_resilience(targeted, random_curve, aoi: str, path: Path) -> None:
     ax.plot([p.n_removed for p in targeted], [p.resilience_index for p in targeted],
             marker="o", ms=3, lw=1.8, color="#d1495b", label="Targeted (high-betweenness first)")
     ax.plot([p.n_removed for p in random_curve], [p.resilience_index for p in random_curve],
-            marker="s", ms=3, lw=1.8, color="#30638e", label="Random")
+            marker="s", ms=3, lw=1.8, color="#30638e",
+            label=f"Seeded random reference (seed {RANDOM_REMOVAL_SEED})")
     ax.set_xlabel("Junctions removed")
     ax.set_ylabel("Resilience Index (global efficiency ratio)")
     ax.set_title(f"Network resilience under node ablation — {aoi}")

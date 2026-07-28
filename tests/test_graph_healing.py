@@ -228,6 +228,65 @@ def test_heal_prefers_straight_over_kinked():
     assert g.edges[1, 2]["is_bridged"] is True
 
 
+def test_equal_score_healing_is_independent_of_insertion_order():
+    """Two equally good bridges resolve by node id, not set/KD-tree order."""
+    def parallel_fragments(reverse: bool) -> nx.Graph:
+        graph = nx.Graph()
+        roads = [
+            (0, (0.0, 0.0), 1, (10.0, 0.0)),
+            (2, (0.0, 10.0), 3, (10.0, 10.0)),
+        ]
+        for args in reversed(roads) if reverse else roads:
+            _road(graph, *args)
+        _annotate_degree_and_type(graph)
+        return graph
+
+    first, _ = heal_graph(parallel_fragments(False), gap_max_m=11.0, angle_max_deg=100.0)
+    second, _ = heal_graph(parallel_fragments(True), gap_max_m=11.0, angle_max_deg=100.0)
+    inferred = lambda graph: {
+        tuple(sorted((u, v))) for u, v, data in graph.edges(data=True)
+        if data.get("is_bridged")
+    }
+    assert inferred(first) == inferred(second) == {(0, 2)}
+
+
+def test_bridge_touching_nonincident_road_is_rejected():
+    graph = nx.Graph()
+    _road(graph, 0, (0.0, 0.0), 1, (4.0, 0.0))
+    _road(graph, 2, (6.0, 0.0), 3, (10.0, 0.0))
+    _road(graph, 4, (5.0, 0.0), 5, (5.0, 4.0))
+    _annotate_degree_and_type(graph)
+
+    healed, report = heal_graph(graph, gap_max_m=3.0, angle_max_deg=30.0)
+    assert report.bridges_added == 0
+    assert report.bridges_rejected_crossing >= 1
+    assert not healed.has_edge(1, 2)
+
+
+def test_curved_bridge_crossing_nonincident_road_is_rejected():
+    graph = nx.Graph()
+    _road(graph, 0, (0.0, 0.0), 1, (-1.0, -1.0))
+    _road(graph, 2, (10.0, 0.0), 3, (11.0, -1.0))
+    _road(graph, 4, (5.0, 1.5), 5, (5.0, 2.0))
+    _annotate_degree_and_type(graph)
+
+    healed, report = heal_graph(graph, gap_max_m=10.1, angle_max_deg=46.0)
+    assert not healed.has_edge(0, 2)
+    assert report.bridges_rejected_crossing >= 1
+
+
+def test_probability_support_samples_segment_interiors():
+    from src.pipeline.p2_graph.healing import sample_prob_along_polyline
+
+    probability = np.zeros((1, 11), dtype=np.float32)
+    probability[0, (0, 10)] = 1.0
+    support = sample_prob_along_polyline(
+        [[0.0, 0.0], [10.0, 0.0]], probability,
+        lambda x, y: (y, x),
+    )
+    assert support == pytest.approx(2 / 11)
+
+
 # --------------------------------------------------------------------------- #
 # A39 — probability-map corridor check
 # --------------------------------------------------------------------------- #

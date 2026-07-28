@@ -19,6 +19,7 @@ their tests stay importable without the heavy geo stack.
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -37,9 +38,9 @@ TYPE_BRIDGED = "bridged"
 def ensure_metric_transform(transform, crs, width: int, height: int):
     """Return an affine/CRS pair whose world coordinates are metres.
 
-    Projected inputs pass through. Geographic rasters get a locally linearised
-    affine in their centre-point UTM zone, preventing degrees from being labelled
-    and pruned/healed as metres while preserving the source pixel grid.
+    Metre-based projected inputs pass through. Geographic and non-metre projected
+    rasters get a locally linearised affine in their centre-point UTM zone,
+    preventing degrees/feet from being labelled and pruned/healed as metres.
     """
     if transform is None or crs is None:
         return transform, crs
@@ -48,7 +49,9 @@ def ensure_metric_transform(transform, crs, width: int, height: int):
     from pyproj import CRS, Transformer
 
     source_crs = CRS.from_user_input(crs)
-    if not source_crs.is_geographic:
+    axes = source_crs.axis_info[:2]
+    if (source_crs.is_projected and len(axes) == 2
+            and all(abs(float(axis.unit_conversion_factor) - 1.0) < 1e-9 for axis in axes)):
         return transform, crs
 
     cx, cy = width / 2.0, height / 2.0
@@ -90,12 +93,16 @@ def mask_to_skeleton_with_distance(mask01: np.ndarray) -> tuple[np.ndarray, np.n
     take the distance transform of the mask separately, rather than swapping to
     ``medial_axis`` — same width signal, zero change to the graph structure.
     """
-    from scipy.ndimage import distance_transform_edt
+    import cv2
 
     if mask01.ndim != 2:
         raise ValueError("mask must be 2-D (H×W)")
-    binary = np.asarray(mask01) > 0
-    return mask_to_skeleton(binary), distance_transform_edt(binary)
+    binary = (np.asarray(mask01) > 0).astype(np.uint8)
+    padded = np.pad(binary, 1, mode="constant")
+    distance = cv2.distanceTransform(
+        padded, cv2.DIST_L2, cv2.DIST_MASK_PRECISE
+    )[1:-1, 1:-1]
+    return mask_to_skeleton(binary), distance
 
 
 def _classify(degree: int) -> str:
@@ -152,8 +159,12 @@ def skeleton_to_graph(
     # the headline resilience metric (A37).
     raw = sknw.build_sknw(skel, multi=True)
 
-    # Pixel size (metres) for width: square-pixel UTM grid, else the GSD.
-    pixel_size_m = abs(float(transform[0])) if transform is not None else float(resolution_m)
+    # Area-equivalent pixel scale is rotation-invariant and gives one explicit
+    # scalar width policy for the uncommon anisotropic grid.
+    if transform is not None:
+        pixel_size_m = math.sqrt(abs(float(transform.a * transform.e - transform.b * transform.d)))
+    else:
+        pixel_size_m = float(resolution_m)
     dist = np.asarray(distance) if distance is not None else None
 
     def pixel_to_metric(row: float, col: float) -> tuple[float, float]:
@@ -183,35 +194,79 @@ def skeleton_to_graph(
     # heal/simplify reports stay honest about how many survived.
     from collections import defaultdict
     pair_counts: dict[tuple[int, int], int] = defaultdict(int)
+    next_node_id = max(graph.nodes, default=-1) + 1
+    rings_preserved = 0
     self_loop_dropped = 0
     for u, v, data in raw.edges(data=True):
         ui, vi = int(u), int(v)
-        if ui == vi:
-            # Self-loop artifacts (multi=True surfaces them at ring corners):
-            # zero routing information, and zero-length ones would violate the
-            # length_m > 0 artifact contract. Skip outright.
-            self_loop_dropped += 1
-            continue
         pts = np.asarray(data["pts"], dtype=float)  # (row, col) polyline
         metric = [list(pixel_to_metric(r, c)) for r, c in pts]
-        if len(metric) >= 2:
-            arr = np.asarray(metric)
-            seg = np.diff(arr, axis=0)
-            length_m = float(np.hypot(seg[:, 0], seg[:, 1]).sum())
+
+        if len(metric) < 2:
+            self_loop_dropped += int(ui == vi)
+            continue
+
+        u_xy = [float(graph.nodes[ui]["x"]), float(graph.nodes[ui]["y"])]
+        v_xy = [float(graph.nodes[vi]["x"]), float(graph.nodes[vi]["y"])]
+        if ui != vi:
+            forward = np.hypot(*(np.asarray(metric[0]) - u_xy)) + np.hypot(
+                *(np.asarray(metric[-1]) - v_xy)
+            )
+            reverse = np.hypot(*(np.asarray(metric[0]) - v_xy)) + np.hypot(
+                *(np.asarray(metric[-1]) - u_xy)
+            )
+            if reverse < forward:
+                metric.reverse()
+                pts = pts[::-1]
+            metric[0], metric[-1] = u_xy, v_xy
         else:
-            length_m = 0.0
-        attrs = {"length_m": length_m, "geometry": metric, "is_bridged": False}
+            metric[0] = metric[-1] = u_xy
+
+        arr = np.asarray(metric, dtype=float)
+        segment_lengths = np.hypot(*np.diff(arr, axis=0).T)
+        length_m = float(segment_lengths.sum())
         width = edge_width_m(pts)
-        if width is not None:
-            attrs["width_m"] = width
-        graph.add_edge(ui, vi, **attrs)
-        pair_counts[(min(ui, vi), max(ui, vi))] += 1
+
+        def add_route(a: int, b: int, geometry: list[list[float]], length: float) -> None:
+            attrs = {"length_m": length, "geometry": geometry, "is_bridged": False}
+            if width is not None:
+                attrs["width_m"] = width
+            graph.add_edge(a, b, **attrs)
+            pair_counts[(min(a, b), max(a, b))] += 1
+
+        if ui != vi:
+            add_route(ui, vi, metric, length_m)
+            continue
+
+        if length_m <= 0.0:
+            self_loop_dropped += 1
+            continue
+
+        # A positive sknw self-loop is a real closed road. Split it at half its
+        # route length into two keyed edges so shortest paths can traverse either
+        # side of the ring without retaining a degenerate self-loop.
+        halfway = length_m / 2.0
+        cumulative = np.cumsum(segment_lengths)
+        segment = int(np.searchsorted(cumulative, halfway, side="left"))
+        before = float(cumulative[segment - 1]) if segment else 0.0
+        fraction = (halfway - before) / float(segment_lengths[segment])
+        midpoint = (arr[segment] + fraction * (arr[segment + 1] - arr[segment])).tolist()
+        first = [point.copy() for point in metric[:segment + 1]] + [midpoint]
+        second = [midpoint] + [point.copy() for point in metric[segment + 1:]]
+        split_node = next_node_id
+        next_node_id += 1
+        graph.add_node(split_node, x=float(midpoint[0]), y=float(midpoint[1]))
+        add_route(ui, split_node, first, halfway)
+        add_route(split_node, ui, second, length_m - halfway)
+        rings_preserved += 1
 
     parallel_kept = sum(c - 1 for c in pair_counts.values() if c > 1)
-    if parallel_kept or self_loop_dropped:
+    if parallel_kept or rings_preserved or self_loop_dropped:
         msg = f"[skeleton_graph] built MultiGraph: {parallel_kept} parallel branch(es) kept"
+        if rings_preserved:
+            msg += f", {rings_preserved} closed ring(s) preserved"
         if self_loop_dropped:
-            msg += f", {self_loop_dropped} self-loop artifact(s) dropped"
+            msg += f", {self_loop_dropped} degenerate self-loop(s) dropped"
         print(msg)
 
     _annotate_degree_and_type(graph)

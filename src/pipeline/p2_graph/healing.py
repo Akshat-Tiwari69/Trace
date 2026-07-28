@@ -159,14 +159,14 @@ def find_candidate_bridges(
         for n in comp:
             comp_of[n] = idx
 
-    endpoints = [n for n in graph.nodes if graph.degree(n) == 1]
+    endpoints = sorted(n for n in graph.nodes if graph.degree(n) == 1)
     if len(endpoints) < 2:
         return []
 
     coords = np.array([[graph.nodes[n]["x"], graph.nodes[n]["y"]] for n in endpoints])
     directions = {n: _endpoint_direction(graph, n) for n in endpoints}
     tree = cKDTree(coords)
-    pairs = tree.query_pairs(r=gap_max_m)  # indices into ``endpoints``
+    pairs = sorted(tree.query_pairs(r=gap_max_m))  # indices into ``endpoints``
 
     bridges: list[Bridge] = []
     seen: set[tuple[int, int]] = set()
@@ -257,14 +257,25 @@ def sample_prob_along_polyline(
     never thought was road-like scores near zero. Samples that fall outside the
     raster count as 0 (no support from off-map terrain).
     """
+    if not points:
+        return 0.0
+    pixels = [metric_to_pixel(x, y) for x, y in points]
+    samples: list[tuple[float, float]] = [pixels[0]]
+    for (row0, col0), (row1, col1) in zip(pixels, pixels[1:]):
+        steps = max(1, int(math.ceil(math.hypot(row1 - row0, col1 - col0))))
+        samples.extend(
+            (row0 + (row1 - row0) * step / steps,
+             col0 + (col1 - col0) * step / steps)
+            for step in range(1, steps + 1)
+        )
+
     h, w = prob.shape
     total = 0.0
-    for x, y in points:
-        row, col = metric_to_pixel(x, y)
+    for row, col in samples:
         r, c = int(round(row)), int(round(col))
         if 0 <= r < h and 0 <= c < w:
             total += float(prob[r, c])
-    return total / len(points)
+    return total / len(samples)
 
 
 def _polyline_length(points: list[list[float]]) -> float:
@@ -278,13 +289,13 @@ def _polyline_length(points: list[list[float]]) -> float:
 def _filter_crossing_bridges(
     graph: "nx.Graph", bridges: list[Bridge]
 ) -> tuple[list[Bridge], int]:
-    """Drop candidate bridges whose straight segment crosses an existing road.
+    """Drop candidate bridges whose final curve intersects an existing road.
 
     Distance + angle alone can't tell a real gap from a frontage road running
     parallel to a highway: a bridge that jumps *over* an unrelated
     road link is a phantom route that inflates measured resilience. We reject any
-    candidate whose straight u→v segment ``crosses`` an existing edge it is not
-    incident to (touching at a shared endpoint is fine). An STRtree keeps this
+    candidate whose final u→v curve crosses, touches, or overlaps an
+    existing edge it is not incident to. An STRtree keeps this
     near-linear in the number of candidates. Returns ``(kept, n_rejected)``.
     """
     from shapely.geometry import LineString
@@ -309,16 +320,15 @@ def _filter_crossing_bridges(
     kept: list[Bridge] = []
     rejected = 0
     for b in bridges:
-        seg = LineString([
-            (graph.nodes[b.u]["x"], graph.nodes[b.u]["y"]),
-            (graph.nodes[b.v]["x"], graph.nodes[b.v]["y"]),
-        ])
+        p_u = np.array([graph.nodes[b.u]["x"], graph.nodes[b.u]["y"]])
+        p_v = np.array([graph.nodes[b.v]["x"], graph.nodes[b.v]["y"]])
+        seg = LineString(_bridge_geometry(p_u, p_v, b.dir_u, b.dir_v))
         crosses = False
         for idx in tree.query(seg):
             eu, ev = edge_ends[int(idx)]
             if b.u in (eu, ev) or b.v in (eu, ev):
                 continue  # incident edge — sharing an endpoint is expected
-            if seg.crosses(edge_lines[int(idx)]):
+            if seg.intersects(edge_lines[int(idx)]):
                 crosses = True
                 break
         if crosses:
@@ -382,7 +392,10 @@ def heal_graph(
     """
     import networkx as nx
 
-    comps_before = list(nx.connected_components(graph))
+    comps_before = sorted(
+        (set(component) for component in nx.connected_components(graph)),
+        key=lambda component: min(component),
+    )
     largest_before = max((len(c) for c in comps_before), default=0)
 
     bridges = find_candidate_bridges(
@@ -390,11 +403,11 @@ def heal_graph(
     )
     # Reject bridges that would jump over an existing road.
     bridges, rejected_crossing = _filter_crossing_bridges(graph, bridges)
-    bridges.sort(key=lambda b: b.score)
+    bridges.sort(key=lambda b: (b.score, b.distance_m, b.angle_deg, b.u, b.v))
 
-    uf = UnionFind(list(graph.nodes))
+    uf = UnionFind(sorted(graph.nodes))
     for comp in comps_before:  # seed UF with the existing components
-        members = iter(comp)
+        members = iter(sorted(comp))
         first = next(members)
         for other in members:
             uf.union(first, other)

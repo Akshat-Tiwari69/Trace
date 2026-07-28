@@ -1,131 +1,138 @@
-# TRD.md — Technical Architecture
+# TRACE technical reference
 
-> Current architecture of Route Resilience. Artifact details are owned by `Schema.md` and coordination contracts by `Tracker.md` §4.
+## System boundary
 
-## System overview
-
-Route Resilience has one analysis pipeline and two ways to enter it.
+TRACE turns satellite imagery into a routable road graph and evaluates how efficiently that graph continues to connect places after junction failures.
 
 ```mermaid
 flowchart LR
-    subgraph P1["P1 · GPU-capable segmentation"]
-      IMG[Imagery] --> SEG[SegFormer MiT-B3 + SCSE U-Net]
-      SEG --> MASK[Mask + optional probability + provenance]
-    end
-    subgraph CPU["CPU pipeline"]
-      MASK --> P2["P2 · skeletonize, MultiGraph, simplify, heal"]
-      P2 --> P3["P3 · criticality + global-efficiency resilience"]
-    end
-    P3 --> ART[GraphML + GeoJSON + CSV/JSON artifacts]
-    ART --> EVAL["Evaluation tooling · APLS + model gates"]
-    ART --> P4["P4 · Streamlit + Folium"]
+    B["Browser · Next.js/React"] --> A["FastAPI · validation and domain API"]
+    A --> M["Authenticated Modal GPU · P1 segmentation"]
+    M --> Q["Filesystem queue"]
+    Q --> P2["CPU P2 · MultiGraph extraction and healing"]
+    P2 --> P3["CPU P3 · criticality and resilience"]
+    P3 --> A
+    S["Committed sample artifacts"] --> A
 ```
 
-### Batch/local path
+The browser is a presentation client. Python remains authoritative for graph construction, criticality, APLS, resilience, and uploaded-image analysis.
 
-`python -m src.pipeline.run_pipeline` runs P1→P2→P3, verifies the P4 contract, records content/config signatures per stage and writes a success-only run summary. Stages may be resumed or forced.
+## Runtime components
 
-### Hosted upload path
+| Component | Technology | Responsibility |
+|---|---|---|
+| Web client | Next.js 16, React 19, TypeScript | Static application shell, accessible controls, export, client state |
+| Map | MapLibre GL JS | Data-driven rendering of the authoritative GeoJSON |
+| Application API | FastAPI/Uvicorn, one worker | Artifact reads, simulation, upload validation, queue status/results, static files |
+| GPU inference | Modal-hosted PyTorch endpoint | Authenticated P1 road-mask inference only |
+| CPU analysis | NetworkX, GeoPandas/Shapely, scikit-image/sknw | P2 graph construction and P3 analysis |
+| Persistence | Versioned repository artifacts and short-lived queue files | Reproducible sample evidence and restart-safe upload jobs |
+| Edge/TLS | Caddy | HTTPS, compression, request-size ceiling, reverse proxy |
+| Process control | systemd | Loopback-only app service and immutable update service |
+
+No database or login service is part of the product.
+
+## Pipeline
+
+1. **P1 segmentation** fine-tunes and serves a pretrained PyTorch model. The production model remains `a4-roadseg-v3.2` until a licensed candidate passes the registered routing gate.
+2. **P2 graph construction** converts a binary mask into a `networkx.MultiGraph`, preserves parallel branches and closed rings, samples confidence, heals only corridor-supported gaps, simplifies safely, and writes matching GraphML/GeoJSON artifacts.
+3. **P3 analysis** annotates node/edge criticality, articulation structure, APLS, percolation, flood scenarios, and baseline-normalized global-efficiency ablation curves.
+4. **Application delivery** exposes committed sample artifacts and deterministic live simulations to the web client.
+
+## Public API
+
+All endpoints are same-origin in production.
+
+| Method/path | Purpose | Cache |
+|---|---|---|
+| `GET /healthz` | Process readiness | no cache |
+| `GET /api/v1/aois/{aoi}` | Sample metadata, criticality, resilience curve, evidence | short public cache |
+| `GET /api/v1/aois/{aoi}/graph` | Authoritative GeoJSON | immutable/ETag |
+| `POST /api/v1/simulations` | Deterministic CPU node-removal scenario | no store; bounded LRU server cache |
+| `POST /api/v1/analyses` | Validate image, call Modal P1, enqueue P2/P3 | no store |
+| `GET /api/v1/analyses/{id}` | Queue status and capability URLs | no store |
+| `GET /api/v1/analyses/{id}/result` | Completed metrics and criticality | no store |
+| `GET /api/v1/analyses/{id}/graph` | Uploaded image-space graph | no store |
+
+AOIs and job IDs are validated before path construction. Public errors do not expose secrets, local paths, upstream bodies, or tracebacks.
+
+## Upload lifecycle
 
 ```mermaid
 sequenceDiagram
-    participant U as Browser
-    participant S as Streamlit on Oracle ARM
-    participant M as Modal GPU P1
-    participant Q as Filesystem job queue
-    U->>S: Upload image
-    S->>M: Authenticated, size-limited segmentation request
-    M-->>S: Binary mask + threshold metadata
-    S->>Q: Persist queued mask-analysis job
-    Q->>Q: CPU P2/P3 analysis with claim/lease recovery
-    S-->>U: Poll status, then render result
+    participant U as User
+    participant W as Web client
+    participant A as FastAPI
+    participant M as Modal P1
+    participant Q as CPU queue
+    U->>W: Select PNG/JPEG and confirm external processing
+    W->>A: Multipart upload + scale estimate
+    A->>A: Validate type, signature, size, dimensions, scale
+    A->>M: Authenticated image request
+    M-->>A: Binary mask + validated metadata
+    A->>Q: Persist mask and queued state
+    A-->>W: 202 + capability status URL
+    W->>A: Poll status
+    Q->>Q: P2/P3 analysis
+    A-->>W: Result + image-space GeoJSON URLs
 ```
 
-The Modal endpoint is the only remote inference boundary. There is no database, user-login system or separately managed REST application backend. Queue persistence is intentionally single-host and file-based.
+Limits are enforced in both client and server: PNG/JPEG only, 11 MiB maximum application payload, and 4096 × 4096 maximum decoded dimensions. Caddy uses a slightly larger request-body ceiling for multipart overhead. Unreferenced images stay in image coordinates; the API never invents longitude/latitude.
 
-## Components
+The filesystem queue uses atomic state/result writes, monotonically allocated FIFO order, per-job claims, stale-worker recovery, versioned JSON results, and age-based cleanup. A single Uvicorn worker avoids split in-memory caches and competing CPU workers on the small ARM host.
 
-### P1 — segmentation and evaluation
+## Resilience semantics
 
-- PyTorch + `segmentation-models-pytorch` SegFormer MiT-B3 encoder and SCSE U-Net decoder.
-- Tiled inference with Hann blending, checkpoint-defined threshold/tile size, optional postprocessing and TTA.
-- Rasterio-backed RGB, multispectral and one-band GeoTIFF/PAN reading with CRS/transform propagation.
-- Checkpoint provenance, SHA-256 and stage signatures.
-- Development evaluation on SpaceNet-5 Mumbai plus common-unit routing evaluation against A18 graph outputs.
+The Resilience Index is:
 
-The deployed checkpoint remains `a4-roadseg-v3.2`/`road_pan.pt` until a candidate passes the promotion and deployment gates.
+`efficiency(after failures, baseline node universe) / efficiency(baseline)`
 
-### P2 — graph construction and healing
+Failed nodes remain represented as isolates for the metric. This keeps the denominator and pair universe stable and prevents apparently better scores caused by deleting hard-to-reach nodes. Values are finite and clamped to `[0, 1]`.
 
-- Binary mask → skeleton/medial information → `sknw` → NetworkX `MultiGraph`.
-- Positive metric edge lengths, preserved LineString geometry and parallel-edge keys.
-- Stub pruning, degree-2 collapse, nearby-node consolidation and geometry simplification.
-- Gap healing based on distance, direction, crossing constraints and optional P1 probability corridor support.
-- Observed and inferred edges remain distinguishable.
+Large graphs use deterministic sampled global efficiency. The sample artifact records method, `k`, efficiency seed, and independent random-removal seed on every curve row. Live simulation reuses the artifact's row-zero baseline and identical sampling policy, so UI scenarios and published evidence are comparable.
 
-### P3 — analysis
+## Sample artifact seam
 
-- Node betweenness, articulation points, graph bridges and optional percolation/demand variants.
-- Baseline-normalized global-efficiency Resilience Index under targeted, random, flood or custom failures. Single-scenario and multi-step paths preserve the baseline node universe; current curve evidence was regenerated after the A45 correction.
-- Exact or fixed-source sampled paths for larger graphs.
-- Analyzed GraphML/GeoJSON and tabular criticality/resilience outputs.
+`data/sample/panaji_demo_*` is committed so the public demo and CI do not require a checkpoint or GPU. Required consumers validate:
 
-APLS/topology utilities are housed in the P3 analysis package for reuse, but normal `analyze()`/`run_pipeline` does not execute them; they belong to the separate evaluation path shown in the diagram.
+- positive finite `length_m` and finite coordinates;
+- stable node/edge keys and parallel-edge preservation;
+- criticality columns and ranks;
+- a resilience curve beginning at zero removals with explicit sampling metadata;
+- an evidence manifest whose hashes match the published files.
 
-### P4 — dashboard
+GraphML and GeoJSON are written as a validated pair with rollback on an interrupted replacement. Pipeline reuse is based on content/config signatures, not modification times.
 
-- Streamlit application with Folium maps and four top-level views: Briefing, Analysis, Your imagery and Methodology.
-- Committed Panaji sample for a no-GPU/no-checkpoint start.
-- Junction and multi-node/flood ablation, rerouting, rankings, curves and exports.
-- Persistent single-host upload job queue with JSON state/results and process claims/leases.
-- Modal transport isolated in `src/app/modal_client.py`; CPU upload analysis isolated in `src/app/upload_analysis.py`.
+## Frontend performance architecture
 
-## Runtime and deployment
+- Next.js produces a static export served by FastAPI; there is no Node process on the request path.
+- MapLibre is loaded through a client-only dynamic boundary after the shell.
+- Self-hosted fonts avoid third-party font requests.
+- The graph is fetched once and styled as data-driven layers rather than per-edge React objects.
+- Server simulation results use a bounded LRU keyed by normalized node sets.
+- Immutable graph responses support ETag/conditional requests; analysis data is `no-store`.
+- Bundle and payload limits are enforced by `web/scripts/check-bundle-budget.mjs`.
 
-| Component | Runtime | Deployment |
-|---|---|---|
-| Training/evaluation | Python 3.11 + NVIDIA GPU when required | Local GPU, Colab or Kaggle |
-| Modal P1 | Pinned Python/PyTorch GPU image | Modal, scales to zero |
-| P2/P3/P4 | CPU, production dependency subset | Oracle Ubuntu ARM user service |
-| TLS/reverse proxy | Caddy | Public 80/443; Streamlit should bind loopback 8501 |
-| Updates | systemd timer + `deploy/update.sh` | Immutable application tag/full SHA only, health check and rollback |
+## Security boundary
 
-The repository proves deployment code and CI smokes; `Tracker.md` O1 is required to prove the current live box matches it.
+- Uvicorn binds `127.0.0.1:8000`; only Caddy exposes 80/443.
+- Trusted host and optional CORS allowlists come from the service environment.
+- Security headers include CSP, frame denial, MIME sniffing denial, referrer policy, permissions policy, and HSTS behind HTTPS.
+- General and upload-specific rate limits are bounded in memory.
+- Modal credentials are read from an owner-only environment file and never sent to the browser.
+- The service has systemd hardening and write access only to the upload output directory.
+- Deployment accepts only an immutable full commit SHA or approved tag, builds the static client before restart, checks health and home page, and rebuilds/restarts the prior revision on failure.
 
-## Security boundaries
+## Deployment topology
 
-- Secrets exist only in environment/Modal secret stores.
-- Modal authentication fails closed and is checked before app-level base64 decoding, image parsing and model work.
-- Uploads are type- and size-limited before expensive processing; decoded-size limits account for base64 expansion.
-- The public host should expose Caddy only; port 8501 is loopback-only.
-- Model downloads are checksum-pinned.
-- Uploaded job artifacts are transient and cleaned by age; the product is not a permanent data store.
-- Rate limiting remains an explicit production operator item.
+```mermaid
+flowchart TB
+    I["Internet · 80/443"] --> C["Caddy · TLS and compression"]
+    C --> U["Uvicorn · 127.0.0.1:8000 · one worker"]
+    U --> O["web/out static export"]
+    U --> D["Python domain pipeline"]
+    D --> F["data/outputs/upload_jobs"]
+    D --> M["Modal HTTPS endpoint"]
+```
 
-## Configuration and provenance
-
-- `PipelineConfig` is the end-to-end source for pipeline settings; `GraphConfig` owns P2/P3 parameters and paths.
-- Checkpoint metadata owns architecture, tile size and deploy threshold unless the caller explicitly overrides them.
-- Content/config signatures invalidate stale stage outputs.
-- `{aoi}_run.json` records successful stage timings, resolved configuration and available provenance.
-- Production dependency pins are separate from the ML development environment by design.
-
-## Performance expectations
-
-| Path | Expectation |
-|---|---|
-| Sample dashboard load | Interactive on a modest CPU host |
-| Junction simulation | Near-interactive for the committed sample; sampled/cached algorithms for larger graphs |
-| Uploaded-image P2/P3 | Queued and bounded on the single ARM host |
-| P1 inference | Remote GPU for hosted uploads; CPU remains supported for local batch use but is slower |
-| Large imagery | Tiled/blended inference; source images still have explicit size limits |
-
-Performance claims must be measured on representative inputs. A45 measurements and their limits are recorded in `Evaluation.md`; future changes must retain the same before/after discipline.
-
-## Deliberate non-goals
-
-- Database, accounts, multi-tenant storage or horizontal queue workers.
-- Native mobile application.
-- Live traffic/GPS integration.
-- National-scale graph serving.
-- Claiming final geographic/sensor generalization from the Mumbai development benchmark.
+Ports 8000 and the retired 8501 must remain closed externally. Production completion requires live page, health, sample simulation, invalid/oversize upload, authenticated warm/cold upload, firewall, and rollback checks recorded against the exact deployed SHA.
