@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-07-26 · **Phase:** O1 release rollout · **Overall:** the verified field-atlas release candidate is awaiting immutable production rollout
+**Last updated:** 2026-07-28 · **Phase:** O1 release closure · **Overall:** the field atlas is live at immutable commit `4493f97`; strict-SNI and public upload/export proofs pass, while PR #132 latest-head CI/merge verification and Tracker closure remain
 
 ---
 
@@ -14,7 +14,7 @@ At the beginning of a session, identify the team member you are working for. If 
 
 | Team member | Default ownership | Current next task |
 |---|---|---|
-| **Akshat** | `src/pipeline/p1_segment/`, data tooling, notebooks, integration, shared configuration and coordination | **O1** immutable rollout and release closure |
+| **Akshat** | `src/pipeline/p1_segment/`, data tooling, notebooks, integration, shared configuration and coordination | **O1** PR #132 verification, merge, and release closure |
 | **Shaivi** | `src/pipeline/p2_graph/`, `src/pipeline/p3_analysis/` | Review post-release graph evidence |
 | **Saanvi** | `src/app/`, `web/`, product design and accessibility | Review post-release web behavior |
 
@@ -73,10 +73,10 @@ Two entry paths share the same P2/P3 logic:
 
 Current release state:
 
-- Public application: `https://trace.tiwaribabu.in`; O1 must verify the exact live ref
-- Repository/intended production segmentation model: `a4-roadseg-v3.2` (`road_pan.pt`, threshold `0.52`); O1 must verify the live Modal checksum
+- Public application: `https://trace.tiwaribabu.in`; verified checkout `4493f974539c2b129e16511864b6231112aa23b6`, with strict Host/SNI rejection live through the shared Caddy root
+- Production segmentation model: `a4-roadseg-v3.2` (`road_pan.pt`, threshold `0.52`); Modal v3.2 is deployed and its checkpoint checksum was verified
 - Current research direction: graph-first SAM-Road++/A18, validated by a common-unit chip APLS gate but not deploy-ready
-- Release candidate: PR #132; Python, app-graph and web CI checks green
+- Latest application/config commit `4493f974539c2b129e16511864b6231112aa23b6` is pushed in PR #132; latest overall PR-head CI and merge state are unverified
 
 F9 implementation result: the replacement changes only the presentation/application boundary, retains Python P1–P3 logic and file artifacts, passes browser/accessibility/performance gates, and removes the Streamlit/Folium presentation instead of maintaining two stacks.
 
@@ -133,8 +133,8 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **A46** | ✅ | Graph-first model improvement program | Akshat | A44; use A45 foundations where relevant | Registered 102-chip selection and one 127-chip comparison complete; metric gate passed; deployment correctly blocked by missing upstream license; licensed next experiment recorded |
 | **A47** | ✅ | P2 topology and artifact-contract hardening | Akshat/coordinator | A45 | Destructive consolidation opt-in; rings/geometry/metric CRS preserved; validated GraphML/GeoJSON pair writes; Panaji evidence regenerated; full suite green |
 | **A48** | ✅ | P3 correctness and CPU-performance hardening | Akshat/coordinator | A47 | Independent seeds and disclosed sampled efficiency; APLS/percolation/reuse edge cases fixed; full sample evidence and focused/full suites green |
-| **O1** | 🔄 | Close production operator checklist | Akshat | approved release ref | Modal/app redeployed from an immutable ref; port 8501 closed; service/Caddy/journald config installed; live upload smoke passes; rate limiting decision recorded |
-| **F9** | ✅ | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; static bundle/payload budgets pass; old presentation removed; O1 owns live Web Vitals/map-frame checks |
+| **O1** | 🔄 | Close production operator checklist | Akshat | approved release ref | Final `4493f97` strict-SNI config rolled out; public upload smoke passes; PR #132 latest-head CI/merge state verified; Tracker closed |
+| **F9** | ✅ | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; static bundle/payload budgets pass; old presentation removed |
 | **X1** | 🔒 | Final backup demo capture | All | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
@@ -174,8 +174,8 @@ flowchart LR
 - A44 may document code problems but does not silently refactor them.
 - A45 establishes a smaller, measured codebase before more model or UI complexity is added.
 - A46 may run research in parallel with later A45 work, but deployment integration waits for A45 contracts to settle.
-- F9 completed around the stable domain/model outputs; O1 now verifies the exact candidate in production.
-- O1 requires access to the live services; repository work alone cannot prove it complete.
+- F9 is complete. O1 verified the live `4493f97` checkout, strict-SNI behavior, public sample/simulation APIs, and one consented upload through Modal, CPU analysis, result JSON and GeoJSON export.
+- O1 now waits only on PR #132 latest-head CI/merge verification, Tracker closure, and X1 capture.
 
 ---
 
@@ -198,20 +198,30 @@ flowchart LR
 ## §9 · Status Snapshot
 
 - **Product:** end-to-end batch and hosted-upload paths exist; the sample field atlas and CPU analysis are runnable.
-- **Quality:** PR #132 has green Python, production graph and web CI; local browser, accessibility and bundle-budget gates pass.
-- **Deployment:** SSH access is verified and the host is running; O1 must still apply and prove the exact immutable release.
+- **Quality:** local release gates pass: 391 Python tests, frontend lint/typecheck, 13 unit tests, production build/budgets, and 3/3 Chromium E2E journeys with a prestarted server. Latest-head PR CI still needs an external recheck.
+- **Deployment:** Oracle is live at exact commit `4493f974539c2b129e16511864b6231112aa23b6`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, zero-removal simulation, and a public upload-to-export run are verified.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** finish O1 deployment closure, then capture X1 from the verified public release.
+- **Immediate work:** recheck CI and merge PR #132 after explicit approval, close the Tracker, then capture X1.
 
 ---
 
 ## §10 · Daily Log
 
+**2026-07-28 (Akshat/coordinator — O1 production flows verified; GitHub closure pending)**
+
+- Cut production from Streamlit/Folium to the immutable Next.js/FastAPI release, rebuilt Modal v3.2 from the candidate, closed public ports 8000/8501, retained HTTPS on 443, and verified the active service sandbox. Rotated the Modal application key, confirmed the retired key returns 401, revoked the temporary operator token, and disabled root/password SSH login.
+- Fixed the live zero-removal simulation regression at its source by recomputing the cached simulation baseline with the disclosed sampling protocol; the public API returns RI `1.0` with equal baseline/perturbed efficiency. Repaired the updater's non-executable-script contract.
+- Verified the clean Oracle checkout and immutable deploy ref at `4493f974539c2b129e16511864b6231112aa23b6`. Installed strict-SNI in the shared Caddy root, removed the redundant site matcher, validated/reloaded transactionally, and proved Trace `200`, mismatched Host/SNI `421`, the other hosted domain `200`, active sandboxed services and no post-rollout errors.
+- Ran a consented public upload with an existing evaluation aerial chip: Modal returned threshold `0.52`; the job completed in seven seconds; result JSON and GeoJSON returned `200` with 18 nodes, 18 edges, RI `0.578763` and 36 features. The temporary source image was deleted.
+- Verified the live public simulation throttle: 12 requests were accepted and request 13 returned 429 even while the supplied forwarding address changed.
+- Verification is green locally: 391 Python tests; frontend lint/typecheck, 13 tests, production build and all bundle budgets; 3/3 Chromium journeys with a prestarted server. The managed Playwright command's only local failure is a documented sandbox teardown denial (`taskkill`).
+- O1 remains active because latest-head PR CI/merge state is unverified, and Tracker closure plus X1 capture remain.
+
 **2026-07-26 (Akshat/coordinator — F9 release candidate verified)**
 
 - Replaced Streamlit/Folium with a static Next.js/React/MapLibre field atlas served by FastAPI while preserving the authenticated Modal P1 boundary, CPU P2/P3 logic and file-artifact contracts.
-- Verified responsive Explore/Stress/Compare/Recover, imagery queue, exports, accessibility and production build/bundle budgets; PR #132 is green for Python, app-graph and web CI.
+- Verified responsive Explore/Stress/Compare/Recover, imagery queue, exports, accessibility and production build/bundle budgets; the then-current PR #132 head was green for Python, app-graph and web CI.
 - Confirmed production SSH reachability and host identity. O1 remains active until the exact merged ref, public flows, services, ports and rollback path are verified live.
 
 **2026-07-22 (Akshat/coordinator — A47/A48 integration evidence)**

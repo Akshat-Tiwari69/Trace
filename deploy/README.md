@@ -4,7 +4,7 @@ Public site: `https://trace.tiwaribabu.in`
 
 The production release has four deliberately small parts:
 
-- Caddy terminates TLS on ports 80/443 and proxies to loopback.
+- Caddy terminates TLS on ports 80/443, rejects Host/SNI mismatches, and proxies to loopback.
 - FastAPI serves `/api/v1/*`, the persistent CPU analysis queue, and `web/out`.
 - Modal runs authenticated GPU segmentation; original uploads are not stored by the app.
 - A user-systemd timer deploys only an approved immutable tag or full commit SHA and rolls back a failed health check.
@@ -76,6 +76,8 @@ sudo cp ~/Trace/deploy/journald-roadresilience.conf /etc/systemd/journald.conf.d
 sudo systemctl restart systemd-journald
 ```
 
+The checked-in `Caddyfile` is a complete configuration for a dedicated host. If a shared host instead imports per-site fragments from a separate root file, keep `servers { strict_sni_host on }` inside that root file's single global block and install only the `trace.tiwaribabu.in` site block as the imported fragment. Validate and reload the root file; importing a second global block is invalid Caddy syntax.
+
 Only Caddy is public. `curl http://127.0.0.1:8000/healthz` should work on the host; an external connection to `:8000` must fail.
 
 ## 4. Modal GPU deployment
@@ -123,7 +125,13 @@ journalctl --user -u roadresilience.service -n 100 --no-pager
 curl -fsS http://127.0.0.1:8000/healthz
 curl -fsS https://trace.tiwaribabu.in/healthz
 curl -fsS https://trace.tiwaribabu.in/api/v1/aois/panaji_demo
+curl --http1.1 --resolve trace.tiwaribabu.in:443:127.0.0.1 \
+  -o /dev/null -sS -w '%{http_code}\n' \
+  -H 'Host: invalid.example' \
+  https://trace.tiwaribabu.in/healthz
 ```
+
+The final command must return `421`; it proves Caddy rejects a Host header that disagrees with the TLS SNI name.
 
 Run one real, authorized upload (never sensitive imagery):
 
@@ -137,4 +145,4 @@ curl -fsS -D /tmp/trace-headers \
 
 Poll the returned `status_url`, then open `result_url` and `graph_url`. Verify finite resilience in `[0,1]`, criticality rows, image-space GeoJSON, Modal cold/warm inference, queue recovery after an app restart, and browser rendering at mobile and desktop sizes.
 
-The rollout is complete only when the checked-out commit equals the approved ref, the public page/API/upload succeed, 8000 and legacy 8501 are externally closed, and the deployed application ref, Modal ref, checkpoint SHA-256, and timestamp are recorded in the project tracker.
+The rollout is complete only when the checked-out commit equals the approved ref, the public page/API/upload succeed, Host/SNI mismatch returns 421, ports 8000 and legacy 8501 are externally closed, and the deployed application ref, Modal ref, checkpoint SHA-256, and timestamp are recorded in the project tracker.
