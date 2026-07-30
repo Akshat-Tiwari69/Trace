@@ -104,3 +104,13 @@ test("reflows without horizontal overflow at target widths", async ({ page }) =>
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   }
 });
+
+test("map canvas fills its frame", async ({ page }) => {
+  const frame = await page.locator(".map-frame").boundingBox();
+  const map = await page.locator(".network-map").boundingBox();
+
+  expect(frame).not.toBeNull();
+  expect(map).not.toBeNull();
+  expect(frame!.height).toBeGreaterThan(0);
+  expect(map!.height).toBeCloseTo(frame!.height, 1);
+});
