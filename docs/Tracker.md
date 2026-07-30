@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-07-28 · **Phase:** X1 demo capture · **Overall:** the approved field atlas release is live at immutable commit `4493f97`; production and release gates pass, O1 is complete, and X1 is ready
+**Last updated:** 2026-07-30 · **Phase:** X1 demo capture · **Overall:** the approved field atlas release remains live at immutable commit `4493f97`; F10's basemap warning fix passes release gates and is ready for review, and X1 remains ready
 
 ---
 
@@ -135,6 +135,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **A48** | ✅ | P3 correctness and CPU-performance hardening | Akshat/coordinator | A47 | Independent seeds and disclosed sampled efficiency; APLS/percolation/reuse edge cases fixed; full sample evidence and focused/full suites green |
 | **O1** | ✅ | Close production operator checklist | Akshat | approved release ref | Final `4493f97` strict-SNI config rolled out; public upload smoke passes; PR #132 latest-head CI/merge state verified; Tracker closed |
 | **F9** | ✅ | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; static bundle/payload budgets pass; old presentation removed |
+| **F10** | ✅ | Remove third-party basemap null warnings | Akshat/coordinator | F9 | OpenFreeMap road-shield filters require numeric `ref_length` before comparison; strict CSP and map behavior remain unchanged; frontend release gates pass |
 | **X1** | ⏳ | Final backup demo capture | All | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
@@ -207,6 +208,12 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-07-30 (Akshat/coordinator — F10 basemap console warning fixed)**
+
+- Confirmed the Oracle deployment remains healthy and clean at immutable commit `4493f974539c2b129e16511864b6231112aa23b6`. The reported blob-script CSP messages came from an Enable Copy browser extension; the strict production CSP correctly blocked them and was not weakened.
+- Traced the three numeric-null warnings to OpenFreeMap's three road-shield filters evaluating features without numeric `ref_length`. MapLibre's native `transformStyle` hook now adds a type guard before those comparisons without self-hosting or duplicating the basemap style.
+- Verification is green: focused regression, frontend typecheck and lint, 14 unit tests, production build and bundle budgets, 3/3 Chromium journeys, and 391 Python tests with two upstream warnings.
 
 **2026-07-28 (Akshat/coordinator — O1 release complete; X1 ready)**
 

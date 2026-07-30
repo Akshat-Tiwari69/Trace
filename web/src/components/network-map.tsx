@@ -3,7 +3,7 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import { useEffect, useRef, useState } from "react";
-import maplibregl, { type FilterSpecification, type GeoJSONSource } from "maplibre-gl";
+import maplibregl, { type FilterSpecification, type GeoJSONSource, type StyleSpecification } from "maplibre-gl";
 
 import type { GeoJsonCollection } from "@/lib/api";
 import type { WorkspaceMode } from "@/lib/types";
@@ -22,6 +22,28 @@ type Props = {
 };
 
 const EDGE_FILTER: FilterSpecification = ["==", ["get", "feature_type"], "edge"];
+const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
+const ROAD_SHIELD_LAYERS = new Set([
+  "highway-shield-non-us",
+  "highway-shield-us-interstate",
+  "road_shield_us",
+]);
+
+export function nullSafeBasemapStyle(
+  _previous: StyleSpecification | undefined,
+  next: StyleSpecification,
+): StyleSpecification {
+  return {
+    ...next,
+    layers: next.layers.map((layer) => {
+      if (!ROAD_SHIELD_LAYERS.has(layer.id) || !("filter" in layer) || !Array.isArray(layer.filter)) return layer;
+      const conditions = (layer.filter[0] === "all" ? layer.filter.slice(1) : [layer.filter]) as FilterSpecification[];
+      const numericRefLength: FilterSpecification = ["==", ["typeof", ["get", "ref_length"]], "number"];
+      const filter = ["all", numericRefLength, ...conditions] as unknown as FilterSpecification;
+      return { ...layer, filter };
+    }),
+  };
+}
 
 function nodeFilter(property: string, value: unknown): FilterSpecification {
   return ["all", ["==", ["get", "feature_type"], "node"], ["==", ["get", property], value]] as FilterSpecification;
@@ -61,7 +83,6 @@ export default function NetworkMap({
     if (!containerRef.current || mapRef.current) return;
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: "https://tiles.openfreemap.org/styles/positron",
       bounds: [[bounds[0], bounds[1]], [bounds[2], bounds[3]]],
       fitBoundsOptions: { padding: 56, duration: 0 },
       cooperativeGestures: true,
@@ -191,6 +212,7 @@ export default function NetworkMap({
       map.setLayoutProperty("bridged-roads", "visibility", state.layers.bridged ? "visible" : "none");
       map.setLayoutProperty("spof-nodes", "visibility", state.layers.spof ? "visible" : "none");
     });
+    map.setStyle(BASEMAP_STYLE, { transformStyle: nullSafeBasemapStyle });
     return () => {
       map.remove();
       mapRef.current = null;
