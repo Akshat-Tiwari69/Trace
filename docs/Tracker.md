@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-07-30 · **Phase:** X1 demo capture · **Overall:** the approved field atlas release remains live at immutable commit `4493f97`; F10's basemap warning fix passes release gates and is ready for review, and X1 remains ready
+**Last updated:** 2026-07-30 · **Phase:** X1 demo capture · **Overall:** the approved field atlas release is live at immutable commit `80a94f7`; F10 is merged, deployed and verified, and X1 remains ready
 
 ---
 
@@ -73,10 +73,10 @@ Two entry paths share the same P2/P3 logic:
 
 Current release state:
 
-- Public application: `https://trace.tiwaribabu.in`; verified checkout `4493f974539c2b129e16511864b6231112aa23b6`, with strict Host/SNI rejection live through the shared Caddy root
+- Public application: `https://trace.tiwaribabu.in`; verified checkout `80a94f7d5265b9a0506fdbab58499d6956d0e7db`, with strict Host/SNI rejection live through the shared Caddy root
 - Production segmentation model: `a4-roadseg-v3.2` (`road_pan.pt`, threshold `0.52`); Modal v3.2 is deployed and its checkpoint checksum was verified
 - Current research direction: graph-first SAM-Road++/A18, validated by a common-unit chip APLS gate but not deploy-ready
-- Latest application/config commit `4493f974539c2b129e16511864b6231112aa23b6` is carried into `dev` by PR #132 together with this O1 closure record
+- Latest application commit `80a94f7d5265b9a0506fdbab58499d6956d0e7db` is merged into `dev` by PR #133 and deployed as the immutable Oracle ref
 
 F9 implementation result: the replacement changes only the presentation/application boundary, retains Python P1–P3 logic and file artifacts, passes browser/accessibility/performance gates, and removes the Streamlit/Folium presentation instead of maintaining two stacks.
 
@@ -135,7 +135,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **A48** | ✅ | P3 correctness and CPU-performance hardening | Akshat/coordinator | A47 | Independent seeds and disclosed sampled efficiency; APLS/percolation/reuse edge cases fixed; full sample evidence and focused/full suites green |
 | **O1** | ✅ | Close production operator checklist | Akshat | approved release ref | Final `4493f97` strict-SNI config rolled out; public upload smoke passes; PR #132 latest-head CI/merge state verified; Tracker closed |
 | **F9** | ✅ | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; static bundle/payload budgets pass; old presentation removed |
-| **F10** | ✅ | Remove third-party basemap null warnings | Akshat/coordinator | F9 | OpenFreeMap road-shield filters require numeric `ref_length` before comparison; strict CSP and map behavior remain unchanged; frontend release gates pass |
+| **F10** | ✅ | Remove third-party basemap null warnings | Akshat/coordinator | F9 | OpenFreeMap road-shield filters require numeric `ref_length` before comparison; strict CSP and map behavior remain unchanged; PR #133 is live at `80a94f7` |
 | **X1** | ⏳ | Final backup demo capture | All | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
@@ -175,7 +175,7 @@ flowchart LR
 - A44 may document code problems but does not silently refactor them.
 - A45 establishes a smaller, measured codebase before more model or UI complexity is added.
 - A46 may run research in parallel with later A45 work, but deployment integration waits for A45 contracts to settle.
-- F9 and O1 are complete. The live `4493f97` checkout, strict-SNI behavior, public sample/simulation APIs, and one consented upload through Modal, CPU analysis, result JSON and GeoJSON export are verified.
+- F9, F10 and O1 are complete. The live `80a94f7` checkout, strict-SNI behavior, public sample/simulation APIs, clean map console, and the earlier consented upload through Modal, CPU analysis, result JSON and GeoJSON export are verified.
 - PR #132 carries this closure record into `dev`; X1 final backup demo capture is the next ready task.
 
 ---
@@ -200,7 +200,7 @@ flowchart LR
 
 - **Product:** end-to-end batch and hosted-upload paths exist; the sample field atlas and CPU analysis are runnable.
 - **Quality:** local release gates pass: 391 Python tests, frontend lint/typecheck, 13 unit tests, production build/budgets, and 3/3 Chromium E2E journeys with a prestarted server. PR #132's required test, web and app-graph-smoke checks pass on the merge head.
-- **Deployment:** Oracle is live at exact commit `4493f974539c2b129e16511864b6231112aa23b6`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, zero-removal simulation, and a public upload-to-export run are verified.
+- **Deployment:** Oracle is live at exact commit `80a94f7d5265b9a0506fdbab58499d6956d0e7db`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, zero-removal simulation, a public upload-to-export run, and F10's clean live map console are verified.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
 - **Immediate work:** capture X1 from the approved public release.
@@ -211,9 +211,11 @@ flowchart LR
 
 **2026-07-30 (Akshat/coordinator — F10 basemap console warning fixed)**
 
-- Confirmed the Oracle deployment remains healthy and clean at immutable commit `4493f974539c2b129e16511864b6231112aa23b6`. The reported blob-script CSP messages came from an Enable Copy browser extension; the strict production CSP correctly blocked them and was not weakened.
+- Confirmed the reported blob-script CSP messages came from an Enable Copy browser extension; the strict production CSP correctly blocked them and was not weakened.
 - Traced the three numeric-null warnings to OpenFreeMap's three road-shield filters evaluating features without numeric `ref_length`. MapLibre's native `transformStyle` hook now adds a type guard before those comparisons without self-hosting or duplicating the basemap style.
 - Verification is green: focused regression, frontend typecheck and lint, 14 unit tests, production build and bundle budgets, 3/3 Chromium journeys, and 391 Python tests with two upstream warnings.
+- PR #133 passed all required checks. GitHub disallowed a formal author self-review, so Akshat's explicit coordinator approval was recorded before the owner-override merge into `dev`; the transactional updater deployed merge commit `80a94f7d5265b9a0506fdbab58499d6956d0e7db` at 2026-07-30 05:57:30 UTC.
+- Post-rollout checks prove a clean exact checkout, active service, internal/public health and sample APIs, strict Host/SNI `421`, externally closed ports 8000/8501, a rendered live MapLibre canvas, and zero Chromium console warnings or errors. F10 was presentation-only, so no new external upload was run; the consented O1 upload remains the current upload-path smoke.
 
 **2026-07-28 (Akshat/coordinator — O1 release complete; X1 ready)**
 
