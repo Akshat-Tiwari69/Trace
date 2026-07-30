@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-07-30 · **Phase:** F11 production repair · **Overall:** F10 is live at immutable commit `80a94f7`; F11 restores the zero-height map canvas and is ready for review and rollout
+**Last updated:** 2026-07-30 · **Phase:** X1 demo capture · **Overall:** the repaired field atlas is live at immutable commit `f42dd68`; F11 restores the map canvas and X1 is ready
 
 ---
 
@@ -73,7 +73,7 @@ Two entry paths share the same P2/P3 logic:
 
 Current release state:
 
-- Public application: `https://trace.tiwaribabu.in`; verified checkout `80a94f7d5265b9a0506fdbab58499d6956d0e7db`, with strict Host/SNI rejection live through the shared Caddy root
+- Public application: `https://trace.tiwaribabu.in`; verified checkout `f42dd68c55a0da66e1b1669339ac35bb94a98a48`, with strict Host/SNI rejection live through the shared Caddy root
 - Production segmentation model: `a4-roadseg-v3.2` (`road_pan.pt`, threshold `0.52`); Modal v3.2 is deployed and its checkpoint checksum was verified
 - Current research direction: graph-first SAM-Road++/A18, validated by a common-unit chip APLS gate but not deploy-ready
 - Latest application/config commit `4493f974539c2b129e16511864b6231112aa23b6` is carried into `dev` by PR #132 together with this O1 closure record
@@ -136,7 +136,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **O1** | ✅ | Close production operator checklist | Akshat | approved release ref | Final `4493f97` strict-SNI config rolled out; public upload smoke passes; PR #132 latest-head CI/merge state verified; Tracker closed |
 | **F9** | ✅ | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; static bundle/payload budgets pass; old presentation removed |
 | **F10** | ✅ | Remove third-party basemap null warnings | Akshat/coordinator | F9 | OpenFreeMap road-shield filters require numeric `ref_length` before comparison; strict CSP and map behavior remain unchanged; frontend release gates pass |
-| **F11** | ✅ | Restore the production map canvas | Akshat/coordinator | F10 | MapLibre container has nonzero frame height; browser regression, frontend gates, production build and budgets pass |
+| **F11** | ✅ | Restore the production map canvas | Akshat/coordinator | F10 | MapLibre container fills its frame; browser regression and release gates pass; exact merged commit is live and visibly renders the network |
 | **X1** | ⏳ | Final backup demo capture | All | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
@@ -176,8 +176,8 @@ flowchart LR
 - A44 may document code problems but does not silently refactor them.
 - A45 establishes a smaller, measured codebase before more model or UI complexity is added.
 - A46 may run research in parallel with later A45 work, but deployment integration waits for A45 contracts to settle.
-- F9 and O1 are complete. The live `80a94f7` checkout, strict-SNI behavior, public sample/simulation APIs, and one consented upload through Modal, CPU analysis, result JSON and GeoJSON export are verified.
-- F11 must be rolled out before X1 final backup demo capture.
+- F9, O1 and F11 are complete. The live `f42dd68` checkout, strict-SNI behavior, public sample/simulation APIs, visibly rendered network map, and one consented upload through Modal, CPU analysis, result JSON and GeoJSON export are verified.
+- X1 final backup demo capture is the next ready task.
 
 ---
 
@@ -201,10 +201,10 @@ flowchart LR
 
 - **Product:** end-to-end batch and hosted-upload paths exist; the sample field atlas and CPU analysis are runnable.
 - **Quality:** local release gates pass: 391 Python tests, frontend lint/typecheck, 14 unit tests, production build/budgets, 3 existing Chromium journeys, and the F11 map-height browser regression.
-- **Deployment:** Oracle is live at exact commit `80a94f7d5265b9a0506fdbab58499d6956d0e7db`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, zero-removal simulation, and a public upload-to-export run are verified.
+- **Deployment:** Oracle is live at exact commit `f42dd68c55a0da66e1b1669339ac35bb94a98a48`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, zero-removal simulation, and a public upload-to-export run are verified.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** merge and deploy F11, then capture X1 from the repaired public release.
+- **Immediate work:** capture X1 from the repaired public release.
 
 ---
 
@@ -215,6 +215,8 @@ flowchart LR
 - Reproduced the blank production map with valid graph, style, tile, sprite and font responses. Browser geometry exposed the root cause: MapLibre's unlayered `.maplibregl-map` positioning overrode the layered application rule, leaving `.network-map` at zero height.
 - Added the existing container's missing `height: 100%` and a browser regression that failed at `0 / 520` pixels before the fix and passes afterward.
 - Frontend lint/typecheck, 14 unit tests, the focused Chromium regression, production build and bundle budgets pass. The unchanged multi-journey Playwright command reached all four journeys but the managed Windows runner again stalled during teardown.
+- PR #135 passed web, app-graph-smoke, Sourcery and the rerun of one unrelated probabilistic Python-test flake, then merged into `dev` at `f42dd68c55a0da66e1b1669339ac35bb94a98a48`. The user-level transactional updater restarted the clean checkout healthy at 12:35:49 UTC.
+- Public `/healthz` and Panaji data return `200`. A production Chromium probe confirms the map and canvas both fill the 634-pixel frame and visibly renders the basemap, network, critical junctions and controls without application warnings. Browser-extension blob/message-channel errors remain correctly blocked by the strict CSP.
 
 **2026-07-30 (Akshat/coordinator — F10 basemap console warning fixed)**
 
