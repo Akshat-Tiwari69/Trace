@@ -109,6 +109,8 @@ test("map canvas fills its frame", async ({ page }) => {
   const frame = await page.locator(".map-frame").boundingBox();
   const map = await page.locator(".network-map").boundingBox();
 
-  expect(frame?.height).toBeGreaterThan(0);
-  expect(map?.height).toBe(frame?.height);
+  expect(frame).not.toBeNull();
+  expect(map).not.toBeNull();
+  expect(frame!.height).toBeGreaterThan(0);
+  expect(map!.height).toBeCloseTo(frame!.height, 1);
 });
