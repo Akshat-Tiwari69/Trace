@@ -216,7 +216,7 @@ flowchart LR
 - Added the existing container's missing `height: 100%` and a browser regression that failed at `0 / 520` pixels before the fix and passes afterward.
 - Frontend lint/typecheck, 14 unit tests, the focused Chromium regression, production build and bundle budgets pass. The unchanged multi-journey Playwright command reached all four journeys but the managed Windows runner again stalled during teardown.
 - PR #135 passed web, app-graph-smoke, Sourcery and the rerun of one unrelated probabilistic Python-test flake, then merged into `dev` at `f42dd68c55a0da66e1b1669339ac35bb94a98a48`. The user-level transactional updater restarted the clean checkout healthy at 12:35:49 UTC.
-- Public `/healthz` and Panaji data return `200`. A production Chromium probe confirms the map and canvas both fill the 634-pixel frame and visibly renders the basemap, network, critical junctions and controls without application warnings. Browser-extension blob/message-channel errors remain correctly blocked by the strict CSP.
+- Public `/healthz` and Panaji data return `200`. A production Chromium probe confirms the map and canvas both fill the 634-pixel frame and visibly render the basemap, network, critical junctions and controls without application warnings. Browser-extension blob/message-channel errors remain correctly blocked by the strict CSP.
 
 **2026-07-30 (Akshat/coordinator — F10 basemap console warning fixed)**
 
