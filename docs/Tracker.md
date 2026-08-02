@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-07-30 · **Phase:** X1 demo capture · **Overall:** the repaired field atlas is live at immutable commit `f42dd68`; F11 restores the map canvas and X1 is ready
+**Last updated:** 2026-08-02 · **Phase:** X1 demo capture · **Overall:** the repaired field atlas is live at immutable commit `f42dd68`; F11 is recorded, the repository wiki is published, and X1 is ready
 
 ---
 
@@ -137,6 +137,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F9** | ✅ | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; static bundle/payload budgets pass; old presentation removed |
 | **F10** | ✅ | Remove third-party basemap null warnings | Akshat/coordinator | F9 | OpenFreeMap road-shield filters require numeric `ref_length` before comparison; strict CSP and map behavior remain unchanged; frontend release gates pass |
 | **F11** | ✅ | Restore the production map canvas | Akshat/coordinator | F10 | MapLibre container fills its frame; browser regression and release gates pass; exact merged commit is live and visibly renders the network |
+| **W1** | ✅ | Publish an accessible repository wiki | Akshat/coordinator | F11 | Current `dev` architecture, setup, product journeys, contracts/metrics, API, development and operations are explained in a linked GitHub wiki; stale PRs are dispositioned |
 | **X1** | ⏳ | Final backup demo capture | All | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
@@ -209,6 +210,12 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-08-02 (Akshat/coordinator — repository wiki published; PR queue cleared)**
+
+- Audited every open PR, its reviews and inline comments against current `dev`. Fixed PR #136's grammar finding, passed the focused documentation check plus all GitHub test/web/app/review checks, and merged it at `656d16b8ac8365305a4b3ff0e60c48d135bf9d94`.
+- Closed PRs #129 and #130 with evidence instead of merging obsolete branches: both were 19 commits behind `dev`, and PR #131 had already integrated/completed their A46 calibration and structural-diagnostic intent. No open PRs remain.
+- Published the GitHub wiki with Home, quickstart, architecture, field-atlas guide, artifact/metric contracts, API reference, development workflow, operations guide, sidebar and footer. Internal wiki links resolve; the pages point to `dev` for exact mutable status/evidence rather than duplicating it.
 
 **2026-07-30 (Akshat/coordinator — F11 zero-height map fixed)**
 
