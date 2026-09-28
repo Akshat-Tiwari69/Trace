@@ -60,3 +60,6 @@ web/coverage/
 web/playwright-report/
 web/test-results/
 web/tsconfig.tsbuildinfo
+# ponytail: `next dev` (16.3+) regenerates these with no opt-out; root AGENTS.md/CLAUDE.md stay authoritative
+web/AGENTS.md
+web/CLAUDE.md

@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-09-29 · **Phase:** X1 demo capture · **Overall:** the repaired field atlas is live at immutable commit `f42dd68`; Akshat is now the sole owner of every area, and X1 is ready
+**Last updated:** 2026-09-29 · **Phase:** audit fixes → deploy → X1 · **Overall:** the 2026-09-29 end-to-end audit passed except for a scenario-URL bug (F12, fixed in `dev` PR); production stays at `f42dd68` until O2 deploys the fix
 
 ---
 
@@ -13,7 +13,7 @@
 
 | Owner | Scope | Current next task |
 |---|---|---|
-| **Akshat** | Everything: `src/pipeline/` (P1–P3), `src/app/`, `web/`, data tooling, notebooks, deployment, shared configuration and docs | **X1** final backup demo capture |
+| **Akshat** | Everything: `src/pipeline/` (P1–P3), `src/app/`, `web/`, data tooling, notebooks, deployment, shared configuration and docs | Merge **F12**, deploy it (**O2**), then **X1** final backup demo capture |
 
 ---
 
@@ -129,7 +129,9 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F11** | ✅ | Restore the production map canvas | Akshat | F10 | MapLibre container fills its frame; browser regression and release gates pass; exact merged commit is live and visibly renders the network |
 | **W1** | ✅ | Publish an accessible repository wiki | Akshat | F11 | Current `dev` architecture, setup, product journeys, contracts/metrics, API, development and operations are explained in a linked GitHub wiki; stale PRs are dispositioned |
 | **A49** | ✅ | Make Akshat the sole project owner in all documentation | Akshat | — | Entry docs, Tracker, Rules, Implementation, RiskRegister, SETUP, the wiki and stale code-docstring attributions no longer name other owners or require cross-lane authorization; docs tests green; PR opened into `dev` |
-| **X1** | ⏳ | Final backup demo capture | Akshat | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
+| **F12** | ✅ | Fix the 2026-09-29 audit findings | Akshat | — | Empty `failed=` URL no longer pre-fails J-0 (unit regression); Recover singular count and per-junction Restore names; no "ready to add" for an already-failed junction; `next` 16.3.6 plus non-breaking audit fixes (npm advisories 11 → 3); frontend gates and browser journeys green; PR opened into `dev` |
+| **O2** | ⏳ | Deploy F12 to production | Akshat | F12 merged | New immutable ref approved and rolled out; public stress test of J-278 alone shows RI 0.985 / 1.5% loss; Tracker records ref and smoke |
+| **X1** | ⏳ | Final backup demo capture | Akshat | F9, O1, O2 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
 
@@ -193,15 +195,22 @@ flowchart LR
 ## §9 · Status Snapshot
 
 - **Product:** end-to-end batch and hosted-upload paths exist; the sample field atlas and CPU analysis are runnable.
-- **Quality:** local release gates pass: 391 Python tests, frontend lint/typecheck, 14 unit tests, production build/budgets, 3 existing Chromium journeys, and the F11 map-height browser regression.
+- **Quality:** local release gates pass: 391 Python tests, frontend lint/typecheck, 17 unit tests, production build/budgets, and 4 Chromium journeys including the F11 map-height regression.
 - **Deployment:** Oracle is live at exact commit `f42dd68c55a0da66e1b1669339ac35bb94a98a48`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, zero-removal simulation, and a public upload-to-export run are verified.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** capture X1 from the repaired public release.
+- **Immediate work:** merge F12, deploy it (O2), then capture X1. Open audit follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
 
 ---
 
 ## §10 · Daily Log
+
+**2026-09-29 (Akshat — end-to-end audit; F12)**
+
+- Local: 391 Python tests; frontend typecheck/lint/unit/build/budgets and all four Chromium journeys pass. `run_pipeline` on a public DeepGlobe test tile with `road_pan.pt` (checksum equals the Modal pin) finished P1→P3 in 29 s: 51 nodes/57 edges, contract columns present, RI bounded, and a visual overlay confirms mask and graph follow the roads.
+- Live: the deployed checkout equals `DEPLOY_REF` `f42dd68`; services and the local health check are clean; only ports 22/80/443 are externally reachable; the TLS certificate is valid to 2026-11-29; mismatched Host returns `421`. One consented upload of the same tile returned threshold `0.52` (17 s including cold start, 7 s queued analysis) and exactly matched the local run: 51/57, top betweenness `0.359184`, RI `0.912705`; result JSON and GeoJSON export returned `200`.
+- A transient network-path outage (~21:40–21:45 UTC 2026-09-28) reset HTTP/HTTPS and timed out SSH from two vantage points while the host stayed up (115 days uptime, no service or kernel errors, other SSH clients still logged). It cleared without intervention.
+- Found and fixed (F12): an empty `failed=` URL value parsed as junction 0, so every fresh visit pre-failed J-0 and testing J-278 alone reported 2.2% loss instead of 1.5%. Browser journeys missed it because their mock network has no node 0. Also fixed Recover pluralization, ambiguous Restore button names and contradictory "ready to add" copy, and moved `next` to 16.3.6. Remaining advisories and ops follow-ups are in `bugs.md`.
 
 **2026-09-29 (Akshat — sole ownership, A49)**
 

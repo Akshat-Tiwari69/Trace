@@ -14,6 +14,13 @@ export function scenarioKey(nodeIds: readonly number[]): string {
   return ids.length ? ids.join(".") : "baseline";
 }
 
+// URL lists like `failed=86,278`. Only whole digit runs count: Number("") is 0,
+// so a naive split would turn an empty value into junction 0.
+export function parseNodeIds(value: string | null): number[] {
+  const ids = (value ?? "").split(",").filter((part) => /^\d+$/.test(part)).map(Number).filter(Number.isSafeInteger);
+  return [...new Set(ids)].sort((a, b) => a - b);
+}
+
 export function formatMetric(value: number | null | undefined, format: MetricFormat = {}): string {
   if (value == null || !Number.isFinite(value)) return "Not available";
   const { digits = 2, prefix = "", suffix = "" } = format;
