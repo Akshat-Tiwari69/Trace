@@ -24,5 +24,38 @@ describe("ScenarioPanel", () => {
     const items = screen.getAllByRole("listitem");
     expect(within(items[0]).getByText("J-7")).toBeInTheDocument();
     expect(within(items[1]).getByText("J-3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restore J-7" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Restore J-3" })).toBeInTheDocument();
+  });
+
+  it("counts a single offline junction in the singular", () => {
+    render(<ScenarioPanel
+      mode="recover"
+      selected={null}
+      criticalNodes={criticalNodes}
+      removed={[7]}
+      busy={false}
+      onToggleRemoved={vi.fn()}
+      onRun={vi.fn()}
+      onReset={vi.fn()}
+    />);
+
+    expect(screen.getByRole("heading", { name: "1 junction offline" })).toBeInTheDocument();
+  });
+
+  it("does not offer to add a junction that is already in the failure set", () => {
+    render(<ScenarioPanel
+      mode="stress"
+      selected={criticalNodes[0]}
+      criticalNodes={criticalNodes}
+      removed={[7]}
+      busy={false}
+      onToggleRemoved={vi.fn()}
+      onRun={vi.fn()}
+      onReset={vi.fn()}
+    />);
+
+    expect(screen.getByText("J-7 is in the failure set.")).toBeInTheDocument();
+    expect(screen.queryByText(/ready to add/)).not.toBeInTheDocument();
   });
 });

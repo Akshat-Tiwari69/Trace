@@ -22,7 +22,7 @@ import {
   type GeoJsonCollection,
   type SimulationResult,
 } from "@/lib/api";
-import { formatMetric } from "@/lib/model";
+import { formatMetric, parseNodeIds } from "@/lib/model";
 import type { WorkspaceMode } from "@/lib/types";
 
 const NetworkMap = dynamic(() => import("@/components/network-map"), {
@@ -36,16 +36,10 @@ function readInitialState() {
   if (typeof window === "undefined") return null;
   const params = new URLSearchParams(window.location.search);
   const requestedMode = params.get("mode") as WorkspaceMode | null;
-  const selectedParam = params.get("junction");
-  const selected = selectedParam == null ? Number.NaN : Number(selectedParam);
-  const failed = (params.get("failed") ?? "")
-    .split(",")
-    .map(Number)
-    .filter(Number.isInteger);
   return {
     mode: requestedMode && MODES.has(requestedMode) ? requestedMode : "explore" as WorkspaceMode,
-    selected: Number.isInteger(selected) ? selected : null,
-    failed: [...new Set(failed)].sort((a, b) => a - b),
+    selected: parseNodeIds(params.get("junction"))[0] ?? null,
+    failed: parseNodeIds(params.get("failed")),
   };
 }
 

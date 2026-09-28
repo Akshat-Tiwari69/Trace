@@ -32,13 +32,13 @@ export function ScenarioPanel({ mode, selected, criticalNodes, removed, busy, on
     return (
       <section className="context-card">
         <span className="eyebrow">Recovery queue</span>
-        <h2>{removed.length ? `${removed.length} junctions offline` : "Network restored"}</h2>
+        <h2>{removed.length ? `${removed.length} junction${removed.length === 1 ? "" : "s"} offline` : "Network restored"}</h2>
         {removed.length ? (
           <ol className="recovery-list">
             {recoveryOrder.map((nodeId, index) => (
               <li key={nodeId}>
                 <span>Priority {index + 1}</span><strong>J-{nodeId}</strong>
-                <button type="button" onClick={() => onToggleRemoved(nodeId)}>Restore</button>
+                <button type="button" aria-label={`Restore J-${nodeId}`} onClick={() => onToggleRemoved(nodeId)}>Restore</button>
               </li>
             ))}
           </ol>
@@ -51,7 +51,13 @@ export function ScenarioPanel({ mode, selected, criticalNodes, removed, busy, on
     <section className="context-card">
       <span className="eyebrow">Scenario builder</span>
       <h2>{mode === "compare" ? "Baseline / disruption" : "Junction failure"}</h2>
-      <p>{selected ? `J-${selected.node_id} is ready to add to the failure set.` : "Select a map junction or ranking row first."}</p>
+      <p>
+        {!selected
+          ? "Select a map junction or ranking row first."
+          : removed.includes(selected.node_id)
+            ? `J-${selected.node_id} is in the failure set.`
+            : `J-${selected.node_id} is ready to add to the failure set.`}
+      </p>
       <div className="scenario-actions">
         <button
           type="button"

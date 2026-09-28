@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { clampResilience, criticalityCsv, formatMetric, scenarioGeoJson, scenarioKey } from "@/lib/model";
+import { clampResilience, criticalityCsv, formatMetric, parseNodeIds, scenarioGeoJson, scenarioKey } from "@/lib/model";
 
 describe("workspace model helpers", () => {
+  it("never turns an empty or malformed URL list into junction 0", () => {
+    expect(parseNodeIds(null)).toEqual([]);
+    expect(parseNodeIds("")).toEqual([]);
+    expect(parseNodeIds("278,,x,-3,1.5")).toEqual([278]);
+    expect(parseNodeIds("278,0,278")).toEqual([0, 278]);
+  });
+
   it("produces one stable key for the same set of failed nodes", () => {
     expect(scenarioKey([278, 86, 261])).toBe(scenarioKey([261, 278, 86]));
   });
