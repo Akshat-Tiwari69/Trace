@@ -8,6 +8,7 @@ describe("workspace model helpers", () => {
     expect(parseNodeIds("")).toEqual([]);
     expect(parseNodeIds("278,,x,-3,1.5")).toEqual([278]);
     expect(parseNodeIds("278,0,278")).toEqual([0, 278]);
+    expect(parseNodeIds(`278,9007199254740993,${"9".repeat(400)}`)).toEqual([278]);
   });
 
   it("produces one stable key for the same set of failed nodes", () => {
