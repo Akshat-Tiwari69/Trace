@@ -1,4 +1,4 @@
-"""P3 · Criticality + resilience lane (Shaivi).
+"""P3 · Criticality + resilience lane.
 
 Betweenness centrality to find chokepoints, node-ablation stress tests, and a
 finite **global-efficiency** Resilience Index (``docs/PRD.md`` G3; metric locked

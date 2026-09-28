@@ -1,4 +1,4 @@
-"""P2 · Graph build + healing lane (Shaivi).
+"""P2 · Graph build + healing lane.
 
 Mask → skeletonise → sknw graph → MST/Union-Find healing → a single routable,
 weighted graph (``docs/PRD.md`` G2). CPU-only, classical Python.

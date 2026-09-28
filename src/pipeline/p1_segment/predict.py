@@ -2,7 +2,7 @@
 
 The inference half of P1: load a fine-tuned checkpoint, predict a binary road
 mask for an image, and write it at the P1 artifact-contract path
-``data/interim/{aoi}_mask.png`` that P2 (Shaivi) consumes.
+``data/interim/{aoi}_mask.png`` that P2 consumes.
 
 :func:`run_inference` is the single shared path (A36) — both this CLI and
 ``run_pipeline.segment()`` call it, so the two entry points can't drift.

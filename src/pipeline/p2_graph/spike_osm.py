@@ -10,13 +10,13 @@ predicted mask. It runs::
         → export small, real-shaped artifacts to data/sample/  (unblocks F1)
 
 The output ``data/sample/{aoi}_graph.geojson`` + ``_criticality.csv`` are the
-committed sample set that lets Saanvi's dashboard (F1) run with no GPU and no
+committed sample set that lets the dashboard (F1) run with no GPU and no
 prior pipeline run (``docs/Tracker.md`` §4 "sample set" contract). When the real
 mask arrives (A4), task S2 runs the *same* ``build_graph`` + ``analyze`` on it —
 this spike just proves the machinery on OSM first.
 
-We *consume* P1's ``osm_mask`` helpers (read-only, cross-lane is fine — we don't
-edit them); everything we write stays in Shaivi's P2/P3 lane + the shared sample.
+We *consume* P1's ``osm_mask`` helpers (read-only — we don't
+edit them); everything we write stays in P2/P3 + the shared sample.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Configuration for Phase II — graph build + healing (Shaivi's lane).
+"""Configuration for Phase II — graph build + healing.
 
 All tunables live here, not scattered through the code (``docs/Rules.md`` →
 "No magic numbers"). The same ``GraphConfig`` drives the S1 spike (graph built

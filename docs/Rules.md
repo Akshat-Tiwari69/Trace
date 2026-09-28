@@ -52,16 +52,16 @@
 
 ## Git and collaboration
 
-- Branch from current `dev` as `<owner>/<task-id>-<slug>`.
+- Branch from current `dev` as `akshat/<task-id>-<slug>`.
 - One coherent task per PR; target `dev`, never `main`.
 - Akshat is the only approver. Do not self-merge a newly opened PR.
 - Preserve user work, untracked files and unrelated changes.
-- Default ownership remains Akshat=P1/integration, Shaivi=P2/P3, Saanvi=P4/design. A documented coordinator authorization may permit cross-lane work, but reviewers and contracts still apply.
+- Akshat is the sole owner of every area (P1, P2/P3, app/web, data, deployment and docs); there are no separate ownership lanes. Code review and §4 contracts still apply.
 
 ## Non-negotiable product constraints
 
 - PyTorch and pretrained fine-tuning only; no training from scratch.
 - Global-efficiency Resilience Index, never raw average-path-length ratio.
 - Python/PyTorch ML and graph core with a performance-budgeted web presentation; no database or auth/login product scope unless separately authorized.
-- Hardware-agnostic training path; no remote access to a teammate’s machine.
+- Hardware-agnostic training path; no remote access to anyone else’s machine.
 - Neutral, public-safe repository with honest, reproducible evidence.
