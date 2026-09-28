@@ -14,7 +14,7 @@ sample graph and reports, in one place, the numbers the graph pipeline produces
   (targeted must fall faster than random).
 
 Outputs a JSON report + a resilience-curve PNG next to the sample, and prints a
-readable summary. Pure CPU, classical Python (Shaivi's lane).
+readable summary. Pure CPU, classical Python.
 """
 
 from __future__ import annotations

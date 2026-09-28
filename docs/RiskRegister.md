@@ -10,15 +10,15 @@
 | **M-2** | A18-LoRA wins relatively but still captures only about 18% of achievable chip routing | H | H | A46 targets encoder adaptation, training coverage and context; require absolute and paired gains | Akshat |
 | **M-3** | Real Cartosat PAN behavior may differ from the RGB-to-gray proxy | M | H | Keep proxy claims explicit; run real-PAN QC/evaluation as soon as data is available | Akshat |
 | **M-4** | The inspected SAM-Road++ snapshot has no clear license or reproducible dependency lock | H | H | Research locally only; do not redistribute upstream code/derived weights until licensing is clarified | Akshat |
-| **G-1** | Graph simplification/healing can create plausible but false connections | M | H | Preserve probability support, crossing/angle checks, inferred-edge flags and APLS/fragmentation evaluation | Shaivi |
-| **G-2** | Exact centrality/efficiency remains expensive on city-scale graphs | M | M | Use fixed-source sampling and caches; benchmark A45 changes on large synthetic graphs | Shaivi |
+| **G-1** | Graph simplification/healing can create plausible but false connections | M | H | Preserve probability support, crossing/angle checks, inferred-edge flags and APLS/fragmentation evaluation | Akshat |
+| **G-2** | Exact centrality/efficiency remains expensive on city-scale graphs | M | M | Use fixed-source sampling and caches; benchmark A45 changes on large synthetic graphs | Akshat |
 | **P-2** | Public analysis remains cost-bearing even with verified application throttles | M | M | The O1 live smoke accepted 12 simulation requests and returned 429 on request 13 even while forwarded IP headers changed; retain queue/Modal caps, watch usage, and add a Caddy rate module only if measured abuse requires it | Akshat |
-| **P-3** | Filesystem queue is appropriate for one host but not horizontal scale | L | M | Keep single-host scope explicit; preserve atomic claim/lease/JSON recovery tests | Saanvi/Akshat |
-| **C-1** | Large modules and accumulated experiment paths increase change risk | H | M | A45 characterization tests, responsibility splits and dead-path quarantine; measure complexity before/after | Coordinator |
+| **P-3** | Filesystem queue is appropriate for one host but not horizontal scale | L | M | Keep single-host scope explicit; preserve atomic claim/lease/JSON recovery tests | Akshat |
+| **C-1** | Large modules and accumulated experiment paths increase change risk | H | M | A45 characterization tests, responsibility splits and dead-path quarantine; measure complexity before/after | Akshat |
 | **C-2** | Local GPU environment contains dependency conflicts despite passing tests | M | M | Use documented isolated environments; CI is the clean reference; avoid mixing TensorFlow/Google stacks | Akshat |
-| **U-1** | The live web rollout can still expose recovery or accessibility regressions missed locally | M | H | API, upload, export and edge gates pass live; repeat the keyboard/browser journeys against the public deployment | Saanvi/coordinator |
-| **U-2** | A richer frontend can trade visual spectacle for bundle, map or interaction latency | M | H | Enforce the committed JS/CSS/font budgets in CI and recheck representative graph payloads after dependency changes | Saanvi/coordinator |
-| **D-1** | Documentation can drift faster than code and misroute agents/operators | M | H | A44 reduces duplication; Tracker holds current state, topic docs hold details, CI/docs checks added where practical | Coordinator |
+| **U-1** | The live web rollout can still expose recovery or accessibility regressions missed locally | M | H | API, upload, export and edge gates pass live; repeat the keyboard/browser journeys against the public deployment | Akshat |
+| **U-2** | A richer frontend can trade visual spectacle for bundle, map or interaction latency | M | H | Enforce the committed JS/CSS/font budgets in CI and recheck representative graph payloads after dependency changes | Akshat |
+| **D-1** | Documentation can drift faster than code and misroute agents/operators | M | H | A44 reduces duplication; Tracker holds current state, topic docs hold details, CI/docs checks added where practical | Akshat |
 
 ## Accepted constraints
 

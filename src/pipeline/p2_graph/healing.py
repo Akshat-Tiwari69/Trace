@@ -14,7 +14,7 @@ score and add one only if it joins two still-separate components. The result is 
 minimum-spanning *forest* of bridges — exactly the MST/Union-Find healing the
 docs specify — with every added edge flagged ``is_bridged=True``.
 
-Pure-Python + numpy/scipy only (CPU; ``docs/Tracker.md`` Shaivi lane). NetworkX
+Pure-Python + numpy/scipy only (CPU; ``docs/Tracker.md`` §2). NetworkX
 and scipy's KD-tree are imported lazily.
 """
 

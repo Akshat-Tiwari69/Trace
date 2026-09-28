@@ -3,22 +3,17 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-08-02 · **Phase:** X1 demo capture · **Overall:** the repaired field atlas is live at immutable commit `f42dd68`; F11 is recorded, the repository wiki is published, and X1 is ready
+**Last updated:** 2026-09-29 · **Phase:** X1 demo capture · **Overall:** the repaired field atlas is live at immutable commit `f42dd68`; Akshat is now the sole owner of every area, and X1 is ready
 
 ---
 
-## §0 · START HERE — Identify Yourself
+## §0 · START HERE — Owner
 
-At the beginning of a session, identify the team member you are working for. If the user has not said, ask:
-*“Which team member am I working as — Akshat, Shaivi, or Saanvi?”*
+**Akshat is the sole owner of the whole project** (since 2026-09-29). Agents always work as Akshat; there are no other ownership lanes and no cross-lane authorization step. Code review and artifact-contract checks still apply.
 
-| Team member | Default ownership | Current next task |
+| Owner | Scope | Current next task |
 |---|---|---|
-| **Akshat** | `src/pipeline/p1_segment/`, data tooling, notebooks, integration, shared configuration and coordination | **X1** final backup demo capture |
-| **Shaivi** | `src/pipeline/p2_graph/`, `src/pipeline/p3_analysis/` | Review post-release graph evidence |
-| **Saanvi** | `src/app/`, `web/`, product design and accessibility | Review post-release web behavior |
-
-**Current coordinator authorization:** Akshat authorized the active agent to work across **the whole project/all three lanes**. On 2026-07-14 he explicitly superseded the Streamlit/Folium stack lock and authorized selection of a replacement web stack for F9. Keep cross-lane and architecture changes reviewable and record them here; this authorization does not remove code review or artifact-contract checks.
+| **Akshat** | Everything: `src/pipeline/` (P1–P3), `src/app/`, `web/`, data tooling, notebooks, deployment, shared configuration and docs | **X1** final backup demo capture |
 
 ---
 
@@ -28,18 +23,17 @@ Before each work turn:
 
 1. Check remote state with both `gh pr list --state open` and `gh pr list --state merged --limit 10`.
 2. Read §0–§2, §4, and the active row in §6.
-3. Work from a branch created from current remote `dev` as `<owner>/<task-id>-<slug>`.
+3. Work from a branch created from current remote `dev` as `akshat/<task-id>-<slug>`.
 4. Preserve §4 contracts unless a contract change is explicit, documented, tested, and coordinated.
 5. Define a measurable done-check before editing. Refactors require behavior tests plus a size or performance comparison; model work requires the frozen promotion gate in `Evaluation.md`.
 6. Run the relevant focused tests, then the full suite when the task is complete.
 7. Update §6 and add a concise §10 log entry.
 8. Open a PR into `dev` and stop. Do not merge it on creation.
 
-For each still-open PR, inspect both reviews and inline review comments. Address owned comments before starting unrelated work.
+For each still-open PR, inspect both reviews and inline review comments. Address them before starting unrelated work.
 
 **Warnings:**
 
-- Out of lane without coordinator authorization: “⚠️ That is **{Owner}’s** area (`{path}`). Switch me to {Owner}, authorize a coordinated cross-lane change, or I will log it for them.”
 - Blocked artifact: “⏳ **{ID}** needs `{artifact}` from **{dependency}**. I will work on `{ready alternative}` while it is unavailable.”
 - Contract change: “🛑 This changes the shared `{artifact}` contract. I have paused until the producer and consumers agree and §4 is updated.”
 
@@ -108,13 +102,9 @@ Contract invariants:
 
 ---
 
-## §5 · Ownership and Coordination
+## §5 · Ownership and Review
 
-Default ownership remains useful for review even during coordinator-authorized work:
-
-- Akshat reviews ML, data, integration, dependencies, deployment wiring, and shared contracts.
-- Shaivi reviews graph construction, graph IO, centrality, APLS, and resilience semantics.
-- Saanvi reviews web/API behavior, accessibility, and visual design.
+Akshat owns and reviews every area: ML, data, graph construction/IO, centrality, APLS, resilience semantics, web/API behavior, accessibility, visual design, dependencies, deployment wiring and shared contracts.
 
 Shared files include `requirements*.txt`, `SETUP.md`, deployment files, `src/pipeline/config.py`, and this Tracker. A change that crosses a §4 seam must name both producer and consumer tests in its PR.
 
@@ -138,7 +128,8 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F10** | ✅ | Remove third-party basemap null warnings | Akshat/coordinator | F9 | OpenFreeMap road-shield filters require numeric `ref_length` before comparison; strict CSP and map behavior remain unchanged; frontend release gates pass |
 | **F11** | ✅ | Restore the production map canvas | Akshat/coordinator | F10 | MapLibre container fills its frame; browser regression and release gates pass; exact merged commit is live and visibly renders the network |
 | **W1** | ✅ | Publish an accessible repository wiki | Akshat/coordinator | F11 | Current `dev` architecture, setup, product journeys, contracts/metrics, API, development and operations are explained in a linked GitHub wiki; stale PRs are dispositioned |
-| **X1** | ⏳ | Final backup demo capture | All | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
+| **A49** | ✅ | Make Akshat the sole project owner in all documentation | Akshat | — | Entry docs, Tracker, Rules, Implementation, RiskRegister, SETUP, and stale code-docstring attributions no longer name other owners or require cross-lane authorization; docs tests green; PR opened into `dev` |
+| **X1** | ⏳ | Final backup demo capture | Akshat | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
 
@@ -195,6 +186,7 @@ flowchart LR
 | Promotion metric = strict common-unit chip APLS with paired uncertainty | 🔒 | Prevents tile/chip frame confounds and requires coverage/comparability |
 | Graph-first is the next model direction | 🔒 for A46 | A18 frozen and LoRA runs beat v3.2 on common-unit routing; absolute routing remains too low for deployment |
 | Immutable deployment refs with rollback | 🔒 | Production must not auto-deploy moving `dev` |
+| Akshat is the sole owner of every area | 🔒 2026-09-29 | Supersedes the Akshat/Shaivi/Saanvi lane split and the coordinator cross-lane authorization; one owner reviews and approves all work |
 
 ---
 
@@ -210,6 +202,10 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-09-29 (Akshat — sole ownership, A49)**
+
+- Akshat now handles the whole project. Retired the three-person lane split and the cross-lane authorization step from the agent entry docs, Tracker, Rules, Implementation, RiskRegister and SETUP, and removed stale owner names from code docstrings. Earlier log entries and archived audits keep their historical attributions.
 
 **2026-08-02 (Akshat/coordinator — repository wiki published; PR queue cleared)**
 
@@ -304,7 +300,7 @@ Historical experiment details remain in `Research.md`, `Evaluation.md`, `Retrosp
 ## §11 · Git and Branching Workflow
 
 1. Synchronize remote state; branch from `dev`, never `main`.
-2. Name the branch `<owner>/<task-id>-<slug>`.
+2. Name the branch `akshat/<task-id>-<slug>`.
 3. Keep one coherent task per PR; do not bundle docs, refactors, model experiments, and UI redesign unless the shared contract makes separation impossible.
 4. Run done-checks and update this Tracker before opening the PR.
 5. Open the PR into `dev` and stop. Akshat is the approver; never target `main`.

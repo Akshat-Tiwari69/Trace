@@ -14,15 +14,9 @@ The original build is complete:
 
 The release candidate is complete; the current phase is **immutable rollout and live verification**.
 
-## Team and review ownership
+## Ownership and review
 
-| Area | Primary reviewer |
-|---|---|
-| ML, data, evaluation, integration, deployment coordination | Akshat |
-| Graph extraction, graph IO, APLS, criticality and resilience | Shaivi |
-| Web/API behavior, accessibility and visual design | Saanvi |
-
-Akshat authorized repository-wide coordinator changes for the A44–A46/F9 program on 2026-07-13. Primary reviewers still review their areas.
+Akshat owns and reviews every area (since 2026-09-29): ML, data, evaluation, graph extraction/IO, APLS, criticality and resilience, web/API behavior, accessibility, visual design, integration and deployment.
 
 ## Delivery sequence
 

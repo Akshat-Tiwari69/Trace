@@ -19,7 +19,7 @@ routing).
 
 Ground truth is the OSM road graph for the same AOI (``build_osm_truth`` fetches
 it once via osmnx and commits a small GeoJSON so the CLI is re-runnable offline).
-Pure CPU, classical Python (Shaivi's lane).
+Pure CPU, classical Python.
 """
 
 from __future__ import annotations

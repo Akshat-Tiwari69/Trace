@@ -8,7 +8,7 @@
 - Python **3.11** for development and CI parity
 - Node.js **22** and npm for the static web build
 - Optional NVIDIA GPU for training/heavy evaluation
-- No remote access to a teammate’s machine; each contributor uses these reproducible paths
+- No remote access to anyone else’s machine; use these reproducible paths
 
 ```bash
 git clone https://github.com/Akshat-Tiwari69/Trace.git

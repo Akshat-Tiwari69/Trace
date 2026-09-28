@@ -2,13 +2,12 @@
 
 **Claude Code reads this automatically. Read it fully before doing anything.**
 
-This repo (**Route Resilience**) is coordinated through one backbone file: **`docs/Tracker.md`**. It is the source of truth for who owns what, what to do next, and where to wait for others.
+This repo (**Route Resilience**) is coordinated through one backbone file: **`docs/Tracker.md`**. It is the source of truth for status, what to do next, and the shared contracts.
 
 ## Do this every session, in order:
 1. **Open `docs/Tracker.md` and read §0–§2 + §4.**
-2. **Identify who you're working for.** If the user hasn't said, ask: *"Which team member am I working as — Akshat, Shaivi, or Saanvi?"*
-3. **Follow `docs/Tracker.md` §1 (Agent Operating Protocol):** pick the next active/unblocked task, respect ownership and artifact contracts (§4), and update the Tracker when done.
-4. **If asked to touch another person's area without a documented coordinator authorization, STOP and warn the user** (use §1). When authorization exists, keep cross-lane changes reviewable and name the affected contracts/tests.
+2. **Work as Akshat.** Akshat owns and reviews every area of the project (P1, P2/P3, app/web, data, deployment and docs); there are no other ownership lanes and no cross-lane authorization step.
+3. **Follow `docs/Tracker.md` §1 (Agent Operating Protocol):** pick the next active/unblocked task, protect the artifact contracts (§4), and update the Tracker when done.
 
 ## Non-negotiable rules (full list in `docs/Rules.md` / Tracker §2):
 - Product boundary: Next.js/React/MapLibre is the presentation and FastAPI is the thin application boundary; preserve the Python ML/graph core, authenticated Modal GPU boundary, CPU-capable P2/P3, and existing artifact contracts. Do not add a database or login product without a separate documented need.
@@ -17,7 +16,7 @@ This repo (**Route Resilience**) is coordinated through one backbone file: **`do
 - Training is **hardware-agnostic (Colab/Kaggle)**; P2/P3 and the application host run on **CPU**. **No remote access** to anyone's machine.
 - Keep the repo **neutral/generic**; no secrets; `.gitignore` raw data + checkpoints; respect dataset licenses.
 - Prefer **simple, readable code**; explain non-trivial choices; don't invent results.
-- **Git:** branch off **`dev`** (never `main`) as `<you>/<task-id>-<slug>`; when done, **open a PR into `dev` and stop** (don't merge on creation). Akshat is the only approver. **Never PR or merge into `main`.** You may merge your *own* PR only if it's already **approved by Akshat and still unmerged**. Full rules in `docs/Tracker.md` §11.
+- **Git:** branch off **`dev`** (never `main`) as `akshat/<task-id>-<slug>`; when done, **open a PR into `dev` and stop** (don't merge on creation). Akshat is the only approver. **Never PR or merge into `main`.** You may merge your *own* PR only if it's already **approved by Akshat and still unmerged**. Full rules in `docs/Tracker.md` §11.
 
 ## Setup
 Environment setup is self-service in **`SETUP.md`** (pick your path by role).
@@ -55,4 +54,4 @@ Environment setup is self-service in **`SETUP.md`** (pick your path by role).
 - A new operating convention (like this one) → **here in the entry-point file**, and **mirror it into the sibling**: `CLAUDE.md` and `AGENTS.md` are the same doc for different agents — keep them **byte-identical except the title line and the "who reads this" line**. Any edit to one is mirrored to the other in the same change.
 - **Negative results are first-class** — record them so nobody re-runs a dead end (cf. A8 / A9 / A11).
 
-> One-line summary: **Read `docs/Tracker.md`, respect ownership or recorded coordinator authorization, protect §4 contracts, verify the work, and record evidence — keeping `CLAUDE.md` ≡ `AGENTS.md`.**
+> One-line summary: **Read `docs/Tracker.md`, work as Akshat, protect §4 contracts, verify the work, and record evidence — keeping `CLAUDE.md` ≡ `AGENTS.md`.**
