@@ -118,17 +118,17 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 
 | ID | Status | Task | Owner | Depends on | Done when |
 |---|---|---|---|---|---|
-| **A44** | ✅ | Reconcile and simplify all documentation | Akshat/coordinator | — | Current docs agree with code/evidence, historical audit archived, sample graph/APLS evidence refreshed, links/JSON/mirrors checked, 284 tests green; PR opened into `dev` |
-| **A45** | ✅ | Repository-wide correctness, simplification and performance refactor | Coordinator across all lanes | A44 | Baseline-universe resilience, one probability inference protocol, evaluator labels, immutable deploy refs and CLI precedence corrected; duplicated/dead logic reduced; focused benchmarks improved; 318 tests green |
+| **A44** | ✅ | Reconcile and simplify all documentation | Akshat | — | Current docs agree with code/evidence, historical audit archived, sample graph/APLS evidence refreshed, links/JSON/mirrors checked, 284 tests green; PR opened into `dev` |
+| **A45** | ✅ | Repository-wide correctness, simplification and performance refactor | Akshat | A44 | Baseline-universe resilience, one probability inference protocol, evaluator labels, immutable deploy refs and CLI precedence corrected; duplicated/dead logic reduced; focused benchmarks improved; 318 tests green |
 | **A46** | ✅ | Graph-first model improvement program | Akshat | A44; use A45 foundations where relevant | Registered 102-chip selection and one 127-chip comparison complete; metric gate passed; deployment correctly blocked by missing upstream license; licensed next experiment recorded |
-| **A47** | ✅ | P2 topology and artifact-contract hardening | Akshat/coordinator | A45 | Destructive consolidation opt-in; rings/geometry/metric CRS preserved; validated GraphML/GeoJSON pair writes; Panaji evidence regenerated; full suite green |
-| **A48** | ✅ | P3 correctness and CPU-performance hardening | Akshat/coordinator | A47 | Independent seeds and disclosed sampled efficiency; APLS/percolation/reuse edge cases fixed; full sample evidence and focused/full suites green |
+| **A47** | ✅ | P2 topology and artifact-contract hardening | Akshat | A45 | Destructive consolidation opt-in; rings/geometry/metric CRS preserved; validated GraphML/GeoJSON pair writes; Panaji evidence regenerated; full suite green |
+| **A48** | ✅ | P3 correctness and CPU-performance hardening | Akshat | A47 | Independent seeds and disclosed sampled efficiency; APLS/percolation/reuse edge cases fixed; full sample evidence and focused/full suites green |
 | **O1** | ✅ | Close production operator checklist | Akshat | approved release ref | Final `4493f97` strict-SNI config rolled out; public upload smoke passes; PR #132 latest-head CI/merge state verified; Tracker closed |
-| **F9** | ✅ | Replace Streamlit/Folium with a researched web experience | Saanvi/coordinator | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; static bundle/payload budgets pass; old presentation removed |
-| **F10** | ✅ | Remove third-party basemap null warnings | Akshat/coordinator | F9 | OpenFreeMap road-shield filters require numeric `ref_length` before comparison; strict CSP and map behavior remain unchanged; frontend release gates pass |
-| **F11** | ✅ | Restore the production map canvas | Akshat/coordinator | F10 | MapLibre container fills its frame; browser regression and release gates pass; exact merged commit is live and visibly renders the network |
-| **W1** | ✅ | Publish an accessible repository wiki | Akshat/coordinator | F11 | Current `dev` architecture, setup, product journeys, contracts/metrics, API, development and operations are explained in a linked GitHub wiki; stale PRs are dispositioned |
-| **A49** | ✅ | Make Akshat the sole project owner in all documentation | Akshat | — | Entry docs, Tracker, Rules, Implementation, RiskRegister, SETUP, and stale code-docstring attributions no longer name other owners or require cross-lane authorization; docs tests green; PR opened into `dev` |
+| **F9** | ✅ | Replace Streamlit/Folium with a researched web experience | Akshat | A45 and A46 | Current capabilities preserved through a thin Python API; striking visual system, responsive/accessibility flows and real browser journeys verified; static bundle/payload budgets pass; old presentation removed |
+| **F10** | ✅ | Remove third-party basemap null warnings | Akshat | F9 | OpenFreeMap road-shield filters require numeric `ref_length` before comparison; strict CSP and map behavior remain unchanged; frontend release gates pass |
+| **F11** | ✅ | Restore the production map canvas | Akshat | F10 | MapLibre container fills its frame; browser regression and release gates pass; exact merged commit is live and visibly renders the network |
+| **W1** | ✅ | Publish an accessible repository wiki | Akshat | F11 | Current `dev` architecture, setup, product journeys, contracts/metrics, API, development and operations are explained in a linked GitHub wiki; stale PRs are dispositioned |
+| **A49** | ✅ | Make Akshat the sole project owner in all documentation | Akshat | — | Entry docs, Tracker, Rules, Implementation, RiskRegister, SETUP, the wiki and stale code-docstring attributions no longer name other owners or require cross-lane authorization; docs tests green; PR opened into `dev` |
 | **X1** | ⏳ | Final backup demo capture | Akshat | F9, O1 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
@@ -205,7 +205,7 @@ flowchart LR
 
 **2026-09-29 (Akshat — sole ownership, A49)**
 
-- Akshat now handles the whole project. Retired the three-person lane split and the cross-lane authorization step from the agent entry docs, Tracker, Rules, Implementation, RiskRegister and SETUP, and removed stale owner names from code docstrings. Earlier log entries and archived audits keep their historical attributions.
+- Akshat now handles the whole project. Retired the three-person lane split and the cross-lane authorization step from the agent entry docs, Tracker, Rules, Implementation, RiskRegister and SETUP, and removed stale owner names from code docstrings and the published wiki (`Development-Guide`, `How-TRACE-Works`). Task-board owner cells now all read Akshat; earlier log entries and archived audits keep their historical attributions.
 
 **2026-08-02 (Akshat/coordinator — repository wiki published; PR queue cleared)**
 
