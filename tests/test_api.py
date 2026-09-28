@@ -368,6 +368,24 @@ def test_static_export_is_served_after_api_routes(tmp_path: Path) -> None:
     assert health.json() == {"status": "ok"}
 
 
+def test_html_revalidates_after_deploys_while_hashed_assets_stay_immutable(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "index.html").write_text("<h1>Field atlas</h1>", encoding="utf-8")
+    chunks = tmp_path / "_next" / "static" / "chunks"
+    chunks.mkdir(parents=True)
+    (chunks / "app.js").write_text("1", encoding="utf-8")
+    with TestClient(create_app(web_out=tmp_path, start_worker=False)) as static_client:
+        page = static_client.get("/")
+        revalidated = static_client.get("/", headers={"if-none-match": page.headers["etag"]})
+        chunk = static_client.get("/_next/static/chunks/app.js")
+        summary = static_client.get("/api/v1/aois/panaji_demo")
+    assert page.headers["cache-control"] == "no-cache"
+    assert revalidated.status_code == 304
+    assert chunk.headers["cache-control"] == api.ARTIFACT_CACHE
+    assert summary.headers["cache-control"] == api.SUMMARY_CACHE
+
+
 def test_expensive_public_work_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         api,
