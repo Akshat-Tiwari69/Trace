@@ -2,7 +2,7 @@
 
 > Historical review findings and their original section numbers are preserved in [`docs/ProductionReadinessAudit-2026-07.md`](docs/ProductionReadinessAudit-2026-07.md). Current code uses durable task/contract references rather than depending on those archived section numbers.
 
-**Last reconciled:** 2026-07-14 · **Active program:** A46 → web replacement/O1
+**Last reconciled:** 2026-09-29 · **Active program:** F12 audit fixes → O2 deploy → X1
 
 ## Correctness and evidence
 
@@ -24,14 +24,19 @@
 
 ## Production operator checklist (O1)
 
-- [ ] Create/approve an immutable application release ref that contains the July hardening work.
-- [ ] Make `roadresilience-update.service` require its environment file instead of treating it as optional.
-- [ ] Install/update the user systemd units, dependency environment, Caddy body cap and journald cap on the Oracle host.
-- [ ] Redeploy the Modal endpoint from the approved code/checkpoint checksum and rotate/verify the shared key.
-- [ ] Verify port 8501 is closed in both Oracle networking and host firewall; external probing currently cannot prove both internal controls.
-- [ ] Decide and apply Caddy/edge rate limiting.
-- [ ] Run the public sample and upload flows, including cold start, queue, restart/recovery and failure cases.
-- [ ] Record the deployed ref, Modal function/checkpoint checksum and smoke timestamp in `Tracker.md`.
+- [x] Closed 2026-07-28: immutable release ref, required updater environment file, host units/caps, Modal redeploy and key rotation, closed legacy ports, application throttles, public sample/upload smoke and deployment record. Evidence: `docs/Tracker.md` §10 (2026-07-28).
+
+## 2026-09-29 audit follow-ups
+
+- [x] **F12-C1 — Empty `failed=` URL pre-failed junction 0.** `Number("")` is `0`, so every fresh visit silently added J-0 to the scenario (J-278 alone showed 2.2% loss instead of 1.5%). Fixed with `parseNodeIds()` and a unit regression.
+- [x] **F12-D1 — `next` critical/high advisories.** Updated to 16.3.6 with non-breaking transitive fixes (npm audit 11 → 3).
+- [ ] **O2 — Deploy F12.** Production stays on `f42dd68` (with the J-0 bug) until a new immutable ref is approved and rolled out.
+- [ ] **D2 — `maplibre-gl` critical advisory (DOM.sanitize XSS).** Low exposure (no popups/`setHTML`; attribution comes from the OpenFreeMap style), but the fix needs the 6.x major upgrade with map regression checks.
+- [ ] **D3 — `vitest` moderate advisory.** Test-only; needs the 5.x major upgrade.
+- [ ] **D4 — Python dependencies are not vulnerability-scanned** and GitHub Dependabot alerts are disabled for the repository.
+- [ ] **OPS-1 — No external uptime monitoring.** A transient network-path outage (~21:40–21:45 UTC 2026-09-28) was noticed only by manual probing; the host itself stayed up.
+- [ ] **F12-W1 — Methodology prefetch 404 (cosmetic).** The static export writes `methodology/__next.methodology/__PAGE__.txt`, but the client prefetches `__next.methodology.__PAGE__.txt`; still present on `next` 16.3.6. Navigation works; only a console error appears. `prefetch={false}` on the Method link would silence it.
+- [ ] **OPS-2 — `rpcbind` listens on the host.** It is blocked by the Oracle security list; disable it if nothing on the box needs it.
 
 ## Repository and product hygiene
 
@@ -41,7 +46,7 @@
 - [ ] **O1-R1 — Reconcile the public/default branch and application release.** GitHub `main` remains far behind `dev`; decide the human stage-gate update and create an approved application ref before claiming the public repository/release is current.
 - [ ] **A46-R1 — Track A18/A46 configs and result artifacts** in a license-safe reproducible form.
 - [ ] **LEGAL-1 — Choose a repository code license.** No top-level `LICENSE` currently grants reuse rights; dataset/provider licenses are separate and must not be treated as the code license.
-- [ ] **F9 — Replace Streamlit/Folium with the authorized researched web experience** after A45/A46, with visual, browser, responsive, accessibility and performance-budget gates from `Design.md`.
+- [x] **F9 — Replace Streamlit/Folium with the authorized researched web experience** (merged in PR #132 and live since O1).
 
 ## Recently closed
 
