@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-09-29 · **Phase:** X1 demo capture · **Overall:** F12 is live at immutable commit `828fd53` (O2); the Oracle host is patched and runs kernel 7.0; X1 is ready
+**Last updated:** 2026-09-29 · **Phase:** X1 demo capture · **Overall:** F12 and the OPS-3 cache fix are live at immutable commit `ae4c6ff`; the Oracle host is patched and runs kernel 7.0; X1 is active
 
 ---
 
@@ -67,7 +67,7 @@ Two entry paths share the same P2/P3 logic:
 
 Current release state:
 
-- Public application: `https://trace.tiwaribabu.in`; verified checkout `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` (O2), with strict Host/SNI rejection live through the shared Caddy root
+- Public application: `https://trace.tiwaribabu.in`; verified checkout `ae4c6ff7805c2c3acc969770f083d4eaf55f0369` (O2 + OPS-3), with strict Host/SNI rejection live through the shared Caddy root
 - Production segmentation model: `a4-roadseg-v3.2` (`road_pan.pt`, threshold `0.52`); Modal v3.2 is deployed and its checkpoint checksum was verified
 - Current research direction: graph-first SAM-Road++/A18, validated by a common-unit chip APLS gate but not deploy-ready
 - Latest application/config commit `4493f974539c2b129e16511864b6231112aa23b6` is carried into `dev` by PR #132 together with this O1 closure record
@@ -131,7 +131,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **A49** | ✅ | Make Akshat the sole project owner in all documentation | Akshat | — | Entry docs, Tracker, Rules, Implementation, RiskRegister, SETUP, the wiki and stale code-docstring attributions no longer name other owners or require cross-lane authorization; docs tests green; PR opened into `dev` |
 | **F12** | ✅ | Fix the 2026-09-29 audit findings | Akshat | — | Empty `failed=` URL no longer pre-fails J-0 (unit regression); Recover singular count and per-junction Restore names; no "ready to add" for an already-failed junction; `next` 16.3.6 plus non-breaking audit fixes (npm advisories 11 → 3); frontend gates and browser journeys green; PR opened into `dev` |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
-| **X1** | ⏳ | Final backup demo capture | Akshat | F9, O1, O2 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
+| **X1** | 🔄 | Final backup demo capture | Akshat | F9, O1, O2 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
 
@@ -196,14 +196,18 @@ flowchart LR
 
 - **Product:** end-to-end batch and hosted-upload paths exist; the sample field atlas and CPU analysis are runnable.
 - **Quality:** local release gates pass: 391 Python tests, frontend lint/typecheck, 17 unit tests, production build/budgets, and 4 Chromium journeys including the F11 map-height regression.
-- **Deployment:** Oracle is live at exact commit `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` (O2) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, simulation, and a public upload-to-export run are verified.
+- **Deployment:** Oracle is live at exact commit `ae4c6ff7805c2c3acc969770f083d4eaf55f0369` (O2 + OPS-3) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, simulation, and a public upload-to-export run are verified.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** capture X1 from the O2 release. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
+- **Immediate work:** capture X1 from the `ae4c6ff` release. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
 
 ---
 
 ## §10 · Daily Log
+
+**2026-09-29 (Akshat — OPS-3 deployed)**
+
+- Merged #140 and #141 into `dev`; the `ae4c6ff` merge tree is byte-identical to the CI-tested head. Pinned `DEPLOY_REF` to `ae4c6ff7805c2c3acc969770f083d4eaf55f0369` (from `828fd53`); the updater restarted healthy at 14:36:28 UTC and the host checkout is clean. Live: HTML returns `Cache-Control: no-cache` and `304` on an ETag revalidation, hashed chunks stay `immutable`, the AOI summary keeps its 60 s policy and the graph stays `immutable` (HEAD on API routes is `404`, so header checks use GET), mismatched Host returns `421`, and the J-278 scenario still returns RI 0.985.
 
 **2026-09-29 (Akshat — host maintenance and O2 release)**
 

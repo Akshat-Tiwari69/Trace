@@ -6,7 +6,7 @@ Route Resilience converts satellite imagery into a routable road graph, flags in
 
 [Open the public dashboard](https://trace.tiwaribabu.in) · [Setup](SETUP.md) · [Evaluation](docs/Evaluation.md) · [Current work](docs/Tracker.md)
 
-> **Status (2026-07-28):** the Next.js/React field atlas and thin FastAPI boundary are live on Oracle at `4493f97` with Modal v3.2. Strict Host/SNI enforcement, the public sample API and a consented upload-to-export run are verified. P2/P3 evidence was regenerated from a 573-node/828-edge MultiGraph, and v3.2 remains production because the higher-scoring graph-first candidate lacks a deployable upstream license. O1 is complete; X1 final demo capture is next.
+> **Status (2026-09-29):** the Next.js/React field atlas and thin FastAPI boundary are live on Oracle at `ae4c6ff` with Modal v3.2. Strict Host/SNI enforcement, the public sample API and a consented upload-to-export run are verified. P2/P3 evidence was regenerated from a 573-node/828-edge MultiGraph, and v3.2 remains production because the higher-scoring graph-first candidate lacks a deployable upstream license. O1, the 2026-09-29 audit fixes (F12/O2) and HTML cache revalidation (OPS-3) are live; X1 final demo capture is next.
 
 ## What it does
 
