@@ -149,9 +149,10 @@ export function runSimulation(aoi: string, removedNodeIds: readonly number[]): P
   });
 }
 
-// The server answers only after the Modal GPU call (its own timeout is 120 s,
-// and cold starts routinely exceed the 10 s default used for other requests).
-export const UPLOAD_TIMEOUT_MS = 150_000;
+// The server answers only after the Modal GPU call: up to 3 attempts of 120 s
+// plus 4.5 s backoff (src/app/modal_client.py), and cold starts alone routinely
+// exceed the 10 s default used for other requests.
+export const UPLOAD_TIMEOUT_MS = 390_000;
 
 export function submitAnalysis(
   image: File,

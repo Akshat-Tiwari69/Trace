@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { fetchAoi, runSimulation, submitAnalysis, UPLOAD_TIMEOUT_MS } from "@/lib/api";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("API client", () => {
   it("waits for the server's GPU call when uploading instead of the 10 s default", async () => {
@@ -13,8 +16,8 @@ describe("API client", () => {
 
     await submitAnalysis(new File(["x"], "roads.png", { type: "image/png" }), 0.5);
     expect(timeout).toHaveBeenCalledWith(UPLOAD_TIMEOUT_MS);
-    expect(UPLOAD_TIMEOUT_MS).toBeGreaterThan(120_000);
-    timeout.mockRestore();
+    // modal_client.call worst case: 3 attempts x 120 s + 1.5 s + 3 s backoff.
+    expect(UPLOAD_TIMEOUT_MS).toBeGreaterThan(3 * 120_000 + 4_500);
   });
 
   it("loads the validated sample contract", async () => {
