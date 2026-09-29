@@ -37,7 +37,7 @@
 - [ ] **OPS-1 — No external uptime monitoring.** A transient network-path outage (~21:40–21:45 UTC 2026-09-28) was noticed only by manual probing; the host itself stayed up.
 - [ ] **F12-W1 — Methodology prefetch 404 (cosmetic).** The static export writes `methodology/__next.methodology/__PAGE__.txt`, but the client prefetches `__next.methodology.__PAGE__.txt`; still present on `next` 16.3.6. Navigation works; only a console error appears. `prefetch={false}` on the Method link would silence it.
 - [x] **OPS-2 — `rpcbind` listened on the host.** Disabled during the 2026-09-29 maintenance (no NFS mounts or dependants).
-- [ ] **OPS-3 — HTML is served without `Cache-Control`.** Browsers may heuristically reuse a stale page for days after a deploy (observed during O2). Send `Cache-Control: no-cache` for non-`/_next/static/` responses in `src/app/api.py` so browsers revalidate via the existing ETag.
+- [x] **OPS-3 — HTML was served without `Cache-Control`.** Browsers could heuristically reuse a stale page for days after a deploy (observed during O2). The API middleware now defaults unhashed responses to `no-cache` (ETag revalidation returns `304`); hashed `/_next/static/` assets stay immutable and routes with their own policy keep it. Takes effect on the next deploy.
 
 ## Repository and product hygiene
 

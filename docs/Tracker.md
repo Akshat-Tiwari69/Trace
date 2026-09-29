@@ -199,7 +199,7 @@ flowchart LR
 - **Deployment:** Oracle is live at exact commit `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` (O2) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, simulation, and a public upload-to-export run are verified.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** capture X1 from the O2 release. Open follow-ups (HTML cache headers, maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
+- **Immediate work:** capture X1 from the O2 release. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
 
 ---
 
@@ -210,6 +210,7 @@ flowchart LR
 - Maintenance, approved plan: disabled the unused `rpcbind` (no NFS mounts or dependants), applied all 44 upgrades and 9 new packages (3 security, Docker 29.8.1, HWE kernel line 6.17 → 7.0), autoremoved the superseded 6.17.0-1020 kernel, and rebooted after confirming GRUB defaults to `7.0.0-1011-oracle`. SSH returned in 34 s; Caddy, Docker, the Trace app/updater timer and the host's other services came back active with no failed units; listening ports match the pre-maintenance set minus `rpcbind`; nothing is pending. `6.17.0-1011` remains as the fallback kernel.
 - O2: pinned `DEPLOY_REF` to `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` (from `f42dd68`); the transactional updater rebuilt and restarted healthy at 22:27:56 UTC. A fresh public visit no longer writes `failed=0`, and a J-278-only stress test shows RI 0.985 / 1.5% loss.
 - Next 16.3 `next build` now appends a root-params import to `web/next-env.d.ts`, which left the host checkout dirty; the regenerated file is committed. A browser that had loaded the site before the deploy kept the old page: HTML is served without `Cache-Control`, so browsers may reuse a stale copy heuristically (`bugs.md` OPS-3).
+- OPS-3 fix (follow-up PR): the API middleware defaults responses without their own policy to `Cache-Control: no-cache`, so HTML revalidates via ETag (`304`) after each deploy; hashed `/_next/static/` assets stay immutable. A regression test covers HTML, `304` revalidation, hashed chunks and the summary cache. It reaches production with the next immutable deploy.
 
 **2026-09-29 (Akshat — end-to-end audit; F12)**
 

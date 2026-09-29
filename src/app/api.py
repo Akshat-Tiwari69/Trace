@@ -263,6 +263,10 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
         elif request.url.path.startswith("/_next/static/"):
             response.headers["Cache-Control"] = ARTIFACT_CACHE
+        elif "cache-control" not in response.headers:
+            # Unhashed HTML/static files must revalidate (cheap 304 via ETag) or
+            # browsers heuristically keep the pre-deploy page for days.
+            response.headers["Cache-Control"] = "no-cache"
         return response
 
     @app.get("/healthz")
