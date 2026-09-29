@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-09-29 · **Phase:** X1 demo capture · **Overall:** F12 and the OPS-3 cache fix are live at immutable commit `ae4c6ff`; the Oracle host is patched and runs kernel 7.0; X1 is active
+**Last updated:** 2026-09-29 · **Phase:** maintenance · **Overall:** F12, OPS-3 and F13 are live at immutable commit `12d0a5c`; X1 backup demo captured from that release; the Oracle host is patched and runs kernel 7.0
 
 ---
 
@@ -13,7 +13,7 @@
 
 | Owner | Scope | Current next task |
 |---|---|---|
-| **Akshat** | Everything: `src/pipeline/` (P1–P3), `src/app/`, `web/`, data tooling, notebooks, deployment, shared configuration and docs | **X1** final backup demo capture |
+| **Akshat** | Everything: `src/pipeline/` (P1–P3), `src/app/`, `web/`, data tooling, notebooks, deployment, shared configuration and docs | No active task — pick from the `bugs.md` follow-ups |
 
 ---
 
@@ -67,10 +67,9 @@ Two entry paths share the same P2/P3 logic:
 
 Current release state:
 
-- Public application: `https://trace.tiwaribabu.in`; verified checkout `ae4c6ff7805c2c3acc969770f083d4eaf55f0369` (O2 + OPS-3), with strict Host/SNI rejection live through the shared Caddy root
+- Public application: `https://trace.tiwaribabu.in`; verified checkout `12d0a5c0fd510b347537c69b35c78d60c9bf5c99` (O2 + OPS-3 + F13), with strict Host/SNI rejection live through the shared Caddy root
 - Production segmentation model: `a4-roadseg-v3.2` (`road_pan.pt`, threshold `0.52`); Modal v3.2 is deployed and its checkpoint checksum was verified
 - Current research direction: graph-first SAM-Road++/A18, validated by a common-unit chip APLS gate but not deploy-ready
-- Latest application/config commit `4493f974539c2b129e16511864b6231112aa23b6` is carried into `dev` by PR #132 together with this O1 closure record
 
 F9 implementation result: the replacement changes only the presentation/application boundary, retains Python P1–P3 logic and file artifacts, passes browser/accessibility/performance gates, and removes the Streamlit/Folium presentation instead of maintaining two stacks.
 
@@ -132,7 +131,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F12** | ✅ | Fix the 2026-09-29 audit findings | Akshat | — | Empty `failed=` URL no longer pre-fails J-0 (unit regression); Recover singular count and per-junction Restore names; no "ready to add" for an already-failed junction; `next` 16.3.6 plus non-breaking audit fixes (npm advisories 11 → 3); frontend gates and browser journeys green; PR opened into `dev` |
 | **F13** | ✅ | Let uploads wait for the GPU call | Akshat | — | The upload POST uses `UPLOAD_TIMEOUT_MS` (390 s, above the server's worst-case Modal retry budget of ~365 s) instead of the 10 s default; unit regression; frontend gates green; PR opened into `dev` |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
-| **X1** | 🔄 | Final backup demo capture | Akshat | F9, O1, O2, F13 deployed | Capture demonstrates sample flow and uploaded-image flow from the approved release |
+| **X1** | ✅ | Final backup demo capture | Akshat | F9, O1, O2, F13 deployed | Live `12d0a5c` capture of the sample flow and a cold-start browser upload: 9 screenshots, both exports, `capture.json` and `x1-demo.webm` (SHA-256 `498bd8fd…c91fb8ee`) under ignored `.tmp/x1/20260929T1642Z/` |
 
 ### Research backlog disposition
 
@@ -197,14 +196,20 @@ flowchart LR
 
 - **Product:** end-to-end batch and hosted-upload paths exist; the sample field atlas and CPU analysis are runnable.
 - **Quality:** local release gates pass: 391 Python tests, frontend lint/typecheck, 17 unit tests, production build/budgets, and 4 Chromium journeys including the F11 map-height regression.
-- **Deployment:** Oracle is live at exact commit `ae4c6ff7805c2c3acc969770f083d4eaf55f0369` (O2 + OPS-3) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, simulation, and a public upload-to-export run are verified.
+- **Deployment:** Oracle is live at exact commit `12d0a5c0fd510b347537c69b35c78d60c9bf5c99` (O2 + OPS-3 + F13) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, simulation, and a public upload-to-export run are verified.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** capture X1 from the `ae4c6ff` release. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
+- **Immediate work:** none scheduled; X1 is captured. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
 
 ---
 
 ## §10 · Daily Log
+
+**2026-09-29 (Akshat — F13 deployed; X1 captured)**
+
+- Merged #143 (Sourcery-approved after its review fixes); the `12d0a5c` merge tree is byte-identical to the CI-tested head. Pinned `DEPLOY_REF` to `12d0a5c0fd510b347537c69b35c78d60c9bf5c99` (from `ae4c6ff`); the updater restarted healthy at 16:41:45 UTC with a clean checkout, and the live bundle contains the 390 s upload limit.
+- X1, captured by a scripted Chromium run against the live site (16:42:20–16:43:11 UTC, no console errors): Explore RI 1.000; J-278 stress RI 0.985 / 1.5% loss; Compare; Recover "1 junction offline"; GeoJSON and CSV exports; Methodology; a phone layout; and a browser upload of the public DeepGlobe tile on a cold Modal start that completed in 23 s (the old 10 s limit would have aborted it) with 51 junctions, 57 links, 5 critical, 20 single points and worst-junction RI 0.913 at J-25, matching the earlier API run. The artifacts stay out of Git under `.tmp/x1/20260929T1642Z/` (`x1-demo.webm` SHA-256 `498bd8fd20f058e1528e80b0597fdc106dca60138523fb05be93af36c91fb8ee`).
+- Addressed #142 review notes: removed the stale O1-era "latest commit" line from §3 and marked X1 complete in the README roadmap.
 
 **2026-09-29 (Akshat — X1 blocked by upload timeout; F13)**
 

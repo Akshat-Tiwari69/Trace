@@ -2,7 +2,7 @@
 
 > Historical review findings and their original section numbers are preserved in [`docs/ProductionReadinessAudit-2026-07.md`](docs/ProductionReadinessAudit-2026-07.md). Current code uses durable task/contract references rather than depending on those archived section numbers.
 
-**Last reconciled:** 2026-09-29 · **Active program:** X1 demo capture
+**Last reconciled:** 2026-09-29 · **Active program:** follow-ups below
 
 ## Correctness and evidence
 
@@ -35,7 +35,7 @@
 - [ ] **D3 — `vitest` moderate advisory.** Test-only; needs the 5.x major upgrade.
 - [ ] **D4 — Python dependencies are not vulnerability-scanned** and GitHub Dependabot alerts are disabled for the repository.
 - [ ] **OPS-1 — No external uptime monitoring.** A transient network-path outage (~21:40–21:45 UTC 2026-09-28) was noticed only by manual probing; the host itself stayed up.
-- [x] **F13 — Browser uploads aborted after 10 s.** The upload POST inherited the 10 s default while the server waits for the Modal call, so cold-start uploads failed in the UI although the server finished them. Now uses a 390 s `UPLOAD_TIMEOUT_MS`, above the server's worst-case Modal retry budget.
+- [x] **F13 — Browser uploads aborted after 10 s.** The upload POST inherited the 10 s default while the server waits for the Modal call, so cold-start uploads failed in the UI although the server finished them. Now uses a 390 s `UPLOAD_TIMEOUT_MS`, above the server's worst-case Modal retry budget. Live at `12d0a5c`; a cold-start browser upload completed in 23 s during X1.
 - [ ] **F12-W1 — Methodology prefetch 404 (cosmetic).** The static export writes `methodology/__next.methodology/__PAGE__.txt`, but the client prefetches `__next.methodology.__PAGE__.txt`; still present on `next` 16.3.6. Navigation works; only a console error appears. `prefetch={false}` on the Method link would silence it.
 - [x] **OPS-2 — `rpcbind` listened on the host.** Disabled during the 2026-09-29 maintenance (no NFS mounts or dependants).
 - [x] **OPS-3 — HTML was served without `Cache-Control`.** Browsers could heuristically reuse a stale page for days after a deploy (observed during O2). The API middleware now defaults unhashed responses to `no-cache` (ETag revalidation returns `304`); hashed `/_next/static/` assets stay immutable and routes with their own policy keep it. Live at `ae4c6ff` since 2026-09-29 14:36 UTC.
