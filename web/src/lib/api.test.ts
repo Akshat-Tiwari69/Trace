@@ -1,10 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchAoi, runSimulation, submitAnalysis } from "@/lib/api";
+import { fetchAoi, runSimulation, submitAnalysis, UPLOAD_TIMEOUT_MS } from "@/lib/api";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe("API client", () => {
+  it("waits for the server's GPU call when uploading instead of the 10 s default", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "a".repeat(32), status: "queued" }), { status: 202 }),
+    ));
+
+    await submitAnalysis(new File(["x"], "roads.png", { type: "image/png" }), 0.5);
+    expect(timeout).toHaveBeenCalledWith(UPLOAD_TIMEOUT_MS);
+    // modal_client.call worst case: 3 attempts x 120 s + 1.5 s + 3 s backoff.
+    expect(UPLOAD_TIMEOUT_MS).toBeGreaterThan(3 * 120_000 + 4_500);
+  });
+
   it("loads the validated sample contract", async () => {
     const payload = { aoi: "panaji_demo", graph_url: "/api/v1/aois/panaji_demo/graph" };
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
