@@ -171,7 +171,7 @@ flowchart LR
 - A45 establishes a smaller, measured codebase before more model or UI complexity is added.
 - A46 may run research in parallel with later A45 work, but deployment integration waits for A45 contracts to settle.
 - F9, O1 and F11 are complete. The live `f42dd68` checkout, strict-SNI behavior, public sample/simulation APIs, visibly rendered network map, and one consented upload through Modal, CPU analysis, result JSON and GeoJSON export are verified.
-- X1 final backup demo capture is the next ready task.
+- X1 is complete (2026-09-29, from `12d0a5c`); next work comes from the `bugs.md` follow-ups.
 
 ---
 
