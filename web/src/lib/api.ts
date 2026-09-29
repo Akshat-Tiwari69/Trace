@@ -149,6 +149,10 @@ export function runSimulation(aoi: string, removedNodeIds: readonly number[]): P
   });
 }
 
+// The server answers only after the Modal GPU call (its own timeout is 120 s,
+// and cold starts routinely exceed the 10 s default used for other requests).
+export const UPLOAD_TIMEOUT_MS = 150_000;
+
 export function submitAnalysis(
   image: File,
   resolutionM: number,
@@ -158,7 +162,11 @@ export function submitAnalysis(
   body.set("image", image);
   body.set("resolution_m", String(resolutionM));
   body.set("confirm_external_processing", "true");
-  return fetchJson("/api/v1/analyses", { method: "POST", body, signal });
+  return fetchJson("/api/v1/analyses", {
+    method: "POST",
+    body,
+    signal: signal ?? AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+  });
 }
 
 export function fetchAnalysis(path: string, signal?: AbortSignal): Promise<AnalysisJob> {

@@ -130,8 +130,9 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **W1** | ✅ | Publish an accessible repository wiki | Akshat | F11 | Current `dev` architecture, setup, product journeys, contracts/metrics, API, development and operations are explained in a linked GitHub wiki; stale PRs are dispositioned |
 | **A49** | ✅ | Make Akshat the sole project owner in all documentation | Akshat | — | Entry docs, Tracker, Rules, Implementation, RiskRegister, SETUP, the wiki and stale code-docstring attributions no longer name other owners or require cross-lane authorization; docs tests green; PR opened into `dev` |
 | **F12** | ✅ | Fix the 2026-09-29 audit findings | Akshat | — | Empty `failed=` URL no longer pre-fails J-0 (unit regression); Recover singular count and per-junction Restore names; no "ready to add" for an already-failed junction; `next` 16.3.6 plus non-breaking audit fixes (npm advisories 11 → 3); frontend gates and browser journeys green; PR opened into `dev` |
+| **F13** | ✅ | Let uploads wait for the GPU call | Akshat | — | The upload POST uses `UPLOAD_TIMEOUT_MS` (150 s, above the server's 120 s Modal timeout) instead of the 10 s default; unit regression; frontend gates green; PR opened into `dev` |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
-| **X1** | 🔄 | Final backup demo capture | Akshat | F9, O1, O2 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
+| **X1** | 🔄 | Final backup demo capture | Akshat | F9, O1, O2, F13 deployed | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
 
@@ -204,6 +205,11 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-09-29 (Akshat — X1 blocked by upload timeout; F13)**
+
+- The X1 live capture recorded the whole sample flow (RI 1.000 → 0.985 / 1.5% for J-278, Compare, "1 junction offline", both exports, Methodology), but the browser upload failed twice with "signal timed out". Root cause: `fetchJson` gives every request a 10 s `AbortSignal` and the upload POST did not override it, while the server answers only after the synchronous Modal call (17 s cold earlier; 120 s server timeout). The server still completed both jobs (`4b4b…` 15:05:25, `8560…` 15:33:40 UTC), so the GPU work was wasted and users saw an error. Earlier upload verifications used `curl`, which has no such limit.
+- F13 gives the upload its own 150 s limit; a unit regression pins it above the server's 120 s Modal timeout. X1 resumes after F13 is deployed.
 
 **2026-09-29 (Akshat — OPS-3 deployed)**
 
