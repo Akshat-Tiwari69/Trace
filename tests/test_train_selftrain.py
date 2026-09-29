@@ -18,25 +18,23 @@ def _write_pairs(folder, n, size=64):
 
 
 def test_unlabeled_dataset_yields_two_perturbed_views(tmp_path):
-    import random
-
     from src.pipeline.p1_segment.experiments.train_selftrain import UnlabeledTileDataset, list_images
-
-    # Seed so the probabilistic 'strong' photometric augmentation reliably fires —
-    # the perturbation has p<1, so an unlucky global RNG state (test ordering) could
-    # otherwise leave the two views identical and flake this assertion.
-    random.seed(0)
-    np.random.seed(0)
 
     d = tmp_path / "corpus"
     _write_pairs(d, 3, size=80)
     imgs = list_images([str(d)])
     assert len(imgs) == 3                              # globs *_sat.jpg (masks ignored)
 
+    # Albumentations 2.x pipelines own their RNG, so global random/np seeds never
+    # reach them. Every strong step has p<1 and all four skip together ~3.5% of the
+    # time, so seed the pipelines and allow a few draws (seed 0 skips on its first).
     ds = UnlabeledTileDataset(imgs, size=64)
-    weak, strong = ds[0]
+    ds.geo.set_random_seed(0)
+    ds.strong.set_random_seed(0)
+    views = [ds[0] for _ in range(5)]
+    weak, strong = views[0]
     assert weak.shape == (3, 64, 64) and strong.shape == (3, 64, 64)
-    assert not torch.allclose(weak, strong)           # strong view is photometrically perturbed
+    assert any(not torch.allclose(w, s) for w, s in views)  # strong view is photometrically perturbed
 
 
 def test_refine_pseudo_drops_small_blobs():
