@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-09-29 · **Phase:** audit fixes → deploy → X1 · **Overall:** the 2026-09-29 end-to-end audit passed except for a scenario-URL bug (F12, fixed in `dev` PR); production stays at `f42dd68` until O2 deploys the fix
+**Last updated:** 2026-09-29 · **Phase:** X1 demo capture · **Overall:** F12 is live at immutable commit `828fd53` (O2); the Oracle host is patched and runs kernel 7.0; X1 is ready
 
 ---
 
@@ -13,7 +13,7 @@
 
 | Owner | Scope | Current next task |
 |---|---|---|
-| **Akshat** | Everything: `src/pipeline/` (P1–P3), `src/app/`, `web/`, data tooling, notebooks, deployment, shared configuration and docs | Merge **F12**, deploy it (**O2**), then **X1** final backup demo capture |
+| **Akshat** | Everything: `src/pipeline/` (P1–P3), `src/app/`, `web/`, data tooling, notebooks, deployment, shared configuration and docs | **X1** final backup demo capture |
 
 ---
 
@@ -67,7 +67,7 @@ Two entry paths share the same P2/P3 logic:
 
 Current release state:
 
-- Public application: `https://trace.tiwaribabu.in`; verified checkout `f42dd68c55a0da66e1b1669339ac35bb94a98a48`, with strict Host/SNI rejection live through the shared Caddy root
+- Public application: `https://trace.tiwaribabu.in`; verified checkout `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` (O2), with strict Host/SNI rejection live through the shared Caddy root
 - Production segmentation model: `a4-roadseg-v3.2` (`road_pan.pt`, threshold `0.52`); Modal v3.2 is deployed and its checkpoint checksum was verified
 - Current research direction: graph-first SAM-Road++/A18, validated by a common-unit chip APLS gate but not deploy-ready
 - Latest application/config commit `4493f974539c2b129e16511864b6231112aa23b6` is carried into `dev` by PR #132 together with this O1 closure record
@@ -130,7 +130,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **W1** | ✅ | Publish an accessible repository wiki | Akshat | F11 | Current `dev` architecture, setup, product journeys, contracts/metrics, API, development and operations are explained in a linked GitHub wiki; stale PRs are dispositioned |
 | **A49** | ✅ | Make Akshat the sole project owner in all documentation | Akshat | — | Entry docs, Tracker, Rules, Implementation, RiskRegister, SETUP, the wiki and stale code-docstring attributions no longer name other owners or require cross-lane authorization; docs tests green; PR opened into `dev` |
 | **F12** | ✅ | Fix the 2026-09-29 audit findings | Akshat | — | Empty `failed=` URL no longer pre-fails J-0 (unit regression); Recover singular count and per-junction Restore names; no "ready to add" for an already-failed junction; `next` 16.3.6 plus non-breaking audit fixes (npm advisories 11 → 3); frontend gates and browser journeys green; PR opened into `dev` |
-| **O2** | ⏳ | Deploy F12 to production | Akshat | F12 merged | New immutable ref approved and rolled out; public stress test of J-278 alone shows RI 0.985 / 1.5% loss; Tracker records ref and smoke |
+| **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **X1** | ⏳ | Final backup demo capture | Akshat | F9, O1, O2 | Capture demonstrates sample flow and uploaded-image flow from the approved release |
 
 ### Research backlog disposition
@@ -196,14 +196,20 @@ flowchart LR
 
 - **Product:** end-to-end batch and hosted-upload paths exist; the sample field atlas and CPU analysis are runnable.
 - **Quality:** local release gates pass: 391 Python tests, frontend lint/typecheck, 17 unit tests, production build/budgets, and 4 Chromium journeys including the F11 map-height regression.
-- **Deployment:** Oracle is live at exact commit `f42dd68c55a0da66e1b1669339ac35bb94a98a48`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, zero-removal simulation, and a public upload-to-export run are verified.
+- **Deployment:** Oracle is live at exact commit `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` (O2) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, simulation, and a public upload-to-export run are verified.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** merge F12, deploy it (O2), then capture X1. Open audit follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
+- **Immediate work:** capture X1 from the O2 release. Open follow-ups (HTML cache headers, maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
 
 ---
 
 ## §10 · Daily Log
+
+**2026-09-29 (Akshat — host maintenance and O2 release)**
+
+- Maintenance, approved plan: disabled the unused `rpcbind` (no NFS mounts or dependants), applied all 44 upgrades and 9 new packages (3 security, Docker 29.8.1, HWE kernel line 6.17 → 7.0), autoremoved the superseded 6.17.0-1020 kernel, and rebooted after confirming GRUB defaults to `7.0.0-1011-oracle`. SSH returned in 34 s; Caddy, Docker, the Trace app/updater timer and the host's other services came back active with no failed units; listening ports match the pre-maintenance set minus `rpcbind`; nothing is pending. `6.17.0-1011` remains as the fallback kernel.
+- O2: pinned `DEPLOY_REF` to `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` (from `f42dd68`); the transactional updater rebuilt and restarted healthy at 22:27:56 UTC. A fresh public visit no longer writes `failed=0`, and a J-278-only stress test shows RI 0.985 / 1.5% loss.
+- Next 16.3 `next build` now appends a root-params import to `web/next-env.d.ts`, which left the host checkout dirty; the regenerated file is committed. A browser that had loaded the site before the deploy kept the old page: HTML is served without `Cache-Control`, so browsers may reuse a stale copy heuristically (`bugs.md` OPS-3).
 
 **2026-09-29 (Akshat — end-to-end audit; F12)**
 

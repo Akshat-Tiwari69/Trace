@@ -2,7 +2,7 @@
 
 > Historical review findings and their original section numbers are preserved in [`docs/ProductionReadinessAudit-2026-07.md`](docs/ProductionReadinessAudit-2026-07.md). Current code uses durable task/contract references rather than depending on those archived section numbers.
 
-**Last reconciled:** 2026-09-29 · **Active program:** F12 audit fixes → O2 deploy → X1
+**Last reconciled:** 2026-09-29 · **Active program:** X1 demo capture
 
 ## Correctness and evidence
 
@@ -30,13 +30,14 @@
 
 - [x] **F12-C1 — Empty `failed=` URL pre-failed junction 0.** `Number("")` is `0`, so every fresh visit silently added J-0 to the scenario (J-278 alone showed 2.2% loss instead of 1.5%). Fixed with `parseNodeIds()` and a unit regression.
 - [x] **F12-D1 — `next` critical/high advisories.** Updated to 16.3.6 with non-breaking transitive fixes (npm audit 11 → 3).
-- [ ] **O2 — Deploy F12.** Production stays on `f42dd68` (with the J-0 bug) until a new immutable ref is approved and rolled out.
+- [x] **O2 — Deploy F12.** Live at `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` since 2026-09-28 22:27:56 UTC; public J-278 scenario verified.
 - [ ] **D2 — `maplibre-gl` critical advisory (DOM.sanitize XSS).** Low exposure (no popups/`setHTML`; attribution comes from the OpenFreeMap style), but the fix needs the 6.x major upgrade with map regression checks.
 - [ ] **D3 — `vitest` moderate advisory.** Test-only; needs the 5.x major upgrade.
 - [ ] **D4 — Python dependencies are not vulnerability-scanned** and GitHub Dependabot alerts are disabled for the repository.
 - [ ] **OPS-1 — No external uptime monitoring.** A transient network-path outage (~21:40–21:45 UTC 2026-09-28) was noticed only by manual probing; the host itself stayed up.
 - [ ] **F12-W1 — Methodology prefetch 404 (cosmetic).** The static export writes `methodology/__next.methodology/__PAGE__.txt`, but the client prefetches `__next.methodology.__PAGE__.txt`; still present on `next` 16.3.6. Navigation works; only a console error appears. `prefetch={false}` on the Method link would silence it.
-- [ ] **OPS-2 — `rpcbind` listens on the host.** It is blocked by the Oracle security list; disable it if nothing on the box needs it.
+- [x] **OPS-2 — `rpcbind` listened on the host.** Disabled during the 2026-09-29 maintenance (no NFS mounts or dependants).
+- [ ] **OPS-3 — HTML is served without `Cache-Control`.** Browsers may heuristically reuse a stale page for days after a deploy (observed during O2). Send `Cache-Control: no-cache` for non-`/_next/static/` responses in `src/app/api.py` so browsers revalidate via the existing ETag.
 
 ## Repository and product hygiene
 
