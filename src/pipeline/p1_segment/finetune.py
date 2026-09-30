@@ -58,6 +58,7 @@ class FineTuneConfig:
     init_checkpoint: str | Path          # the v1 checkpoint to start from
     finetune_dir: str | Path | None = None   # data/finetune (DeepGlobe-format Indian pairs)
     finetune_pairs: list | None = None   # explicit (sat,mask) pairs — overrides finetune_dir (A23: SpaceNet train split)
+    extra_train_pairs: list | None = None    # A50: train-only pairs (Google Mumbai) — never validated/selected on
     grayscale_p: float = 0.0             # A24: random desaturation for Cartosat-PAN robustness
     deepglobe_dir: str | Path | None = None   # mix in DeepGlobe to avoid forgetting
     deepglobe_subset: int = 2000         # clean DeepGlobe anchor size
@@ -101,7 +102,7 @@ def gather_pairs(cfg: FineTuneConfig) -> tuple[list, list, list]:
     val_groups = set(group_ids[:n_val_groups])
     indian_val = [pair for group in group_ids if group in val_groups for pair in groups[group]]
     indian_train = [pair for group in group_ids if group not in val_groups for pair in groups[group]]
-    train = indian_train * cfg.finetune_oversample
+    train = indian_train * cfg.finetune_oversample + list(cfg.extra_train_pairs or [])
 
     deepglobe_val: list = []
     if cfg.deepglobe_dir:
@@ -412,12 +413,20 @@ def main() -> None:
     p.add_argument("--num-workers", type=int, default=0)
     p.add_argument("--spacenet-corpus", default=None,
                    help="A23: SpaceNet dg_format dir — train on the NON-held-out chips (frozen A17 split)")
+    p.add_argument("--extra-train-dirs", nargs="*", default=[],
+                   help="A50: DeepGlobe-format dirs added to TRAINING only (e.g. data/raw/google_mumbai/dg_format)")
     p.add_argument("--device", default="cpu")
     p.add_argument("--resume", default=None,
                    help="A19: resume from a rolling `<out>.last.pt` checkpoint (restores optimizer/epoch/best)")
     args = p.parse_args()
     occlusion = {"standard": True, "heavy": "heavy", "none": False}[args.occlusion]
 
+    extra_pairs = []
+    for d in args.extra_train_dirs:            # a typo'd dir must not silently train without it
+        found = pair_deepglobe(d)
+        if not found:
+            raise SystemExit(f"--extra-train-dirs {d}: no DeepGlobe-format pairs found")
+        extra_pairs += found
     finetune_pairs, finetune_dir = None, args.finetune_dir
     if args.spacenet_corpus:  # A23 reproducible mode: SpaceNet train split, held-out reserved
         from src.pipeline.p1_segment.eval_spacenet import (
@@ -430,6 +439,7 @@ def main() -> None:
 
     finetune(FineTuneConfig(
         init_checkpoint=args.init, finetune_dir=finetune_dir, finetune_pairs=finetune_pairs,
+        extra_train_pairs=extra_pairs,
         deepglobe_dir=args.deepglobe_dir, deepglobe_subset=args.deepglobe_subset,
         deepglobe_val=args.deepglobe_val, out_path=args.out,
         image_size=args.image_size, batch_size=args.batch_size, lr=args.lr,

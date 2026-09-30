@@ -198,6 +198,7 @@ when every stage is reused.
 | A41/A41b SDT-BCE | pixels improved, APLS regressed | rejected |
 | A18 frozen → LoRA | common-unit routing improved strongly, absolute routing still low | graph-first direction adopted for A46 |
 | A46 epoch-22 + topology 0.60 | 127-chip raw APLS `0.181165`, `+0.076053` vs epoch-18, CI `[+0.059871, +0.092975]`; normalized `0.301519` | metric gate passed; not deployable because upstream has no license |
+| A50 Google road labels scored as a prediction | 127-chip raw APLS `0.3585` vs v3.2 `0.2821` (current scorer), `+0.0764`, CI `[+0.0486, +0.1070]`; normalized `0.5553` | labels carry routing signal beyond v3.2 → build the train-only Google corpus; see A50 section |
 
 ## Promotion protocol for A46
 
@@ -224,3 +225,19 @@ All 27 historical LoRA checkpoints were inferred on the registered 102-chip sele
 `data/sample/a46_comparison_preregistration.json` froze that exact candidate, incumbent, v3.2 checkpoint, 127-chip manifest and strict 600-sample protocol before the comparison split was opened. The one permitted comparison completed 127/127 coverage. The candidate scored raw APLS `0.181165` and normalized APLS `0.301519`; the incumbent scored `0.105112` and `0.180762`; deployable v3.2 scored `0.012082` and `0.018539`. Candidate-minus-incumbent raw APLS was `+0.076053`, with 95% CI `[+0.059871, +0.092975]` and paired randomization `p=0.000100`. Fragmentation also improved: mean components fell from `11.433` to `7.937`, largest-component node fraction rose from `0.3763` to `0.5413`, and reachable-pair fraction rose from `0.2200` to `0.3859`.
 
 The metric gate passed, but **production promotion remains false**. SAM-Road++ publishes no license, so its source, patch, derived weights and predictions remain local research artifacts and cannot be redistributed or deployed. `data/sample/a46_comparison_result.json` records the license-safe result summary and hashes; licensed v3.2 remains the production checkpoint while MIT-licensed SAM-Road is evaluated next under the same protocol.
+
+## A50 Google-label agreement and scorer caveat (2026-09-30)
+
+Question: do Google's Mumbai road labels agree with what the gate grades, before any training on them? `build_google_data --check` renders the roads-only Google overlay (z19, alpha mask) over each of the 127 frozen comparison chips, maps it into the common 400 px frame exactly like the v3.2 mask path, and scores it as if it were a prediction (600 samples, current code, `.tmp/a50_google_check.json`).
+
+| Source (same chips, same current scorer) | Raw APLS | Normalized | Median chip |
+|---|---:|---:|---:|
+| GT self-ceiling | 0.6419 | 1.0 | — |
+| Google road labels | **0.3585** | **0.5553** | 0.338 |
+| v3.2 (`road_pan.pt`, 0.52) | 0.2821 | 0.4549 | 0.240 |
+
+Google minus v3.2: `+0.0764`, 95% CI `[+0.0486, +0.1070]`, `p<0.001`; Google is higher on 89/127 chips. Reading: the labels contain routing information v3.2 does not predict, so there is headroom to learn from them; but they reach only ~56% of the achievable ceiling, because Google's road definition differs from SpaceNet's (compound/driveway loops, dual carriageways drawn as two lines). A model that copied Google exactly would top out near 0.36 raw on this benchmark, so Google data is a **supplement** to SpaceNet supervision, not a replacement.
+
+Pilot registration (cells r0c0, r6c6, r20c10): Google's road vectors sit a consistent 3.5–4.5 m east of Google's own imagery (best shifts `[1,-3]`, `[2,9]`, `[-3,7]` px); aligning to v3.2 raises mean probability under the centrelines from 0.32–0.47 to 0.36–0.51, and visual overlays confirm the shifted lines sit on the visible roads.
+
+**Scorer caveat (affects the A18/A46 rows above).** The registered A46 comparison scored v3.2 at raw `0.012082`; today's code scores the same checkpoint on the same 127 chips at `0.2821`. Commit `22a749f` (2026-07-26, after the 2026-07-18 comparison) changed `skeleton_to_graph` (sknw ring self-loops were previously *dropped*; now split into two routable edges) and APLS snapping (degree-offset `_snap_map` replaced by metric snapping). The first change affects only mask-derived graphs such as v3.2, not A18's graph outputs. The A18/A46 prediction graphs are not on this machine, so they could not be re-scored; until they are, the A18-vs-v3.2 and A46-vs-v3.2 deltas are **not comparable** with any number produced by the current scorer, and the graph-first-beats-v3.2 reading should be treated as unverified.
