@@ -6,7 +6,7 @@ Route Resilience converts satellite imagery into a routable road graph, flags in
 
 [Open the public dashboard](https://trace.tiwaribabu.in) · [Setup](SETUP.md) · [Evaluation](docs/Evaluation.md) · [Current work](docs/Tracker.md)
 
-> **Status (2026-09-29):** the Next.js/React field atlas and thin FastAPI boundary are live on Oracle at `ae4c6ff` with Modal v3.2. Strict Host/SNI enforcement, the public sample API and a consented upload-to-export run are verified. P2/P3 evidence was regenerated from a 573-node/828-edge MultiGraph, and v3.2 remains production because the higher-scoring graph-first candidate lacks a deployable upstream license. O1, the 2026-09-29 audit fixes (F12/O2) and HTML cache revalidation (OPS-3) are live; X1 final demo capture is next.
+> **Status (2026-09-29):** the Next.js/React field atlas and thin FastAPI boundary are live on Oracle at `12d0a5c` with Modal v3.2. Strict Host/SNI enforcement, the public sample API and a consented upload-to-export run are verified. P2/P3 evidence was regenerated from a 573-node/828-edge MultiGraph, and v3.2 remains production because the higher-scoring graph-first candidate lacks a deployable upstream license. O1, the 2026-09-29 audit fixes (F12/O2), HTML cache revalidation (OPS-3) and the browser upload timeout fix (F13) are live, and the X1 backup demo was captured from that release.
 
 ## What it does
 
@@ -155,7 +155,7 @@ CI runs Python tests and production dependency smoke plus TypeScript, lint, unit
 2. **A45 (complete):** fix resilience/inference protocol correctness, simplify code and measure performance.
 3. **A46 (complete):** graph-first candidate passed the routing gate but was blocked from deployment by its missing upstream license.
 4. **F9 (complete):** the Next.js/React/MapLibre experience and FastAPI replacement are live.
-5. **O1 (complete) → X1 (ready):** capture the final backup demo from the approved release.
+5. **O1 → X1 (complete):** the final backup demo was captured from the approved release on 2026-09-29.
 
 See [Tracker.md](docs/Tracker.md) for status and [bugs.md](bugs.md) for the current issue ledger.
 
