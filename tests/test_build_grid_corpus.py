@@ -65,7 +65,7 @@ def test_tile_drop_reason_checks_leakage_first():
     road = np.ones((4, 4), np.uint8)
     land = box(-1000, -1000, 1000, 1000)
     far = box(5000, 5000, 5001, 5001)
-    assert bg.tile_drop_reason(tile, land, box(200, 200, 300, 300), np.zeros((4, 4))) == "spacenet"
+    assert bg.tile_drop_reason(tile, land, box(200, 200, 300, 300), np.zeros((4, 4))) == "heldout"
     assert bg.tile_drop_reason(tile, box(0, 0, 256, 20), far, road) == "land"      # ~8% land
     assert bg.tile_drop_reason(tile, land, far, np.zeros((4, 4))) == "road"
     assert bg.tile_drop_reason(tile, land, far, road) is None
@@ -105,6 +105,17 @@ def test_cached_fetcher_never_caches_a_non_image(tmp_path, monkeypatch):
     assert not any(p.is_file() for p in tmp_path.rglob("*"))
 
 
+def test_load_boundary_picks_the_local_utm_zone(tmp_path):
+    import geopandas as gpd
+
+    path = tmp_path / "boundary.gpkg"
+    gpd.GeoDataFrame(geometry=[box(88.30, 22.50, 88.40, 22.60)], crs="EPSG:4326").to_file(path)
+    geom, crs = bg.load_boundary(path)                          # Kolkata -> UTM 45N
+    assert crs == "EPSG:32645" and geom.area > 1e8
+    with pytest.raises(SystemExit, match="osm-boundary"):
+        bg.load_boundary(tmp_path / "missing.gpkg")
+
+
 def test_load_sources_reads_local_file_and_fails_clearly_without_it(tmp_path):
     with pytest.raises(SystemExit, match="imagery_url"):
         bg.load_sources(tmp_path / "sources.json")
@@ -112,9 +123,28 @@ def test_load_sources_reads_local_file_and_fails_clearly_without_it(tmp_path):
     assert bg.load_sources(tmp_path / "sources.json") == ("a/{z}", "b/{z}")
 
 
-def test_spacenet_exclusion_refuses_to_run_without_chips(tmp_path):
+def test_exclusion_zone_refuses_to_run_without_chips(tmp_path):
     with pytest.raises(FileNotFoundError, match="leakage guard"):
-        bg.spacenet_exclusion(tmp_path)
+        bg.exclusion_zone(tmp_path)
+
+
+def test_exclusion_zone_covers_held_out_indian_eval_aois(tmp_path):
+    import rasterio
+    from rasterio.transform import from_origin
+    from rasterio.warp import transform_bounds
+
+    from src.pipeline.p1_segment.build_finetune_data import DEFAULT_CITIES
+
+    with rasterio.open(tmp_path / "chip1.tif", "w", driver="GTiff", width=2, height=2, count=1,
+                       dtype="uint8", crs="EPSG:4326",
+                       transform=from_origin(72.90, 19.10, 0.001, 0.001)) as dst:
+        dst.write(np.zeros((1, 2, 2), np.uint8))
+    crs = "EPSG:32643"                                          # Bengaluru and Delhi share UTM 43N
+    zone, n = bg.exclusion_zone(tmp_path, crs)
+    assert n == 1
+    for aoi in ("bengaluru_indiranagar", "delhi_cp", "mumbai_bandra"):
+        aoi_box = box(*transform_bounds("EPSG:4326", crs, *DEFAULT_CITIES[aoi]))
+        assert zone.contains(aoi_box.centroid), aoi
 
 
 def test_rgba_mosaic_and_warp_keep_the_overlay_alpha():

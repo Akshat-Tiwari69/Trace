@@ -1,14 +1,16 @@
-"""A50 data prep: a Greater Mumbai (satellite, road-mask) corpus on a 1024 m grid.
+"""A50 data prep: an Indian city's (satellite, road-mask) corpus on a 1024 m grid.
 
-Scripted, corrected version of a manual QGIS tiling project: a 1024 m grid over
-the Greater Mumbai boundary, with imagery and road labels rendered from a
-third-party XYZ web-map source (an imagery layer plus a roads-only overlay on a
-transparent background). The two URL templates live only in the local, ignored
-``<root>/sources.json``; they are never committed.
+Scripted, corrected version of a manual QGIS tiling project (built first for
+Greater Mumbai): a 1024 m grid over a city boundary, with imagery and road labels
+rendered from a third-party XYZ web-map source (an imagery layer plus a roads-only
+overlay on a transparent background). The two URL templates live only in the
+local, ignored ``data/raw/grid_sources.json``; they are never committed.
 
-1. **Grid** -- 1024 m UTM-43N cells from the boundary's top-left corner that
-   intersect it (529 cells for Greater Mumbai), rendered at 0.5 m/px plus a pad
-   so centrelines do not fray at cell edges.
+1. **Grid** -- 1024 m cells in the city's local UTM zone, anchored at the
+   boundary's top-left corner and intersecting it (529 cells for Greater Mumbai),
+   rendered at 0.5 m/px plus a pad so centrelines do not fray at cell edges.
+   The boundary is ``data/raw/<city>_grid/boundary.gpkg`` (fetched once from OSM
+   with ``--osm-boundary`` when missing).
 2. **Pinned zoom** -- imagery and overlay are both fetched at XYZ z19 and warped
    onto the cell grid (QGIS picked a zoom per layer from the output scale).
 3. **Clean overlay** -- the road mask is the overlay's **alpha** channel (the old
@@ -19,7 +21,8 @@ transparent background). The two URL templates live only in the local, ignored
 5. **Width** -- the overlay's cartographic stroke is skeletonised and re-buffered
    to ~6 m, the SpaceNet label convention (``build_spacenet_data``, buffer_m=6).
 6. **Leakage** -- tiles within ``EXCLUDE_BUFFER_M`` of ANY SpaceNet-5 Mumbai chip
-   are dropped, so no corpus pixel is near a test, validation or selection chip.
+   or held-out Indian eval AOI are dropped, so no corpus pixel is near a test,
+   validation or selection area.
 7. **Filtering** -- tiles under 10% land or 0.5% road are dropped.
 
 ``--check`` scores the overlay centrelines *as if they were a prediction* on the
@@ -29,8 +32,13 @@ v3.2): it measures whether these labels agree with what the promotion gate grade
 Provenance: the provider's terms restrict bulk download and redistribution, so
 everything stays local under ignored ``data/raw/`` and is never committed.
 
+``--min-agreement 0`` keeps every cell: use it for test-only cities, where dropping
+cells v3.2 disagrees with would bias the test toward v3.2.
+
     python -m src.pipeline.p1_segment.build_grid_corpus --check --v32 models/road_pan.pt
-    python -m src.pipeline.p1_segment.build_grid_corpus --v32 models/road_pan.pt --cells 6,6
+    python -m src.pipeline.p1_segment.build_grid_corpus --city mumbai --device cuda
+    python -m src.pipeline.p1_segment.build_grid_corpus --city kolkata --device cuda \\
+        --osm-boundary "Kolkata, West Bengal, India" --min-agreement 0
 """
 from __future__ import annotations
 
@@ -66,7 +74,6 @@ EXCLUDE_BUFFER_M = 256.0  # one tile width around every SpaceNet chip
 MIN_LAND = 0.10
 MIN_ROAD = 0.005
 FETCH_THREADS = 8
-ROOT = Path("data/raw/mumbai_grid")
 
 
 def load_sources(path: Path) -> tuple[str, str]:
@@ -132,13 +139,16 @@ def grid_cells(boundary, cell_m: float = CELL_M) -> list[tuple[int, int, object]
     return cells
 
 
-def spacenet_exclusion(rgb_dir: Path, buffer_m: float = EXCLUDE_BUFFER_M):
-    """Union of every SpaceNet chip footprint (UTM), buffered. Fails loud when empty:
-    a silently empty exclusion zone would leak the benchmark into training."""
+def exclusion_zone(rgb_dir: Path, crs: str = UTM, buffer_m: float = EXCLUDE_BUFFER_M):
+    """Buffered union of every SpaceNet chip footprint and every held-out Indian eval
+    AOI (``build_finetune_data.DEFAULT_CITIES``), in ``crs``. Fails loud without the
+    chips: a silently empty zone would leak the benchmark into training."""
     import rasterio
     from rasterio.warp import transform_bounds
     from shapely.geometry import box
     from shapely.ops import unary_union
+
+    from src.pipeline.p1_segment.build_finetune_data import DEFAULT_CITIES
 
     tifs = sorted(Path(rgb_dir).glob("*.tif"))
     if not tifs:
@@ -146,7 +156,9 @@ def spacenet_exclusion(rgb_dir: Path, buffer_m: float = EXCLUDE_BUFFER_M):
     zones = []
     for tif in tifs:
         with rasterio.open(tif) as src:
-            zones.append(box(*transform_bounds(src.crs, UTM, *src.bounds)).buffer(buffer_m))
+            zones.append(box(*transform_bounds(src.crs, crs, *src.bounds)).buffer(buffer_m))
+    for bbox in DEFAULT_CITIES.values():
+        zones.append(box(*transform_bounds("EPSG:4326", crs, *bbox)).buffer(buffer_m))
     return unary_union(zones), len(tifs)
 
 
@@ -196,7 +208,7 @@ def rebuffer(skeleton: np.ndarray, half_width_px: int = ROAD_HALF_WIDTH_PX) -> n
 def tile_drop_reason(tile_box, boundary, exclusion, mask: np.ndarray) -> str | None:
     """Why a tile is not written (``None`` = keep). Leakage is checked first."""
     if tile_box.intersects(exclusion):
-        return "spacenet"
+        return "heldout"
     if tile_box.intersection(boundary).area / tile_box.area < MIN_LAND:
         return "land"
     if float(mask.mean()) < MIN_ROAD:
@@ -204,12 +216,12 @@ def tile_drop_reason(tile_box, boundary, exclusion, mask: np.ndarray) -> str | N
     return None
 
 
-def _centerlines_geojson(skeleton: np.ndarray, transform) -> dict:
+def _centerlines_geojson(skeleton: np.ndarray, transform, crs: str = UTM) -> dict:
     """Skeleton -> WGS84 LineString FeatureCollection (graph labels for A18-style work)."""
     from src.pipeline.p2_graph.skeleton_graph import reproject_graph_to_wgs84, skeleton_to_graph
 
     graph = skeleton_to_graph(skeleton, transform=transform)
-    reproject_graph_to_wgs84(graph, UTM)
+    reproject_graph_to_wgs84(graph, crs)
     return {"type": "FeatureCollection", "features": [
         {"type": "Feature", "properties": {"length_m": round(float(d["length_m"]), 2)},
          "geometry": {"type": "LineString", "coordinates": d["geometry"]}}
@@ -217,8 +229,12 @@ def _centerlines_geojson(skeleton: np.ndarray, transform) -> dict:
 
 
 def build_cell(row: int, col: int, cell, boundary, exclusion, fetch_sat, fetch_roads,
-               model, device: str, root: Path, min_agreement: float) -> dict:
-    """Render, register, re-label and tile one grid cell. Returns its manifest record."""
+               model, device: str, root: Path, min_agreement: float,
+               crs: str = UTM, prefix: str = "mumbai") -> dict:
+    """Render, register, re-label and tile one grid cell. Returns its manifest record.
+
+    ``min_agreement <= 0`` keeps every cell (test cities: dropping cells where v3.2
+    disagrees would bias the test toward v3.2)."""
     from affine import Affine
     from PIL import Image
     from rasterio.warp import transform_bounds
@@ -244,10 +260,10 @@ def build_cell(row: int, col: int, cell, boundary, exclusion, fetch_sat, fetch_r
     pad_m = PAD_PX * GSD_M
     size = CELL_PX + 2 * PAD_PX
     padded = Affine(GSD_M, 0.0, left - pad_m, 0.0, -GSD_M, top + pad_m)
-    bbox = transform_bounds(UTM, "EPSG:4326", left - pad_m, bottom - pad_m,
+    bbox = transform_bounds(crs, "EPSG:4326", left - pad_m, bottom - pad_m,
                             right + pad_m, top + pad_m)
-    sat = render(bbox, fetch_sat, "RGB", UTM, padded, (size, size))
-    skeleton = skeletonize(render(bbox, fetch_roads, "RGBA", UTM, padded, (size, size))[..., 3] >= 128)
+    sat = render(bbox, fetch_sat, "RGB", crs, padded, (size, size))
+    skeleton = skeletonize(render(bbox, fetch_roads, "RGBA", crs, padded, (size, size))[..., 3] >= 128)
     if not skeleton.any():
         return {**record, "status": "no_roads", "kept": 0}
 
@@ -262,16 +278,16 @@ def build_cell(row: int, col: int, cell, boundary, exclusion, fetch_sat, fetch_r
     dy, dx, score, score0 = best_shift(prob, skeleton[y0:y0 + win, x0:x0 + win])
     record.update({"shift_px": [dy, dx], "agreement": round(score, 4),
                    "agreement_unshifted": round(score0, 4)})
-    if score < min_agreement or max(abs(dy), abs(dx)) == SHIFT_PX:
+    if min_agreement > 0 and (score < min_agreement or max(abs(dy), abs(dx)) == SHIFT_PX):
         return {**record, "status": "low_agreement", "kept": 0}
 
     crop = slice(PAD_PX, PAD_PX + CELL_PX)
     skeleton = shift_mask(skeleton, dy, dx)[crop, crop]
     mask, sat = rebuffer(skeleton), sat[crop, crop]
-    stem = f"mgrid_{row:02d}_{col:02d}"
+    stem = f"{prefix}_{row:02d}_{col:02d}"
     pairs = root / "dg_format"
     pairs.mkdir(parents=True, exist_ok=True)
-    dropped = {"spacenet": 0, "land": 0, "road": 0}
+    dropped = {"heldout": 0, "land": 0, "road": 0}
     keep = np.zeros_like(skeleton)            # centrelines only where tiles survive
     for st, mt in zip(tile_array(sat, TILE_PX), tile_array(mask, TILE_PX)):
         reason = tile_drop_reason(boxes[mt.row, mt.col], boundary, exclusion, mt.data)
@@ -287,7 +303,7 @@ def build_cell(row: int, col: int, cell, boundary, exclusion, fetch_sat, fetch_r
         lines = root / "centerlines" / f"{stem}.geojson"
         lines.parent.mkdir(parents=True, exist_ok=True)
         lines.write_text(json.dumps(_centerlines_geojson(
-            skeleton & keep, Affine(GSD_M, 0.0, left, 0.0, -GSD_M, top))))
+            skeleton & keep, Affine(GSD_M, 0.0, left, 0.0, -GSD_M, top), crs)))
     return {**record, "status": "ok", "kept": kept, "dropped": dropped}
 
 
@@ -355,31 +371,46 @@ def check_agreement(fetch_roads, v32: Path | None, device: str = "cpu",
     return report
 
 
-def _load_boundary(path: Path):
+def load_boundary(path: Path, osm_query: str | None = None):
+    """``(boundary geometry, its local UTM CRS)``; fetched once from OSM if missing."""
     import geopandas as gpd
 
-    return gpd.read_file(path).to_crs(UTM).geometry.unary_union
+    path = Path(path)
+    if not path.is_file():
+        if not osm_query:
+            raise SystemExit(f"missing {path}: pass --osm-boundary '<city, state, India>' to fetch it")
+        import osmnx as ox
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ox.geocode_to_gdf(osm_query)[["geometry"]].to_file(path, driver="GPKG")
+    gdf = gpd.read_file(path)
+    crs = gdf.estimate_utm_crs().to_string()
+    return gdf.to_crs(crs).geometry.unary_union, crs
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="A50: Greater Mumbai 1024 m grid corpus.")
+    p = argparse.ArgumentParser(description="A50: 1024 m grid corpus for an Indian city.")
     p.add_argument("--check", action="store_true",
                    help="score overlay labels vs SpaceNet GT on the 127 held-out chips; build nothing")
+    p.add_argument("--city", default="mumbai", help="city id: output data/raw/<city>_grid, file prefix")
+    p.add_argument("--osm-boundary", default=None,
+                   help="OSM geocoder query used once when <root>/boundary.gpkg is missing")
     p.add_argument("--v32", default="models/road_pan.pt", help="checkpoint for registration / check")
     p.add_argument("--device", default="cpu")
-    p.add_argument("--root", default=str(ROOT), help="output root (gitignored)")
-    p.add_argument("--sources", default=None, help="local XYZ sources JSON (default <root>/sources.json)")
-    p.add_argument("--boundary", default=str(ROOT / "greater_mumbai_boundary_clean.gpkg"))
+    p.add_argument("--root", default=None, help="output root (default data/raw/<city>_grid, ignored)")
+    p.add_argument("--sources", default="data/raw/grid_sources.json", help="local XYZ sources JSON")
+    p.add_argument("--boundary", default=None, help="boundary file (default <root>/boundary.gpkg)")
     p.add_argument("--cells", nargs="*", default=None, help="only these 'row,col' cells (pilot)")
     p.add_argument("--min-agreement", type=float, default=0.2,
-                   help="drop a cell whose best registered v3.2 agreement is below this")
+                   help="drop a cell whose best registered v3.2 agreement is below this; "
+                        "0 keeps every cell (use for test-only cities)")
     p.add_argument("--n-chips", type=int, default=None, help="--check: subsample chips")
     p.add_argument("--n-samples", type=int, default=None, help="--check: APLS samples per chip")
     p.add_argument("--out", default=".tmp/a50_label_check.json", help="--check report")
     args = p.parse_args()
 
-    root = Path(args.root)
-    imagery_url, roads_url = load_sources(Path(args.sources) if args.sources else root / "sources.json")
+    root = Path(args.root or f"data/raw/{args.city}_grid")
+    imagery_url, roads_url = load_sources(Path(args.sources))
     fetch_roads = cached_fetcher(roads_url, root / "cache" / "roads")
     if args.check:
         from src.pipeline.p1_segment.chip_apls_eval import _write_report
@@ -392,8 +423,8 @@ def main() -> None:
     from src.pipeline.p1_segment.chip_apls_eval import SRC_RGB
     from src.pipeline.p1_segment.model import load_checkpoint
 
-    boundary = _load_boundary(Path(args.boundary))
-    exclusion, n_chips = spacenet_exclusion(SRC_RGB)
+    boundary, crs = load_boundary(Path(args.boundary or root / "boundary.gpkg"), args.osm_boundary)
+    exclusion, n_chips = exclusion_zone(SRC_RGB, crs)
     cells = grid_cells(boundary)
     if args.cells:
         wanted = {tuple(int(v) for v in rc.split(",")) for rc in args.cells}
@@ -404,8 +435,8 @@ def main() -> None:
 
     root.mkdir(parents=True, exist_ok=True)
     (root / "provenance.json").write_text(json.dumps({     # local-only, ignored
-        "task": "A50", "imagery_url": imagery_url, "roads_url": roads_url,
-        "zoom": ZOOM, "gsd_m": GSD_M, "cell_m": CELL_M, "crs": UTM,
+        "task": "A50", "city": args.city, "imagery_url": imagery_url, "roads_url": roads_url,
+        "zoom": ZOOM, "gsd_m": GSD_M, "cell_m": CELL_M, "crs": crs,
         "registration_model": Path(args.v32).name,
         "min_agreement": args.min_agreement, "spacenet_chips_excluded": n_chips,
         "exclude_buffer_m": EXCLUDE_BUFFER_M, "min_land": MIN_LAND, "min_road": MIN_ROAD,
@@ -424,13 +455,13 @@ def main() -> None:
                 done.add((rec["row"], rec["col"]))
 
     todo = [c for c in cells if (c[0], c[1]) not in done]
-    print(f"A50: {len(cells)} cells, {len(done)} done, {len(todo)} to build "
-          f"({n_chips} SpaceNet chips excluded)", flush=True)
+    print(f"A50 {args.city} ({crs}): {len(cells)} cells, {len(done)} done, {len(todo)} to build "
+          f"({n_chips} SpaceNet chips + held-out eval AOIs excluded)", flush=True)
     failed = 0
     for i, (row, col, cell) in enumerate(todo, 1):
         try:
             rec = build_cell(row, col, cell, boundary, exclusion, fetch_sat, fetch_roads,
-                             model, args.device, root, args.min_agreement)
+                             model, args.device, root, args.min_agreement, crs, args.city)
         except Exception as exc:          # one cell's failure must not abort the city
             rec = {"row": row, "col": col, "status": "failed", "error": f"{type(exc).__name__}: {exc}"}
             failed += 1
