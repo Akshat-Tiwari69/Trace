@@ -73,7 +73,7 @@ SHIFT_PX = 10             # registration search radius (5 m)
 EXCLUDE_BUFFER_M = 256.0  # one tile width around every SpaceNet chip
 MIN_LAND = 0.10
 MIN_ROAD = 0.005
-FETCH_THREADS = 8
+FETCH_THREADS = 4         # 8 drew bursts of connection resets on a full-city build
 
 
 def load_sources(path: Path) -> tuple[str, str]:
