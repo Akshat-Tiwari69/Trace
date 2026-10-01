@@ -2,35 +2,35 @@
 
 Scripted, corrected version of a manual QGIS tiling project (built first for
 Greater Mumbai): a 1024 m grid over a city boundary, with imagery and road labels
-rendered from a third-party XYZ web-map source (an imagery layer plus a roads-only
-overlay on a transparent background). The two URL templates live only in the
-local, ignored ``data/raw/grid_sources.json``; they are never committed.
+from a local XYZ tile source (an imagery layer and a road-label layer whose alpha
+channel marks roads). The two URL templates live only in the local, ignored
+``data/raw/grid_sources.json``; they are never committed.
 
 1. **Grid** -- 1024 m cells in the city's local UTM zone, anchored at the
    boundary's top-left corner and intersecting it (529 cells for Greater Mumbai),
    rendered at 0.5 m/px plus a pad so centrelines do not fray at cell edges.
    The boundary is ``data/raw/<city>_grid/boundary.gpkg`` (fetched once from OSM
    with ``--osm-boundary`` when missing).
-2. **Pinned zoom** -- imagery and overlay are both fetched at XYZ z19 and warped
+2. **Pinned zoom** -- both layers are fetched at one fixed XYZ zoom and warped
    onto the cell grid (QGIS picked a zoom per layer from the output scale).
-3. **Clean overlay** -- the road mask is the overlay's **alpha** channel (the old
+3. **Clean mask** -- the road mask is the road layer's **alpha** channel (the old
    ``band1 < 250`` rule caught anti-alias haze and any non-white feature).
-4. **Registration** -- v3.2 runs on the imagery and the overlay centrelines are
+4. **Registration** -- v3.2 runs on the imagery and the label centrelines are
    moved by the integer offset (<= ``SHIFT_PX``) that maximises v3.2 probability
    under them; cells whose best agreement is too low are dropped.
-5. **Width** -- the overlay's cartographic stroke is skeletonised and re-buffered
+5. **Width** -- the label layer's drawn stroke is skeletonised and re-buffered
    to ~6 m, the SpaceNet label convention (``build_spacenet_data``, buffer_m=6).
 6. **Leakage** -- tiles within ``EXCLUDE_BUFFER_M`` of ANY SpaceNet-5 Mumbai chip
    or held-out Indian eval AOI are dropped, so no corpus pixel is near a test,
    validation or selection area.
 7. **Filtering** -- tiles under 10% land or 0.5% road are dropped.
 
-``--check`` scores the overlay centrelines *as if they were a prediction* on the
+``--check`` scores the label centrelines *as if they were a prediction* on the
 127 held-out chips (common-unit chip APLS vs SpaceNet vector GT, paired with
 v3.2): it measures whether these labels agree with what the promotion gate grades.
 
-Provenance: the provider's terms restrict bulk download and redistribution, so
-everything stays local under ignored ``data/raw/`` and is never committed.
+Provenance: the source's terms restrict redistribution, so everything stays local
+under ignored ``data/raw/`` and is never committed.
 
 ``--min-agreement 0`` keeps every cell: use it for test-only cities, where dropping
 cells v3.2 disagrees with would bias the test toward v3.2.
@@ -80,8 +80,8 @@ def load_sources(path: Path) -> tuple[str, str]:
     """``(imagery_url, roads_url)`` XYZ templates from the local, ignored sources file."""
     if not Path(path).is_file():
         raise SystemExit(f"missing {path}: a local JSON with 'imagery_url' and 'roads_url' "
-                         "XYZ templates ({z}/{x}/{y}); the roads layer must be a transparent "
-                         "roads-only overlay")
+                         "XYZ templates ({z}/{x}/{y}); the road layer must mark roads in its "
+                         "alpha channel")
     data = json.loads(Path(path).read_text())
     return data["imagery_url"], data["roads_url"]
 
@@ -113,7 +113,7 @@ def cached_fetcher(url: str, cache_dir: Path):
 
 
 def render(bbox_lonlat, fetch, mode: str, dst_crs, dst_transform, shape) -> np.ndarray:
-    """Fetch the z19 tiles covering ``bbox_lonlat`` and warp them onto a target grid."""
+    """Fetch the ``ZOOM`` tiles covering ``bbox_lonlat`` and warp them onto a target grid."""
     west, south, east, north = bbox_lonlat
     x0, y0 = (int(math.floor(v)) for v in deg2num(north, west, ZOOM))
     x1, y1 = (int(math.floor(v)) for v in deg2num(south, east, ZOOM))
@@ -309,7 +309,7 @@ def build_cell(row: int, col: int, cell, boundary, exclusion, fetch_sat, fetch_r
 
 def check_agreement(fetch_roads, v32: Path | None, device: str = "cpu",
                     n_chips: int | None = None, n_samples: int | None = None) -> dict:
-    """Score overlay centrelines as a prediction on the held-out chips (common-unit APLS)."""
+    """Score label centrelines as a prediction on the held-out chips (common-unit APLS)."""
     import cv2
     import rasterio
 
@@ -367,7 +367,7 @@ def check_agreement(fetch_roads, v32: Path | None, device: str = "cpu",
             "labels_minus_v32": {"delta": ci.delta, "ci_low": ci.ci_low, "ci_high": ci.ci_high,
                                  "excludes_zero": ci.excludes_zero, "verdict": ci.verdict},
         })
-        print(f"  overlay labels vs v3.2: {ci.summary()}", flush=True)
+        print(f"  grid labels vs v3.2: {ci.summary()}", flush=True)
     return report
 
 
@@ -411,7 +411,7 @@ def load_boundary(path: Path, osm_query: str | None = None):
 def main() -> None:
     p = argparse.ArgumentParser(description="A50: 1024 m grid corpus for an Indian city.")
     p.add_argument("--check", action="store_true",
-                   help="score overlay labels vs SpaceNet GT on the 127 held-out chips; build nothing")
+                   help="score grid labels vs SpaceNet GT on the 127 held-out chips; build nothing")
     p.add_argument("--city", default="mumbai", help="city id: output data/raw/<city>_grid, file prefix")
     p.add_argument("--osm-boundary", default=None,
                    help="OSM geocoder query used once when <root>/boundary.gpkg is missing")

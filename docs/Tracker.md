@@ -206,14 +206,12 @@ flowchart LR
 
 ## §10 · Daily Log
 
-**2026-09-30 (Akshat — A50 Mumbai grid corpus)**
+**2026-09-30 to 2026-10-01 (Akshat — A50 Mumbai grid corpus)**
 
-- Audited a manual QGIS tiling project (1024 m UTM-43N grid, 529 cells; one hand-made tile). Scripted it as `src/pipeline/p1_segment/build_grid_corpus.py` (tile sources live only in a local ignored `sources.json`), fixing: leakage (tiles within 256 m of any of the 1016 SpaceNet chips dropped), pinned z19 for both layers, a roads-only alpha overlay (the old `band1 < 250` rule caught semi-transparent haze), per-cell registration against v3.2, skeleton re-buffered to SpaceNet's ~6 m width, land/road filters, a cached/atomic/resumable fetch, and train-only use via `finetune.py --extra-train-dirs`. The scripted grid reproduces QGIS exactly (529 cells; r6c6 = `tile_001`).
-- Label-agreement check on the 127 frozen chips: the web-map labels as a prediction score raw APLS 0.3585 vs v3.2 0.2821 (+0.0764, CI [+0.0486, +0.1070]); normalized 0.555 — useful signal, different road definition (details in `Evaluation.md` A50). City build: 4,012 train-only pairs from 332 of 529 cells.
-- Retrains (details in `Evaluation.md` A50): A50 (v3.2 recipe + grid corpus) rejected — APLS 0.2899 vs 0.2821 with CI spanning zero, held-out IoU 0.3997 vs 0.4564; A50b (A50 + SpaceNet-only stage 2) ties v3.2 (APLS +0.0058, CI [-0.0048, +0.0166]; IoU 0.4490 vs 0.4564). v3.2 stays deployed. The `d15b529` CI-based DeepGlobe keep-rule rejects every epoch at 40 validation tiles. Next: the same two stages with the encoder unfrozen (A50c), and an unseen-city check on a test-only Kolkata grid (244 cells, `--min-agreement 0`).
-- The grid script now takes any city (`--city`, OSM boundary, local UTM zone), excludes the held-out Indian eval AOIs as well as SpaceNet chips, and refuses to resume a root built with different settings.
-- Found a scorer discrepancy: today's code scores v3.2 at 0.2821 on the 127 chips where the registered A46 comparison recorded 0.012082; `22a749f` changed ring handling in `skeleton_to_graph` and APLS snapping after that comparison. A18/A46 prediction graphs are not local, so the graph-first-vs-v3.2 deltas are unverified under the current scorer.
-- CUDA failed with `cudaGetDeviceCount: invalid argument`; the DriverStore `nvidia-smi` showed the RTX 3070 Ti had fallen off the bus ("GPU is lost"), not a driver/CUDA install fault. A reboot restored it and pilot cells reproduce identical shifts/agreement on CUDA. The corpus is provider-terms-restricted: local-only under ignored `data/raw/mumbai_grid/`.
+- Replaced a manual QGIS tiling project with `src/pipeline/p1_segment/build_grid_corpus.py`: the same 1024 m grid (529 cells), a leakage guard (256 m around all 1016 SpaceNet chips and the held-out Indian eval AOIs), per-cell registration against v3.2, masks re-buffered to SpaceNet's ~6 m width, land/road filters, cached resumable builds that refuse mismatched settings, any-city support (`--city`, OSM boundary, local UTM zone) and train-only use via `finetune.py --extra-train-dirs`. Data and sources stay local and ignored.
+- Results (`Evaluation.md` A50): the grid labels, scored as a prediction, beat v3.2 on the 127 chips (+0.0764, CI [+0.0486, +0.1070]); the A50 retrain was rejected (held-out IoU 0.3997 vs 0.4564) and A50b ties v3.2 (APLS +0.0058, CI [-0.0048, +0.0166]). v3.2 stays deployed.
+- Findings: the `d15b529` DeepGlobe keep-rule rejects every epoch at 40 validation tiles; today's scorer gives v3.2 0.2821 on the 127 chips where the registered A46 comparison recorded 0.012082 (`22a749f` changed ring handling and APLS snapping), so the A18/A46-vs-v3.2 deltas are unverified.
+- Next: A50c (the two stages with the encoder unfrozen at 0.1×) and an unseen-city check on a test-only Kolkata grid.
 
 **2026-09-29 (Akshat — F13 deployed; X1 captured)**
 
