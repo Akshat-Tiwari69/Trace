@@ -131,7 +131,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F12** | ✅ | Fix the 2026-09-29 audit findings | Akshat | — | Empty `failed=` URL no longer pre-fails J-0 (unit regression); Recover singular count and per-junction Restore names; no "ready to add" for an already-failed junction; `next` 16.3.6 plus non-breaking audit fixes (npm advisories 11 → 3); frontend gates and browser journeys green; PR opened into `dev` |
 | **F13** | ✅ | Let uploads wait for the GPU call | Akshat | — | The upload POST uses `UPLOAD_TIMEOUT_MS` (390 s, above the server's worst-case Modal retry budget of ~365 s) instead of the 10 s default; unit regression; frontend gates green; PR opened into `dev` |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
-| **A50** | 🔄 | Scripted Google-labelled Greater Mumbai corpus (replaces the manual QGIS "Dataset Maker") | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS (needs a working local GPU) |
+| **A50** | 🔄 | Scripted Google-labelled Greater Mumbai corpus (replaces the manual QGIS "Dataset Maker") | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **X1** | ✅ | Final backup demo capture | Akshat | F9, O1, O2, F13 deployed | Live `12d0a5c` capture of the sample flow and a cold-start browser upload: 9 screenshots, both exports, `capture.json` and `x1-demo.webm` (SHA-256 `498bd8fd…c91fb8ee`) under ignored `.tmp/x1/20260929T1642Z/` |
 
 ### Research backlog disposition
@@ -200,7 +200,7 @@ flowchart LR
 - **Deployment:** Oracle is live at exact commit `12d0a5c0fd510b347537c69b35c78d60c9bf5c99` (O2 + OPS-3 + F13) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, simulation, and a public upload-to-export run are verified.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** A50 — build the Google Mumbai corpus, re-score the A18/A46 graphs under the current scorer, then the gated retrain once a GPU works. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
+- **Immediate work:** A50 — build the Google Mumbai corpus, re-score the A18/A46 graphs under the current scorer, then the gated retrain on the local GPU. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
 
 ---
 
@@ -211,7 +211,7 @@ flowchart LR
 - Audited the manual QGIS "Dataset Maker" project (1024 m UTM-43N grid, 529 cells; one hand-made Google tile). Scripted it as `src/pipeline/p1_segment/build_google_data.py`, fixing: leakage (tiles within 256 m of any of the 1016 SpaceNet chips dropped), pinned z19 for both layers, a roads-only alpha overlay (the old `band1 < 250` rule caught semi-transparent haze), per-cell registration against v3.2, skeleton re-buffered to SpaceNet's ~6 m width, land/road filters, a cached/atomic/resumable fetch, and train-only use via `finetune.py --extra-train-dirs`. The scripted grid reproduces QGIS exactly (529 cells; r6c6 = `tile_001`).
 - Label-agreement check on the 127 frozen chips: Google labels as a prediction score raw APLS 0.3585 vs v3.2 0.2821 (+0.0764, CI [+0.0486, +0.1070]); normalized 0.555 — useful signal, different road definition (details in `Evaluation.md` A50). Pilot registration found a consistent 3.5–4.5 m east offset between Google's road vectors and its imagery.
 - Found a scorer discrepancy: today's code scores v3.2 at 0.2821 on the 127 chips where the registered A46 comparison recorded 0.012082; `22a749f` changed ring handling in `skeleton_to_graph` and APLS snapping after that comparison. A18/A46 prediction graphs are not local, so the graph-first-vs-v3.2 deltas are unverified under the current scorer.
-- The local NVIDIA driver is broken (`cudaGetDeviceCount` invalid argument; `nvidia-smi` missing), so A50 ran on CPU and the retrain waits for a GPU. Data is Google-terms-restricted: local-only under ignored `data/raw/google_mumbai/`.
+- CUDA failed with `cudaGetDeviceCount: invalid argument`; the DriverStore `nvidia-smi` showed the RTX 3070 Ti had fallen off the bus ("GPU is lost"), not a driver/CUDA install fault. A reboot restored it and pilot cells reproduce identical shifts/agreement on CUDA. Data is Google-terms-restricted: local-only under ignored `data/raw/google_mumbai/`.
 
 **2026-09-29 (Akshat — F13 deployed; X1 captured)**
 
