@@ -371,6 +371,26 @@ def check_agreement(fetch_roads, v32: Path | None, device: str = "cpu",
     return report
 
 
+PROVENANCE_KEYS = ("imagery_url", "roads_url", "zoom", "gsd_m", "cell_m", "crs",
+                   "registration_model", "min_agreement", "exclude_buffer_m",
+                   "min_land", "min_road", "road_width_px")
+
+
+def record_provenance(path: Path, settings: dict) -> None:
+    """Write the build settings, refusing to resume a root built with different ones.
+
+    The tile cache and ``cells.jsonl`` are keyed only by position, so resuming
+    under changed sources/parameters would silently mix two corpora."""
+    if path.is_file():
+        old = json.loads(path.read_text())
+        changed = [k for k in PROVENANCE_KEYS if old.get(k) != settings.get(k)]
+        if changed:
+            raise SystemExit(f"{path} was built with different settings ({', '.join(changed)}); "
+                             "use a new --root or remove the old outputs and cache")
+    stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
+    path.write_text(json.dumps({**settings, "updated_utc": stamp}, indent=2))
+
+
 def load_boundary(path: Path, osm_query: str | None = None):
     """``(boundary geometry, its local UTM CRS)``; fetched once from OSM if missing."""
     import geopandas as gpd
@@ -434,15 +454,14 @@ def main() -> None:
     fetch_sat = cached_fetcher(imagery_url, root / "cache" / "sat")
 
     root.mkdir(parents=True, exist_ok=True)
-    (root / "provenance.json").write_text(json.dumps({     # local-only, ignored
+    record_provenance(root / "provenance.json", {     # local-only, ignored
         "task": "A50", "city": args.city, "imagery_url": imagery_url, "roads_url": roads_url,
         "zoom": ZOOM, "gsd_m": GSD_M, "cell_m": CELL_M, "crs": crs,
         "registration_model": Path(args.v32).name,
         "min_agreement": args.min_agreement, "spacenet_chips_excluded": n_chips,
         "exclude_buffer_m": EXCLUDE_BUFFER_M, "min_land": MIN_LAND, "min_road": MIN_ROAD,
         "road_width_px": 2 * ROAD_HALF_WIDTH_PX + 1,
-        "updated_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-    }, indent=2))
+    })
     manifest = root / "cells.jsonl"
     done = set()
     if manifest.is_file():     # resume: every recorded non-failed cell is final

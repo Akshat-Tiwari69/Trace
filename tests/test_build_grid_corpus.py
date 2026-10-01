@@ -116,6 +116,15 @@ def test_load_boundary_picks_the_local_utm_zone(tmp_path):
         bg.load_boundary(tmp_path / "missing.gpkg")
 
 
+def test_record_provenance_refuses_to_resume_with_changed_settings(tmp_path):
+    path = tmp_path / "provenance.json"
+    settings = {k: 1 for k in bg.PROVENANCE_KEYS}
+    bg.record_provenance(path, settings)
+    bg.record_provenance(path, {**settings, "city": "x"})          # non-build key: fine
+    with pytest.raises(SystemExit, match="roads_url"):
+        bg.record_provenance(path, {**settings, "roads_url": 2})
+
+
 def test_load_sources_reads_local_file_and_fails_clearly_without_it(tmp_path):
     with pytest.raises(SystemExit, match="imagery_url"):
         bg.load_sources(tmp_path / "sources.json")
