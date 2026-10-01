@@ -32,6 +32,15 @@ def test_best_shift_moves_centrelines_onto_the_roads():
     assert score > 0.9 > zero
 
 
+def test_best_shift_cannot_win_by_pushing_roads_out_of_frame():
+    prob = np.zeros((100, 100), np.float32)
+    prob[20:, :] = 0.6                                    # model misses the top strip only
+    skeleton = np.zeros((100, 100), bool)
+    skeleton[3, :] = skeleton[50, :] = True               # one unseen road near the edge
+    dy, dx, score, zero = bg.best_shift(prob, skeleton, radius=5)
+    assert (dy, dx) == (0, 0) and score == pytest.approx(zero)   # old mean picked dy=-5
+
+
 def test_best_shift_keeps_zero_on_ties_and_empty_skeleton():
     assert bg.best_shift(np.zeros((20, 20)), np.ones((20, 20), bool), radius=3)[:2] == (0, 0)
     assert bg.best_shift(np.ones((20, 20)), np.zeros((20, 20), bool)) == (0, 0, 0.0, 0.0)
@@ -77,6 +86,16 @@ def test_cached_fetcher_downloads_each_tile_once(tmp_path, monkeypatch):
     assert fetch(19, 1, 2) == fetch(19, 1, 2) == png
     assert calls == [(19, 1, 2, "u/{z}/{x}/{y}")]
     assert [p.name for p in tmp_path.rglob("*") if p.is_file()] == ["2.bin"]   # no .tmp left
+
+
+def test_cached_fetcher_refetches_a_corrupt_cache_entry(tmp_path, monkeypatch):
+    png = _png()
+    monkeypatch.setattr(bg, "_default_tile_fetcher", lambda z, x, y, url: png)
+    bad = tmp_path / "19" / "1" / "2.bin"
+    bad.parent.mkdir(parents=True)
+    bad.write_bytes(png[:20])                              # truncated by an old, killed run
+    assert bg.cached_fetcher("u", tmp_path)(19, 1, 2) == png
+    assert bad.read_bytes() == png
 
 
 def test_cached_fetcher_never_caches_a_non_image(tmp_path, monkeypatch):

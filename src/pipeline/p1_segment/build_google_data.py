@@ -82,7 +82,12 @@ def cached_fetcher(url: str, cache_dir: Path):
 
         path = cache_dir / str(z) / str(x) / f"{y}.bin"
         if path.is_file():
-            return path.read_bytes()
+            data = path.read_bytes()
+            try:
+                Image.open(io.BytesIO(data)).verify()
+                return data
+            except Exception:          # corrupt/stale entry (e.g. pre-atomic cache): re-fetch
+                path.unlink(missing_ok=True)
         data = _default_tile_fetcher(z, x, y, url=url)
         Image.open(io.BytesIO(data)).verify()          # raises on a non-image body
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -141,21 +146,23 @@ def spacenet_exclusion(rgb_dir: Path, buffer_m: float = EXCLUDE_BUFFER_M):
 def best_shift(prob: np.ndarray, skeleton: np.ndarray, radius: int = SHIFT_PX):
     """Integer ``(dy, dx)`` that moves the centrelines onto the model's roads.
 
-    Each shift is scored by the mean probability under the shifted skeleton.
+    Each shift is scored by the mean probability under the shifted skeleton;
+    pixels shifted out of the window count as 0, so pushing hard-to-see roads
+    off the edge can never raise the score.
     Returns ``(dy, dx, score, zero_shift_score)``; ties keep the zero shift.
     """
     rows, cols = np.nonzero(skeleton)
     if rows.size == 0:
         return 0, 0, 0.0, 0.0
     h, w = prob.shape
-    zero = float(prob[rows, cols].mean())
+    zero = float(prob[rows, cols].sum(dtype=np.float64)) / rows.size
     best = (0, 0, zero)
     for dy in range(-radius, radius + 1):
         r = rows + dy
         for dx in range(-radius, radius + 1):
             c = cols + dx
             ok = (r >= 0) & (r < h) & (c >= 0) & (c < w)
-            score = float(prob[r[ok], c[ok]].mean()) if ok.any() else 0.0
+            score = float(prob[r[ok], c[ok]].sum(dtype=np.float64)) / rows.size
             if score > best[2] + 1e-9:
                 best = (dy, dx, score)
     return best[0], best[1], best[2], zero
