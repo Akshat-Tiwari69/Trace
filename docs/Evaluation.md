@@ -199,6 +199,8 @@ when every stage is reused.
 | A18 frozen → LoRA | common-unit routing improved strongly, absolute routing still low | graph-first direction adopted for A46 |
 | A46 epoch-22 + topology 0.60 | 127-chip raw APLS `0.181165`, `+0.076053` vs epoch-18, CI `[+0.059871, +0.092975]`; normalized `0.301519` | metric gate passed; not deployable because upstream has no license |
 | A50 web-map road labels scored as a prediction | 127-chip raw APLS `0.3585` vs v3.2 `0.2821` (current scorer), `+0.0764`, CI `[+0.0486, +0.1070]`; normalized `0.5553` | labels carry routing signal beyond v3.2 → build the train-only grid corpus; see A50 section |
+| A50 v3.2 recipe + Mumbai grid corpus (frozen encoder, epoch 10) | APLS `0.2899` vs `0.2821`, CI `[-0.0065, +0.0227]`; held-out IoU `0.3997` vs `0.4564` (gray `0.3537` vs `0.4158`) | rejected: learned the map's broader road definition |
+| A50b = A50 + SpaceNet-only stage 2 (5 epochs) | APLS `0.2878` vs `0.2821`, CI `[-0.0048, +0.0166]`, 70/127 wins; IoU `0.4490` vs `0.4564` (gray `0.4121` vs `0.4158`) | tie, not promoted: stage 2 repairs the definition but adds nothing on Mumbai |
 
 ## Promotion protocol for A46
 
@@ -241,5 +243,18 @@ Labels minus v3.2: `+0.0764`, 95% CI `[+0.0486, +0.1070]`, `p<0.001`; the labels
 Registration: in the pilot cells (r0c0, r6c6, r20c10) the overlay's road vectors sat 3.5–4.5 m east of the provider's imagery (best shifts `[1,-3]`, `[2,9]`, `[-3,7]` px), and visual overlays confirm the shifted lines sit on the visible roads. City-wide the median shift is small (`dy=-2`, `dx=2` px), so the pilot offset is local, not systematic.
 
 City build (529 cells, ~2 h on the local GPU): 332 built, 126 ineligible (sea or within 256 m of a SpaceNet chip), 42 without roads, 29 dropped for low agreement (14 below 0.2; 15 at the 5 m search limit); **4,012** train-only 512 px pairs (~260 km²). Median registered agreement on built cells is 0.445 (minimum 0.206).
+
+Retrains (local RTX 3070 Ti; every candidate scored once against v3.2 on the 127 frozen chips with the current scorer, plus the 449-tile held-out IoU in RGB and gray):
+
+| Candidate | Chip APLS (v3.2 0.2821) | Paired delta, 95% CI | IoU RGB (v3.2 0.4564) | IoU gray (v3.2 0.4158) | Verdict |
+|---|---:|---|---:|---:|---|
+| A50: v3.2 recipe + 4,012 grid pairs, frozen encoder, epoch 10 | 0.2899 | +0.0078 `[-0.0065, +0.0227]` | 0.3997 | 0.3537 | rejected |
+| A50b: A50 then 5 SpaceNet-only epochs | 0.2878 | +0.0058 `[-0.0048, +0.0166]` | 0.4490 | 0.4121 | tie, not promoted |
+
+Reading: the corpus outnumbers SpaceNet train 2.7:1 and draws more roads (compound loops, both carriageways), so A50 over-predicts against SpaceNet's definition; a SpaceNet-only second stage repairs that but lands on v3.2. With the encoder frozen (all three models), extra Mumbai data cannot change the features, so on Mumbai's own benchmark it adds nothing measurable. Its intended value — other Indian cities — needs the unseen-city check.
+
+Training-protocol finding: since `d15b529` (2026-07-12) an epoch is kept only if the paired-CI *lower bound* of the DeepGlobe change is ≥ -0.005. With 40 DeepGlobe validation tiles that interval is about ±0.013 wide even at zero change, so A50 kept **no** epoch although epoch 10 *improved* DeepGlobe (0.6767 vs 0.6722). v3.2 (2026-07-02) was selected under the earlier point-estimate rule. A50 used per-epoch snapshots and a pre-registered pick (best SpaceNet-val IoU with DeepGlobe ≥ v1 − 0.02); A50b used `deepglobe_iou_tolerance=0.03`.
+
+Leakage note: the Mumbai grid was built before the held-out Indian eval AOIs were excluded; 35 tiles (5 cells) near the Bandra AOI were moved out of the training folder afterwards. A50/A50b trained on them, so their scores on that AOI are not clean; the 127-chip and 449-tile results above are unaffected.
 
 **Scorer caveat (affects the A18/A46 rows above).** The registered A46 comparison scored v3.2 at raw `0.012082`; today's code scores the same checkpoint on the same 127 chips at `0.2821`. Commit `22a749f` (2026-07-26, after the 2026-07-18 comparison) changed `skeleton_to_graph` (sknw ring self-loops were previously *dropped*; now split into two routable edges) and APLS snapping (degree-offset `_snap_map` replaced by metric snapping). The first change affects only mask-derived graphs such as v3.2, not A18's graph outputs. The A18/A46 prediction graphs are not on this machine, so they could not be re-scored; until they are, the A18-vs-v3.2 and A46-vs-v3.2 deltas are **not comparable** with any number produced by the current scorer, and the graph-first-beats-v3.2 reading should be treated as unverified.
