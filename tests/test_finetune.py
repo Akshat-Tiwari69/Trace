@@ -127,6 +127,19 @@ def test_gather_pairs_keeps_spacenet_chip_tiles_in_one_split(tmp_path):
     assert train_chips.isdisjoint(val_chips)
 
 
+def test_gather_pairs_extra_pairs_are_train_only(tmp_path):
+    ft = tmp_path / "ft"
+    for i in range(10):
+        _write_pair(ft, f"c{i}")
+    extra = [(tmp_path / f"mgrid_{i}_sat.jpg", tmp_path / f"mgrid_{i}_mask.png") for i in range(4)]
+    cfg = FineTuneConfig(init_checkpoint="x", finetune_dir=ft, extra_train_pairs=extra,
+                         finetune_oversample=2, val_fraction=0.2)
+    train, val, _ = gather_pairs(cfg)
+    assert set(extra) <= set(train)
+    assert sum(pair in extra for pair in train) == 4          # added once, never oversampled
+    assert not set(extra) & set(val)                          # never used for checkpoint selection
+
+
 def test_freeze_encoder_disables_encoder_grads(tmp_path):
     model = build_model(encoder_weights=None, decoder_attention_type="scse")
     cfg = FineTuneConfig(init_checkpoint="x", finetune_dir=tmp_path, encoder_lr_scale=0.0)

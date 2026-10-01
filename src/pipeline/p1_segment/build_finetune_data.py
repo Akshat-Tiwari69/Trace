@@ -93,8 +93,8 @@ def num2merc(x: float, y: float, z: int) -> tuple[float, float]:
     return mx, my
 
 
-def _default_tile_fetcher(z: int, x: int, y: int) -> bytes:
-    """Fetch one Esri World-Imagery tile (keyless), retrying transient network errors.
+def _default_tile_fetcher(z: int, x: int, y: int, url: str = ESRI_TILE) -> bytes:
+    """Fetch one XYZ tile (default: keyless Esri World-Imagery), retrying transient errors.
 
     A multi-city corpus run issues thousands of tile requests; a single timed-out
     tile must NOT abort the whole run, so retry a few times with linear backoff.
@@ -103,7 +103,7 @@ def _default_tile_fetcher(z: int, x: int, y: int) -> bytes:
     import urllib.error
     import urllib.request
 
-    req = urllib.request.Request(ESRI_TILE.format(z=z, x=x, y=y),
+    req = urllib.request.Request(url.format(z=z, x=x, y=y),
                                  headers={"User-Agent": "Mozilla/5.0 route-resilience-a6"})
     last: Exception | None = None
     for attempt in range(4):
@@ -116,8 +116,11 @@ def _default_tile_fetcher(z: int, x: int, y: int) -> bytes:
 
 
 def fetch_imagery_mosaic(bbox: tuple[float, float, float, float], zoom: int,
-                         tile_fetcher: Callable[[int, int, int], bytes] = _default_tile_fetcher):
-    """Stitch the Esri tiles covering ``bbox`` → ``(rgb HxWx3 uint8, Affine 3857)``."""
+                         tile_fetcher: Callable[[int, int, int], bytes] = _default_tile_fetcher,
+                         mode: str = "RGB"):
+    """Stitch the XYZ tiles covering ``bbox`` → ``(HxWxC uint8, Affine 3857)``.
+
+    ``mode="RGBA"`` keeps a transparent overlay's alpha (A50 road masks)."""
     from affine import Affine
     from PIL import Image
 
@@ -126,11 +129,11 @@ def fetch_imagery_mosaic(bbox: tuple[float, float, float, float], zoom: int,
     x1, y1 = (int(math.floor(v)) for v in deg2num(south, east, zoom))  # bottom-right tile
     nx, ny = x1 - x0 + 1, y1 - y0 + 1
 
-    canvas = Image.new("RGB", (nx * 256, ny * 256))
+    canvas = Image.new(mode, (nx * 256, ny * 256))
     for ix in range(nx):
         for iy in range(ny):
             data = tile_fetcher(zoom, x0 + ix, y0 + iy)
-            canvas.paste(Image.open(io.BytesIO(data)).convert("RGB"), (ix * 256, iy * 256))
+            canvas.paste(Image.open(io.BytesIO(data)).convert(mode), (ix * 256, iy * 256))
     rgb = np.asarray(canvas)
 
     mx0, my0 = num2merc(x0, y0, zoom)            # top-left corner (metres)
@@ -147,7 +150,7 @@ def warp_to_grid(rgb: np.ndarray, src_transform, dst_crs: str, dst_transform,
     from rasterio.warp import Resampling, reproject
 
     src = np.ascontiguousarray(np.transpose(rgb, (2, 0, 1)))   # bands-first
-    out = np.zeros((3, dst_shape[0], dst_shape[1]), np.uint8)
+    out = np.zeros((src.shape[0], dst_shape[0], dst_shape[1]), np.uint8)
     reproject(
         src, out,
         src_transform=src_transform, src_crs=src_crs,

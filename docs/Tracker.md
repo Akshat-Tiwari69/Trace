@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-09-29 · **Phase:** maintenance · **Overall:** F12, OPS-3 and F13 are live at immutable commit `12d0a5c`; X1 backup demo captured from that release; the Oracle host is patched and runs kernel 7.0
+**Last updated:** 2026-09-30 · **Phase:** maintenance + A50 data work · **Overall:** F12, OPS-3 and F13 are live at immutable commit `12d0a5c`; X1 backup demo captured from that release; A50 Mumbai grid corpus built; gated retrain running
 
 ---
 
@@ -13,7 +13,7 @@
 
 | Owner | Scope | Current next task |
 |---|---|---|
-| **Akshat** | Everything: `src/pipeline/` (P1–P3), `src/app/`, `web/`, data tooling, notebooks, deployment, shared configuration and docs | No active task — pick from the `bugs.md` follow-ups |
+| **Akshat** | Everything: `src/pipeline/` (P1–P3), `src/app/`, `web/`, data tooling, notebooks, deployment, shared configuration and docs | A50 — gated retrain on the Mumbai grid corpus |
 
 ---
 
@@ -131,6 +131,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F12** | ✅ | Fix the 2026-09-29 audit findings | Akshat | — | Empty `failed=` URL no longer pre-fails J-0 (unit regression); Recover singular count and per-junction Restore names; no "ready to add" for an already-failed junction; `next` 16.3.6 plus non-breaking audit fixes (npm advisories 11 → 3); frontend gates and browser journeys green; PR opened into `dev` |
 | **F13** | ✅ | Let uploads wait for the GPU call | Akshat | — | The upload POST uses `UPLOAD_TIMEOUT_MS` (390 s, above the server's worst-case Modal retry budget of ~365 s) instead of the 10 s default; unit regression; frontend gates green; PR opened into `dev` |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
+| **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **X1** | ✅ | Final backup demo capture | Akshat | F9, O1, O2, F13 deployed | Live `12d0a5c` capture of the sample flow and a cold-start browser upload: 9 screenshots, both exports, `capture.json` and `x1-demo.webm` (SHA-256 `498bd8fd…c91fb8ee`) under ignored `.tmp/x1/20260929T1642Z/` |
 
 ### Research backlog disposition
@@ -199,11 +200,19 @@ flowchart LR
 - **Deployment:** Oracle is live at exact commit `12d0a5c0fd510b347537c69b35c78d60c9bf5c99` (O2 + OPS-3 + F13) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, simulation, and a public upload-to-export run are verified.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** none scheduled; X1 is captured. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
+- **Immediate work:** A50 — finish the gated retrain on the local GPU and score it under the current scorer; re-score the A18/A46 graphs under the same scorer. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
 
 ---
 
 ## §10 · Daily Log
+
+**2026-09-30 (Akshat — A50 Mumbai grid corpus)**
+
+- Audited a manual QGIS tiling project (1024 m UTM-43N grid, 529 cells; one hand-made tile). Scripted it as `src/pipeline/p1_segment/build_grid_corpus.py` (tile sources live only in a local ignored `sources.json`), fixing: leakage (tiles within 256 m of any of the 1016 SpaceNet chips dropped), pinned z19 for both layers, a roads-only alpha overlay (the old `band1 < 250` rule caught semi-transparent haze), per-cell registration against v3.2, skeleton re-buffered to SpaceNet's ~6 m width, land/road filters, a cached/atomic/resumable fetch, and train-only use via `finetune.py --extra-train-dirs`. The scripted grid reproduces QGIS exactly (529 cells; r6c6 = `tile_001`).
+- Label-agreement check on the 127 frozen chips: the web-map labels as a prediction score raw APLS 0.3585 vs v3.2 0.2821 (+0.0764, CI [+0.0486, +0.1070]); normalized 0.555 — useful signal, different road definition (details in `Evaluation.md` A50). City build: 4,012 train-only pairs from 332 of 529 cells.
+- Retrain launched locally: the exact v3.2 recipe (`run_a24`) with the grid corpus as the only added variable (`models/road_a50.pt`); promotion requires beating v3.2's 0.2821 chip APLS under the current scorer with a CI excluding zero.
+- Found a scorer discrepancy: today's code scores v3.2 at 0.2821 on the 127 chips where the registered A46 comparison recorded 0.012082; `22a749f` changed ring handling in `skeleton_to_graph` and APLS snapping after that comparison. A18/A46 prediction graphs are not local, so the graph-first-vs-v3.2 deltas are unverified under the current scorer.
+- CUDA failed with `cudaGetDeviceCount: invalid argument`; the DriverStore `nvidia-smi` showed the RTX 3070 Ti had fallen off the bus ("GPU is lost"), not a driver/CUDA install fault. A reboot restored it and pilot cells reproduce identical shifts/agreement on CUDA. The corpus is provider-terms-restricted: local-only under ignored `data/raw/mumbai_grid/`.
 
 **2026-09-29 (Akshat — F13 deployed; X1 captured)**
 
