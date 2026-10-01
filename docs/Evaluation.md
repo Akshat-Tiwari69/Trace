@@ -201,6 +201,8 @@ when every stage is reused.
 | A50 grid labels scored as a prediction | 127-chip raw APLS `0.3585` vs v3.2 `0.2821` (current scorer), `+0.0764`, CI `[+0.0486, +0.1070]`; normalized `0.5553` | labels carry routing signal beyond v3.2 → build the train-only grid corpus; see A50 section |
 | A50 v3.2 recipe + Mumbai grid corpus (frozen encoder, epoch 10) | APLS `0.2899` vs `0.2821`, CI `[-0.0065, +0.0227]`; held-out IoU `0.3997` vs `0.4564` (gray `0.3537` vs `0.4158`) | rejected: learned a broader road definition than SpaceNet's |
 | A50b = A50 + SpaceNet-only stage 2 (5 epochs) | APLS `0.2878` vs `0.2821`, CI `[-0.0048, +0.0166]`, 70/127 wins; IoU `0.4490` vs `0.4564` (gray `0.4121` vs `0.4158`) | tie, not promoted: stage 2 repairs the definition but adds nothing on Mumbai |
+| A50c = two stages, encoder ×0.1, with grid corpus | APLS `0.3429`, `+0.0608` CI `[+0.0391, +0.0839]`, 95/127 wins; IoU `0.4791` (gray `0.4588`); Kolkata `+0.0591` | passes; not deployable (restricted training data) |
+| A50d = A50c without the grid corpus (control) | APLS `0.3375`, `+0.0555` CI `[+0.0371, +0.0755]`, 99/127 wins; IoU `0.4699` (gray `0.4461`); Kolkata `+0.0263` | passes; same data provenance as v3.2 → promotion candidate pending release checks |
 
 ## Promotion protocol for A46
 
@@ -244,12 +246,16 @@ Labels minus v3.2: `+0.0764`, 95% CI `[+0.0486, +0.1070]`, `p<0.001`, higher on 
 
 Retrains, each scored once against v3.2 on the 127 frozen chips (current scorer) and on the 449-tile held-out IoU in RGB and gray:
 
-| Candidate | Chip APLS (v3.2 0.2821) | Paired delta, 95% CI | IoU RGB (v3.2 0.4564) | IoU gray (v3.2 0.4158) | Verdict |
-|---|---:|---|---:|---:|---|
-| A50: v3.2 recipe + 4,012 grid pairs, frozen encoder, epoch 10 | 0.2899 | +0.0078 `[-0.0065, +0.0227]` | 0.3997 | 0.3537 | rejected |
-| A50b: A50 then 5 SpaceNet-only epochs | 0.2878 | +0.0058 `[-0.0048, +0.0166]` | 0.4490 | 0.4121 | tie, not promoted |
+| Candidate | Chip APLS (v3.2 0.2821) | Paired delta, 95% CI | IoU RGB (v3.2 0.4564) | IoU gray (v3.2 0.4158) | Kolkata APLS delta (unseen) | Verdict |
+|---|---:|---|---:|---:|---|---|
+| A50: v3.2 recipe + 4,012 grid pairs, frozen encoder, epoch 10 | 0.2899 | +0.0078 `[-0.0065, +0.0227]` | 0.3997 | 0.3537 | — | rejected |
+| A50b: A50 then 5 SpaceNet-only epochs | 0.2878 | +0.0058 `[-0.0048, +0.0166]` | 0.4490 | 0.4121 | +0.0557 `[+0.0466, +0.0650]` | tie on Mumbai |
+| A50c: A50b recipe with the encoder trained at 0.1× | **0.3429** | **+0.0608 `[+0.0391, +0.0839]`** | **0.4791** | **0.4588** | **+0.0591 `[+0.0482, +0.0703]`** | passes; trained on restricted data |
+| A50d: control — A50c without the grid corpus (SpaceNet + DeepGlobe only) | 0.3375 | +0.0555 `[+0.0371, +0.0755]` | 0.4699 | 0.4461 | +0.0263 `[+0.0179, +0.0347]` | passes; same data provenance as v3.2 |
 
-Reading: the corpus outnumbers SpaceNet train 2.7:1 and labels more roads, so A50 over-predicts against SpaceNet's definition; a SpaceNet-only second stage repairs that but lands on v3.2. With the encoder frozen (all three models), extra Mumbai data cannot change the features, so Mumbai's own benchmark shows no gain. The corpus's intended value — other Indian cities — needs an unseen-city check.
+Reading: with the encoder frozen (A50, A50b) extra data cannot change the features; A50 over-predicts against SpaceNet's definition (the corpus outnumbers SpaceNet train 2.7:1 and labels more roads) and a SpaceNet-only second stage repairs that but lands on v3.2. Training the encoder at 0.1× (A50c, A50d) is what moves Mumbai: A50c minus A50d on the 127 chips is `+0.0053` `[-0.0056, +0.0165]`. The grid corpus is what moves the unseen city: on the same 400 Kolkata tiles A50c beats A50d by `+0.0328` APLS `[+0.0240, +0.0425]` and `+0.0331` IoU `[+0.0281, +0.0388]`. A50d is the first segmentation model to pass the Mumbai gate without new data sources.
+
+Unseen-city check (Kolkata, test-only grid, 244 cells built with `--min-agreement 0`, 400 random 512 px tiles, paired with v3.2): labels come from the same local source as the training corpus, so the scores measure agreement with that source's road network rather than ground truth, and part of the corpus gain may be shared labelling style. Visual inspection of the largest gains shows v3.2 leaving gaps on clearly visible roads that the corpus-trained models close, with no invented roads. A50b was scored on a slightly earlier tile sample (before 16 failed cells were rebuilt); A50c and A50d share one sample.
 
 Protocol notes:
 
