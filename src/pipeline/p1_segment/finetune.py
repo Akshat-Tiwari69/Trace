@@ -79,6 +79,7 @@ class FineTuneConfig:
     cosine: bool = False                 # A51: warm-up + cosine LR decay to 3% (False = constant LR)
     warmup_epochs: int = 0               # A51: linear warm-up length when cosine=True
     max_grad_norm: float = 0.0           # A51: >0 clips gradients (from-ImageNet runs)
+    save_every_epoch: bool = False       # A51: also write <out>.epNN.pt for every DeepGlobe-keeping epoch
     val_fraction: float = 0.15
     deepglobe_iou_tolerance: float = 0.005   # max allowed DeepGlobe drop vs v1
     device: str = "cpu"
@@ -157,22 +158,14 @@ def _read_val_pair(sat_path: str, mask_path: str):
 
 
 @torch.no_grad()
-def _iou_scores_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False) -> list[float]:
-    """Per-tile IoU from the Hann-blended probabilities used for calibration.
-
-    ``grayscale=True`` decolorizes each image (3-channel grey) before predicting —
-    a Cartosat-PAN proxy, so the fine-tune can watch the sensor-modality gap close
-    epoch-by-epoch instead of only at the end (A24).
-    """
-    import cv2
-
+def _iou_scores_on_pairs(model, pairs, tile_size, device, thr) -> list[float]:
+    """Per-tile IoU from the Hann-blended probabilities used for calibration
+    (DeepGlobe forget-check: the paired bootstrap needs per-tile scores)."""
     if not pairs:
         return []
     scores = []
     for sat_path, mask_path in pairs:
         img, gt = _read_val_pair(str(sat_path), str(mask_path))
-        if grayscale:
-            img = cv2.cvtColor(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
         probability = predict_large_prob(model, img, tile_size=tile_size, device=device)
         pred = probability >= thr
         inter = np.logical_and(pred, gt).sum()
@@ -182,30 +175,38 @@ def _iou_scores_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool =
 
 
 def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False) -> float:
-    scores = _iou_scores_on_pairs(model, pairs, tile_size, device, thr, grayscale)
-    if not scores:
-        return float("nan")
-    # Plain float, not numpy float64 — this value is stored in the .last.pt
-    # train_state, which must stay weights_only=True-loadable (see model.py).
-    return float(np.mean(scores))
+    """Pooled Indian-validation IoU at one threshold (see ``_select_threshold``)."""
+    return _select_threshold(model, pairs, tile_size, device, (thr,), grayscale)[1]
 
 
 @torch.no_grad()
-def _select_threshold(model, pairs, tile_size, device, thresholds) -> tuple[float, float]:
-    """Calibrate the candidate threshold on Indian validation in one inference pass."""
+def _select_threshold(model, pairs, tile_size, device, thresholds,
+                      grayscale: bool = False) -> tuple[float, float]:
+    """Calibrate the candidate threshold on Indian validation in one inference pass.
+
+    Pooled IoU (sum of intersections / sum of unions), so road-free validation tiles
+    count through their false positives — a per-tile mean scores every road-free
+    tile 0 whatever is predicted, which hides invented roads (A51)."""
+    import cv2
+
     if not pairs:
         return float(thresholds[0]), float("nan")
-    accum = np.zeros(len(thresholds), dtype=float)
+    inter = np.zeros(len(thresholds), dtype=float)
+    union = np.zeros(len(thresholds), dtype=float)
     for sat_path, mask_path in pairs:
         image, gt = _read_val_pair(str(sat_path), str(mask_path))
+        if grayscale:
+            image = cv2.cvtColor(cv2.cvtColor(image, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
         probability = predict_large_prob(model, image, tile_size=tile_size, device=device)
         for index, threshold in enumerate(thresholds):
             pred = probability >= threshold
-            union = np.logical_or(pred, gt).sum()
-            accum[index] += np.logical_and(pred, gt).sum() / max(union, 1)
-    means = accum / len(pairs)
-    best = int(np.argmax(means))
-    return float(thresholds[best]), float(means[best])
+            inter[index] += np.logical_and(pred, gt).sum()
+            union[index] += np.logical_or(pred, gt).sum()
+    ious = inter / np.maximum(union, 1)
+    best = int(np.argmax(ious))
+    # Plain floats, not numpy float64 — these land in the .last.pt train_state,
+    # which must stay weights_only=True-loadable (see model.py).
+    return float(thresholds[best]), float(ious[best])
 
 
 def _cosine_scheduler(optimizer, cfg: FineTuneConfig, steps_per_epoch: int, start_epoch: int = 1):
@@ -361,20 +362,23 @@ def finetune(cfg: FineTuneConfig) -> dict:
               f"(v1 {base_ind:.4f}) | DeepGlobe {dg_iou:.4f} (v1 {base_dg:.4f}){gap} | "
               f"DG delta CI [{dg_ci.ci_low:+.4f},{dg_ci.ci_high:+.4f}] | "
               f"{'KEEPS dg' if keeps_dg else 'regresses dg'}")
+        epoch_meta = {
+            **{k: meta.get(k) for k in ("encoder", "arch", "decoder_attention_type", "image_size")},
+            "threshold": selected_thr,
+            "finetuned_from": str(cfg.init_checkpoint), "encoder_frozen": frozen,
+            "indian_val_iou": float(ind_iou), "deepglobe_val_iou": float(dg_iou),
+            "indian_gray_val_iou": float(gray_iou),  # A24: Cartosat-PAN proxy
+            "v1_indian_val_iou": float(base_ind), "v1_deepglobe_val_iou": float(base_dg),
+            "deepglobe_delta_ci_low": dg_ci.ci_low,
+            "deepglobe_delta_ci_high": dg_ci.ci_high,
+            "validation_inference_protocol": VALIDATION_INFERENCE_PROTOCOL,
+            "epoch": epoch,
+        }
+        if cfg.save_every_epoch and keeps_dg:  # A51: candidates for routing-APLS selection
+            save_checkpoint(model, out.with_name(f"{out.stem}.ep{epoch:02d}{out.suffix}"), meta=epoch_meta)
         if score > best_score:
             best_score, best_row = score, row
-            save_checkpoint(model, out, meta={
-                **{k: meta.get(k) for k in ("encoder", "arch", "decoder_attention_type", "image_size")},
-                "threshold": selected_thr,
-                "finetuned_from": str(cfg.init_checkpoint), "encoder_frozen": frozen,
-                "indian_val_iou": float(ind_iou), "deepglobe_val_iou": float(dg_iou),
-                "indian_gray_val_iou": float(gray_iou),  # A24: Cartosat-PAN proxy
-                "v1_indian_val_iou": float(base_ind), "v1_deepglobe_val_iou": float(base_dg),
-                "deepglobe_delta_ci_low": dg_ci.ci_low,
-                "deepglobe_delta_ci_high": dg_ci.ci_high,
-                "validation_inference_protocol": VALIDATION_INFERENCE_PROTOCOL,
-                "epoch": epoch,
-            })
+            save_checkpoint(model, out, meta=epoch_meta)
             print(f"  saved new best -> {out} (Indian {ind_iou:.4f}, DeepGlobe {dg_iou:.4f})")
         # A19: rolling full-state checkpoint so a kill mid-run can --resume from here.
         save_checkpoint(model, last, meta={
@@ -407,7 +411,13 @@ def finetune(cfg: FineTuneConfig) -> dict:
               f"(v1 {base_ind:.4f}, {best_row['indian_iou']-base_ind:+.4f}) | "
               f"DeepGlobe {best_row['deepglobe_iou']:.4f} (v1 {base_dg:.4f}, "
               f"{best_row['deepglobe_iou']-base_dg:+.4f}) -> {out}")
-    return {"best": best_row, "v1_deepglobe": base_dg, "v1_indian": base_ind, "history": history,
+    # A51: an epoch can "win" while every epoch is worse than the starting checkpoint.
+    beats_init = best_row is not None and best_row["indian_iou"] > base_ind
+    if best_row is not None and not beats_init:
+        print(f"WARNING: no epoch beat the starting checkpoint on Indian val ({base_ind:.4f}); "
+              f"keep {cfg.init_checkpoint} as a candidate.")
+    return {"best": best_row, "beats_init": beats_init,
+            "v1_deepglobe": base_dg, "v1_indian": base_ind, "history": history,
             "n_train": len(train_pairs), "start_epoch": start_epoch, "resumed": bool(cfg.resume),
             "validation_inference_protocol": VALIDATION_INFERENCE_PROTOCOL}
 

@@ -167,6 +167,7 @@ The supported policy is simple:
 - training and heavy evaluation may use an optional local NVIDIA GPU, Colab or Kaggle;
 - recipes must fit a practical single-GPU environment or document why they do not;
 - P2/P3/dashboard remain CPU-capable;
+- cloud training (A51, Modal A100-40GB) is GPU-bound for MiT-B5 at 512 px (~85% busy, ~30 tiles/s): data loading needs about one core, so a 4-core/32 GB reservation suffices and extra workers or cores only add cost;
 - exact current installation instructions belong in `SETUP.md`, not in a timeless research claim about specific cloud quotas or GPU generations.
 
 ## Resilience research note

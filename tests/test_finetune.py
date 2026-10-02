@@ -140,6 +140,45 @@ def test_gather_pairs_extra_pairs_are_train_only(tmp_path):
     assert not set(extra) & set(val)                          # never used for checkpoint selection
 
 
+def test_select_threshold_pools_iou_so_invented_roads_count(monkeypatch):
+    # A51: a per-tile mean scores a road-free tile 0 whatever is predicted; pooled IoU
+    # charges its false positives.
+    import src.pipeline.p1_segment.finetune as finetune_module
+
+    road = np.zeros((4, 4), bool)
+    road[:, :2] = True
+    tiles = {"road": (np.zeros((4, 4, 3), np.uint8), road),
+             "empty": (np.ones((4, 4, 3), np.uint8), np.zeros((4, 4), bool))}
+    monkeypatch.setattr(finetune_module, "_read_val_pair", lambda sat, mask: tiles[sat])
+
+    def iou_with(invented):
+        monkeypatch.setattr(finetune_module, "predict_large_prob",
+                            lambda model, image, **k: road.astype(np.float32)
+                            if image is tiles["road"][0] else invented)
+        return _select_threshold(None, [("road", "m"), ("empty", "m")], 4, "cpu", (0.5,))[1]
+
+    assert iou_with(np.zeros((4, 4), np.float32)) == 1.0
+    assert iou_with(np.ones((4, 4), np.float32)) == pytest.approx(8 / 24)  # 8 hits / (8 road + 16 invented)
+
+
+def test_finetune_save_every_epoch_and_flags_not_beating_init(tmp_path):
+    ft, dg = tmp_path / "ft", tmp_path / "dg"
+    for i in range(5):
+        _write_pair(ft, f"c{i}")
+    for i in range(6):
+        _write_pair(dg, f"d{i}")
+    init = tmp_path / "v1.pt"
+    _tiny_v1_checkpoint(init)
+    out = tmp_path / "v2.pt"
+    summary = finetune(FineTuneConfig(
+        init_checkpoint=init, finetune_dir=ft, deepglobe_dir=dg, deepglobe_subset=3, deepglobe_val=2,
+        out_path=out, image_size=64, batch_size=2, epochs=2, finetune_oversample=2,
+        deepglobe_iou_tolerance=1.0, device="cpu", save_every_epoch=True))
+    assert (tmp_path / "v2.ep01.pt").exists() and (tmp_path / "v2.ep02.pt").exists()
+    assert load_checkpoint(tmp_path / "v2.ep02.pt")[1]["epoch"] == 2
+    assert summary["beats_init"] == (summary["best"]["indian_iou"] > summary["v1_indian"])
+
+
 def test_cosine_scheduler_warms_up_decays_and_resumes_on_the_curve():
     from src.pipeline.p1_segment.finetune import _cosine_scheduler
 

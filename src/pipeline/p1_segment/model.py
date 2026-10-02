@@ -15,6 +15,7 @@ P2 then skeletonises.
 
 from __future__ import annotations
 
+import os
 import pickle
 import warnings
 from itertools import islice
@@ -98,7 +99,10 @@ def save_checkpoint(
     blob: dict[str, Any] = {"state_dict": _unwrap(model).state_dict(), "meta": meta or {}}
     if train_state is not None:
         blob["train_state"] = train_state
-    torch.save(blob, path)
+    # Atomic: a kill mid-save must never truncate the checkpoint a resume needs.
+    tmp = path.with_name(path.name + ".tmp")
+    torch.save(blob, tmp)
+    os.replace(tmp, path)
 
 
 def load_checkpoint_blob(path: str | Path, map_location: str = "cpu") -> dict[str, Any]:

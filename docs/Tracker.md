@@ -133,6 +133,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **R33** | ✅ | Release `a4-roadseg-v3.3` (A50d) to production | Akshat | A50 | Release asset + checksum published; Modal staging run pixel-identical to local; production deploy; live upload returns threshold 0.50 and a finished analysis; docs point at v3.3 |
+| **A51** | 🔄 | Train MiT-B5 from ImageNet on Modal with everything learned so far | Akshat | A50 | `deploy/modal_train.py` pilot passes end to end; review fixes (atomic checkpoints, run record + CPU pre-flight, seeded init/augmentation, road-free tiles kept, pooled val IoU, per-epoch candidates picked by validation-chip APLS, DeepGlobe vs v3.3) tested; full run scored on the 127 chips, held-out IoU and Kolkata vs v3.3/A50e |
 | **X1** | ✅ | Final backup demo capture | Akshat | F9, O1, O2, F13 deployed | Live `12d0a5c` capture of the sample flow and a cold-start browser upload: 9 screenshots, both exports, `capture.json` and `x1-demo.webm` (SHA-256 `498bd8fd…c91fb8ee`) under ignored `.tmp/x1/20260929T1642Z/` |
 
 ### Research backlog disposition
@@ -206,6 +207,12 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-10-02 (Akshat — A51: Modal training)**
+
+- Training data (SpaceNet, Mumbai + Bengaluru grids, DeepGlobe train; ~4.7 GB) is in the private Modal volume `trace-train-data`; Kolkata stays test-only and was not uploaded. A 1-epoch-per-stage pilot ran end to end in 16 min (~23–30 tiles/s on an A100-40GB).
+- Live profile of the first full launch: GPU 80–89% busy, 12 loader workers ~1 core in total, 12 GB RAM — more workers cannot help. The reservation was cut from 16 cores/64 GB to 4/32 GB (~$0.80/h less). Stopping at epoch 1 and resuming exposed a crash restoring CUDA RNG states from a `map_location="cuda"` checkpoint (any GPU resume; fixed with a regression test).
+- A pre-launch review found nine issues; all fixed before the full run (`Evaluation.md` A51): non-atomic checkpoint saves; pilots and changed recipes could reuse `.done` stages; unseeded decoder init and Albumentations 2.x RNGs identical across workers; stage 2 could replace a better stage 1; IoU-only selection; no DeepGlobe check against the deployed model; no recipe/data/code record; empty sources crashed only on the GPU; road-free SpaceNet tiles (1,798 of 3,556) filtered out before the validation split. Road-free tiles now train too.
 
 **2026-10-02 (Akshat — R33: v3.3 released)**
 

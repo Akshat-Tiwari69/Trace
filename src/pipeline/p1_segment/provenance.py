@@ -39,6 +39,39 @@ def git_commit() -> str | None:
         return None
 
 
+def dir_fingerprint(path: str | Path) -> dict:
+    """Cheap identity of a training-data folder: pair count + SHA-256 over sorted
+    ``(name, size)`` entries. Catches added, removed or resized files without
+    reading gigabytes (A51: a mutable data volume must not change a resumed run
+    unnoticed); a same-size in-place rewrite is out of scope."""
+    entries = sorted((e.name, e.stat().st_size) for e in os.scandir(path))
+    digest = hashlib.sha256("\n".join(f"{n}\t{s}" for n, s in entries).encode()).hexdigest()
+    return {"pairs": sum(n.endswith("_sat.jpg") for n, _ in entries), "sha256_names_sizes": digest}
+
+
+def record_run(run_dir: str | Path, record: dict, launch: dict) -> dict:
+    """Write or verify ``run_dir/run.json``: one run directory holds one recipe and
+    one dataset (A51: a pilot or a changed encoder must never reuse another run's
+    ``.done`` stages). Appends ``launch`` (code revision, time) on every launch.
+    Raises ``RuntimeError`` on a recipe/data mismatch or on unrecorded artifacts."""
+    run_dir = Path(run_dir)
+    path = run_dir / "run.json"
+    record = json.loads(json.dumps(record))         # compare as JSON, the stored form
+    if path.exists():
+        saved = json.loads(path.read_text())
+        if {k: saved.get(k) for k in record} != record:
+            raise RuntimeError(f"{run_dir} was recorded with a different recipe or data; use a new run name")
+        launches = saved["launches"]
+    elif run_dir.exists() and any(run_dir.iterdir()):
+        raise RuntimeError(f"{run_dir} has artifacts but no run.json; use a new run name")
+    else:
+        launches = []
+    record["launches"] = [*launches, launch]
+    run_dir.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, indent=2))
+    return record
+
+
 def build_provenance(
     checkpoint: str | Path,
     meta: dict,
