@@ -140,6 +140,42 @@ def test_gather_pairs_extra_pairs_are_train_only(tmp_path):
     assert not set(extra) & set(val)                          # never used for checkpoint selection
 
 
+def test_cosine_scheduler_warms_up_decays_and_resumes_on_the_curve():
+    from src.pipeline.p1_segment.finetune import _cosine_scheduler
+
+    def make_optimizer():
+        net = torch.nn.Linear(2, 1)
+        return torch.optim.AdamW([{"params": [net.weight]}, {"params": [net.bias]}], lr=1.0)
+
+    cfg = FineTuneConfig(init_checkpoint="x", lr=1.0, encoder_lr_scale=0.5, epochs=4,
+                         warmup_epochs=1, cosine=True)
+    opt = make_optimizer()
+    scheduler = _cosine_scheduler(opt, cfg, steps_per_epoch=10)
+    lrs = []
+    for _ in range(40):
+        lrs.append(opt.param_groups[0]["lr"])
+        assert opt.param_groups[1]["lr"] == pytest.approx(0.5 * lrs[-1])   # encoder keeps its scale
+        opt.step()
+        scheduler.step()
+    assert lrs[0] == pytest.approx(0.1) and lrs[10] == pytest.approx(1.0)  # warm-up, then peak
+    assert 0.03 <= lrs[-1] < 0.05                                          # decayed to the floor
+    resumed = make_optimizer()
+    _cosine_scheduler(resumed, cfg, steps_per_epoch=10, start_epoch=3)
+    assert resumed.param_groups[0]["lr"] == pytest.approx(lrs[20])          # same point on the curve
+
+
+def test_train_one_epoch_steps_scheduler_per_batch_and_clips():
+    from src.pipeline.p1_segment.train import train_one_epoch
+
+    net = torch.nn.Conv2d(3, 1, 1)
+    batches = [(torch.randn(2, 3, 8, 8), torch.rand(2, 1, 8, 8).round()) for _ in range(3)]
+    opt = torch.optim.SGD(net.parameters(), lr=0.1)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lambda step: 1.0)
+    loss = train_one_epoch(net, batches, opt, torch.nn.functional.binary_cross_entropy_with_logits,
+                           "cpu", None, scheduler=scheduler, max_grad_norm=1e-3)
+    assert scheduler.last_epoch == 3 and loss > 0
+
+
 def test_freeze_encoder_disables_encoder_grads(tmp_path):
     model = build_model(encoder_weights=None, decoder_attention_type="scse")
     cfg = FineTuneConfig(init_checkpoint="x", finetune_dir=tmp_path, encoder_lr_scale=0.0)

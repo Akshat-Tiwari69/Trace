@@ -76,6 +76,9 @@ class FineTuneConfig:
     cldice_weight: float = 0.1           # soft-clDice weight; 0 avoids its 8 GB skeletonize OOM (A12)
     sdt_bce_weight: float = 0.0          # A41 SDT-weighted BCE topology proxy; 0 = off
     num_workers: int = 0                 # DataLoader workers (0 = safe on low RAM, per A12)
+    cosine: bool = False                 # A51: warm-up + cosine LR decay to 3% (False = constant LR)
+    warmup_epochs: int = 0               # A51: linear warm-up length when cosine=True
+    max_grad_norm: float = 0.0           # A51: >0 clips gradients (from-ImageNet runs)
     val_fraction: float = 0.15
     deepglobe_iou_tolerance: float = 0.005   # max allowed DeepGlobe drop vs v1
     device: str = "cpu"
@@ -205,6 +208,27 @@ def _select_threshold(model, pairs, tile_size, device, thresholds) -> tuple[floa
     return float(thresholds[best]), float(means[best])
 
 
+def _cosine_scheduler(optimizer, cfg: FineTuneConfig, steps_per_epoch: int, start_epoch: int = 1):
+    """Per-batch linear warm-up then cosine decay to 3% (the v1 ImageNet recipe's shape).
+
+    Bases are the configured decoder/encoder LRs, so a resumed run lands on the
+    same point of the curve instead of restarting it."""
+    import math
+
+    steps = max(1, steps_per_epoch)
+    total, warm = steps * cfg.epochs, steps * cfg.warmup_epochs
+
+    def factor(step: int) -> float:
+        if step < warm:
+            return (step + 1) / warm
+        phase = min(1.0, (step - warm) / max(1, total - warm))
+        return 0.03 + 0.97 * 0.5 * (1 + math.cos(math.pi * phase))
+
+    for group, base in zip(optimizer.param_groups, (cfg.lr, cfg.lr * cfg.encoder_lr_scale)):
+        group["initial_lr"] = base
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, factor, last_epoch=(start_epoch - 1) * steps - 1)
+
+
 def _last_path(out_path: str | Path) -> Path:
     """Rolling full-state checkpoint path beside the best model (A19).
 
@@ -271,7 +295,9 @@ def finetune(cfg: FineTuneConfig) -> dict:
                                crops_per_image=cfg.crops_per_image,
                                foreground_bias=cfg.foreground_bias)
     train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True,
-                              num_workers=cfg.num_workers, generator=loader_generator)
+                              num_workers=cfg.num_workers, generator=loader_generator,
+                              persistent_workers=cfg.num_workers > 0,
+                              pin_memory=cfg.device != "cpu")
     loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=cfg.cldice_weight,
                        sdt_bce_weight=cfg.sdt_bce_weight)
     optimizer = _build_optimizer(model, cfg)
@@ -303,8 +329,10 @@ def finetune(cfg: FineTuneConfig) -> dict:
         start_epoch = resume_state["epoch"] + 1
         print(f"resumed from {cfg.resume} @ epoch {resume_state['epoch']} -> starting epoch {start_epoch}",
               flush=True)
+    scheduler = _cosine_scheduler(optimizer, cfg, len(train_loader), start_epoch) if cfg.cosine else None
     for epoch in range(start_epoch, cfg.epochs + 1):
-        train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, cfg.device, scaler)
+        train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, cfg.device, scaler,
+                                     scheduler=scheduler, max_grad_norm=cfg.max_grad_norm)
         selected_thr, ind_iou = _select_threshold(
             model, indian_val, cfg.image_size, cfg.device, cfg.selection_thresholds
         )
