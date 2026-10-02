@@ -95,9 +95,11 @@ def prepare(run: str, spec: dict, code: dict) -> None:
     from src.pipeline.p1_segment.provenance import dir_fingerprint, record_run
 
     fingerprints = {name: dir_fingerprint(path) for name, path in SOURCES.items()}
-    empty = [name for name, fp in fingerprints.items() if not fp["pairs"]]
-    if empty:
-        raise RuntimeError(f"no training pairs on the data volume for: {empty}")
+    bad = {name: fp for name, fp in fingerprints.items() if not fp["pairs"] or fp["incomplete"]}
+    if bad:     # an empty or half-uploaded source must fail here, not after a GPU is reserved
+        raise RuntimeError("data volume not ready: " + ", ".join(
+            f"{n} ({fp['pairs']} complete pairs, {fp['incomplete']} missing an image or mask)"
+            for n, fp in bad.items()))
     record_run(f"/runs/{run}", {"recipe": spec, "data": fingerprints},
                {**code, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
     runs.commit()

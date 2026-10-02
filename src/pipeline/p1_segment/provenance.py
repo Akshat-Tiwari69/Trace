@@ -40,13 +40,19 @@ def git_commit() -> str | None:
 
 
 def dir_fingerprint(path: str | Path) -> dict:
-    """Cheap identity of a training-data folder: pair count + SHA-256 over sorted
-    ``(name, size)`` entries. Catches added, removed or resized files without
-    reading gigabytes (A51: a mutable data volume must not change a resumed run
-    unnoticed); a same-size in-place rewrite is out of scope."""
+    """Cheap identity of a training-data folder: complete pairs (``<stem>_sat.jpg`` and
+    ``<stem>_mask.png`` both present and non-empty, as training pairs them), stems
+    missing half a pair, and a SHA-256 over sorted ``(name, size)`` entries. Catches
+    added, removed or resized files without reading gigabytes (A51: a mutable data
+    volume must not change a resumed run unnoticed); a same-size in-place rewrite is
+    out of scope."""
     entries = sorted((e.name, e.stat().st_size) for e in os.scandir(path))
     digest = hashlib.sha256("\n".join(f"{n}\t{s}" for n, s in entries).encode()).hexdigest()
-    return {"pairs": sum(n.endswith("_sat.jpg") for n, _ in entries), "sha256_names_sizes": digest}
+    sats = {n[: -len("_sat.jpg")]: s for n, s in entries if n.endswith("_sat.jpg")}
+    masks = {n[: -len("_mask.png")]: s for n, s in entries if n.endswith("_mask.png")}
+    complete = {stem for stem in sats.keys() & masks.keys() if sats[stem] > 0 and masks[stem] > 0}
+    return {"pairs": len(complete), "incomplete": len((sats.keys() | masks.keys()) - complete),
+            "sha256_names_sizes": digest}
 
 
 def record_run(run_dir: str | Path, record: dict, launch: dict) -> dict:
