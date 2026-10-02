@@ -212,7 +212,7 @@ flowchart LR
 - Results (`Evaluation.md` A50): the grid labels, scored as a prediction, beat v3.2 on the 127 chips (+0.0764, CI [+0.0486, +0.1070]); the A50 retrain was rejected (held-out IoU 0.3997 vs 0.4564) and A50b ties v3.2 (APLS +0.0058, CI [-0.0048, +0.0166]). v3.2 stays deployed.
 - Findings: the `d15b529` DeepGlobe keep-rule rejects every epoch at 40 validation tiles; today's scorer gives v3.2 0.2821 on the 127 chips where the registered A46 comparison recorded 0.012082 (`22a749f` changed ring handling and APLS snapping), so the A18/A46-vs-v3.2 deltas are unverified.
 - Encoder unfrozen at 0.1× (two stages): A50c (with corpus) and the A50d control (SpaceNet + DeepGlobe only) both pass the 127-chip gate (+0.0608 and +0.0555) and beat v3.2 on held-out IoU; A50c − A50d on Mumbai is not significant, so the encoder drives the Mumbai gain. On a test-only Kolkata grid the corpus adds +0.0328 APLS over A50d. A50d has v3.2's data provenance and is a promotion candidate pending release checks and an owner decision; v3.2 stays deployed until then.
-- Next: Bengaluru grid (training city, building) → joint city-balanced retrain from v1 (A50e) scored on Mumbai and Kolkata.
+- Bengaluru grid built (762 cells, 10,615 pairs; 39 throttled cells recovered on a later retry). A50e (joint from v1, Mumbai + Bengaluru balanced, DeepGlobe anchor scaled to 0.35 of the Indian pairs) is the best routing model: Mumbai chip APLS 0.3543 (+0.0722 vs v3.2) and Kolkata +0.0928, +0.0336 over A50c. Each training city adds roughly +0.03 unseen-city APLS. Next: Delhi grid (1,500 cells, building) → A50f joint retrain.
 
 **2026-09-29 (Akshat — F13 deployed; X1 captured)**
 
