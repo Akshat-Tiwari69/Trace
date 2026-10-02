@@ -123,7 +123,7 @@ Cloud GPU is the hardware-agnostic training path. Accelerator names, quotas and 
 - Only small, license-safe contract fixtures/evidence belong in `data/sample/`.
 - Dataset roles, limitations and licenses are in `docs/Research.md`.
 
-Download the intended deployed mask checkpoint from [`a4-roadseg-v3.2`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) as `models/road_pan.pt`. Verify release/checksum guidance before production use.
+Download the intended deployed mask checkpoint from [`a4-roadseg-v3.3`](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.3) as `models/road_v3_3.pt`. Verify release/checksum guidance before production use.
 
 ## Run the sample field atlas
 
@@ -143,7 +143,7 @@ Blended Hann inference is the default. Use `--no-blend` only for a deliberate le
 ```bash
 python -m src.pipeline.p1_segment.predict \
   --image data/raw/<tile>.tif \
-  --checkpoint models/road_pan.pt \
+  --checkpoint models/road_v3_3.pt \
   --aoi <safe-id> \
   --postprocess
 ```
@@ -155,7 +155,7 @@ Outputs include `data/interim/<id>_mask.png`, provenance, and georeference/proba
 ```bash
 python -m src.pipeline.run_pipeline \
   --image data/raw/<tile>.tif \
-  --checkpoint models/road_pan.pt \
+  --checkpoint models/road_v3_3.pt \
   --aoi <safe-id> \
   --postprocess
 ```

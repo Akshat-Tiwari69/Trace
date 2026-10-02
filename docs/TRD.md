@@ -34,7 +34,7 @@ No database or login service is part of the product.
 
 ## Pipeline
 
-1. **P1 segmentation** fine-tunes and serves a pretrained PyTorch model. The production model remains `a4-roadseg-v3.2` until a licensed candidate passes the registered routing gate.
+1. **P1 segmentation** fine-tunes and serves a pretrained PyTorch model. The production model is `a4-roadseg-v3.3` (2026-10-02; same licensed training sources as v3.2) until a licensed candidate passes the registered routing gate against it.
 2. **P2 graph construction** converts a binary mask into a `networkx.MultiGraph`, preserves parallel branches and closed rings, samples confidence, heals only corridor-supported gaps, simplifies safely, and writes matching GraphML/GeoJSON artifacts.
 3. **P3 analysis** annotates node/edge criticality, articulation structure, APLS, percolation, flood scenarios, and baseline-normalized global-efficiency ablation curves.
 4. **Application delivery** exposes committed sample artifacts and deterministic live simulations to the web client.
