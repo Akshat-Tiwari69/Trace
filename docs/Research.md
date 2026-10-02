@@ -51,6 +51,7 @@ Route Resilience began with a segmentation→classical-graph pipeline because it
 | DeepGlobe Roads | v1 training and anti-forgetting anchor | Non-Indian in-domain benchmark |
 | SpaceNet-5 Mumbai | Real vector/mask supervision for v3/v3.2 and A18 | Repeatedly consulted single-city development benchmark |
 | OSM + Esri imagery Indian corpus | Weak-label/domain experiments and graph sample generation | OSM agreement is noisy and was misleading for A12 |
+| Locally sourced imagery + road labels, Greater Mumbai grid (A50) | Train-only supplementary labels on a 1024 m grid (`build_grid_corpus.py`); never used for validation or selection | Restricted terms: local-only under ignored `data/raw/`, never committed or redistributed. Broader road definition than SpaceNet (compound loops, separate carriageways); registered per cell against v3.2 |
 | Massachusetts Roads | A11 combined retrain | Domain mismatch; rejected |
 | Panaji OSM/sample artifacts | Graph, resilience and dashboard demonstration | One sample AOI, not model generalization evidence |
 

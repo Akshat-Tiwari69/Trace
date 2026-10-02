@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-09-29 · **Phase:** maintenance · **Overall:** F12, OPS-3 and F13 are live at immutable commit `12d0a5c`; X1 backup demo captured from that release; the Oracle host is patched and runs kernel 7.0
+**Last updated:** 2026-09-30 · **Phase:** maintenance + A50 data work · **Overall:** F12, OPS-3 and F13 are live at immutable commit `12d0a5c`; X1 backup demo captured from that release; A50 Mumbai grid corpus built; gated retrain running
 
 ---
 
@@ -13,7 +13,7 @@
 
 | Owner | Scope | Current next task |
 |---|---|---|
-| **Akshat** | Everything: `src/pipeline/` (P1–P3), `src/app/`, `web/`, data tooling, notebooks, deployment, shared configuration and docs | No active task — pick from the `bugs.md` follow-ups |
+| **Akshat** | Everything: `src/pipeline/` (P1–P3), `src/app/`, `web/`, data tooling, notebooks, deployment, shared configuration and docs | A50 — gated retrain on the Mumbai grid corpus |
 
 ---
 
@@ -131,6 +131,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F12** | ✅ | Fix the 2026-09-29 audit findings | Akshat | — | Empty `failed=` URL no longer pre-fails J-0 (unit regression); Recover singular count and per-junction Restore names; no "ready to add" for an already-failed junction; `next` 16.3.6 plus non-breaking audit fixes (npm advisories 11 → 3); frontend gates and browser journeys green; PR opened into `dev` |
 | **F13** | ✅ | Let uploads wait for the GPU call | Akshat | — | The upload POST uses `UPLOAD_TIMEOUT_MS` (390 s, above the server's worst-case Modal retry budget of ~365 s) instead of the 10 s default; unit regression; frontend gates green; PR opened into `dev` |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
+| **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **X1** | ✅ | Final backup demo capture | Akshat | F9, O1, O2, F13 deployed | Live `12d0a5c` capture of the sample flow and a cold-start browser upload: 9 screenshots, both exports, `capture.json` and `x1-demo.webm` (SHA-256 `498bd8fd…c91fb8ee`) under ignored `.tmp/x1/20260929T1642Z/` |
 
 ### Research backlog disposition
@@ -199,11 +200,19 @@ flowchart LR
 - **Deployment:** Oracle is live at exact commit `12d0a5c0fd510b347537c69b35c78d60c9bf5c99` (O2 + OPS-3 + F13) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, simulation, and a public upload-to-export run are verified.
 - **Model:** A46 passed its registered routing gate; v3.2 remains deployed because the winning SAM-Road++ implementation has no published license.
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** none scheduled; X1 is captured. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
+- **Immediate work:** A50 — finish the gated retrain on the local GPU and score it under the current scorer; re-score the A18/A46 graphs under the same scorer. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
 
 ---
 
 ## §10 · Daily Log
+
+**2026-09-30 to 2026-10-01 (Akshat — A50 Mumbai grid corpus)**
+
+- Replaced a manual QGIS tiling project with `src/pipeline/p1_segment/build_grid_corpus.py`: the same 1024 m grid (529 cells), a leakage guard (256 m around all 1016 SpaceNet chips and the held-out Indian eval AOIs), per-cell registration against v3.2, masks re-buffered to SpaceNet's ~6 m width, land/road filters, cached resumable builds that refuse mismatched settings, any-city support (`--city`, OSM boundary, local UTM zone) and train-only use via `finetune.py --extra-train-dirs`. Data and sources stay local and ignored.
+- Results (`Evaluation.md` A50): the grid labels, scored as a prediction, beat v3.2 on the 127 chips (+0.0764, CI [+0.0486, +0.1070]); the A50 retrain was rejected (held-out IoU 0.3997 vs 0.4564) and A50b ties v3.2 (APLS +0.0058, CI [-0.0048, +0.0166]). v3.2 stays deployed.
+- Findings: the `d15b529` DeepGlobe keep-rule rejects every epoch at 40 validation tiles; today's scorer gives v3.2 0.2821 on the 127 chips where the registered A46 comparison recorded 0.012082 (`22a749f` changed ring handling and APLS snapping), so the A18/A46-vs-v3.2 deltas are unverified.
+- Encoder unfrozen at 0.1× (two stages): A50c (with corpus) and the A50d control (SpaceNet + DeepGlobe only) both pass the 127-chip gate (+0.0608 and +0.0555) and beat v3.2 on held-out IoU; A50c − A50d on Mumbai is not significant, so the encoder drives the Mumbai gain. On a test-only Kolkata grid the corpus adds +0.0328 APLS over A50d. A50d has v3.2's data provenance and is a promotion candidate pending release checks and an owner decision; v3.2 stays deployed until then.
+- Bengaluru grid built (762 cells, 10,615 pairs; 39 throttled cells recovered on a later retry). A50e (joint from v1, Mumbai + Bengaluru balanced, DeepGlobe anchor scaled to 0.35 of the Indian pairs) is the best routing model: Mumbai chip APLS 0.3543 (+0.0722 vs v3.2) and Kolkata +0.0928, +0.0336 over A50c. Each training city adds roughly +0.03 unseen-city APLS. Next: Delhi grid (1,500 cells, building) → A50f joint retrain.
 
 **2026-09-29 (Akshat — F13 deployed; X1 captured)**
 

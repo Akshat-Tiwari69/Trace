@@ -198,6 +198,12 @@ when every stage is reused.
 | A41/A41b SDT-BCE | pixels improved, APLS regressed | rejected |
 | A18 frozen → LoRA | common-unit routing improved strongly, absolute routing still low | graph-first direction adopted for A46 |
 | A46 epoch-22 + topology 0.60 | 127-chip raw APLS `0.181165`, `+0.076053` vs epoch-18, CI `[+0.059871, +0.092975]`; normalized `0.301519` | metric gate passed; not deployable because upstream has no license |
+| A50 grid labels scored as a prediction | 127-chip raw APLS `0.3585` vs v3.2 `0.2821` (current scorer), `+0.0764`, CI `[+0.0486, +0.1070]`; normalized `0.5553` | labels carry routing signal beyond v3.2 → build the train-only grid corpus; see A50 section |
+| A50 v3.2 recipe + Mumbai grid corpus (frozen encoder, epoch 10) | APLS `0.2899` vs `0.2821`, CI `[-0.0065, +0.0227]`; held-out IoU `0.3997` vs `0.4564` (gray `0.3537` vs `0.4158`) | rejected: learned a broader road definition than SpaceNet's |
+| A50b = A50 + SpaceNet-only stage 2 (5 epochs) | APLS `0.2878` vs `0.2821`, CI `[-0.0048, +0.0166]`, 70/127 wins; IoU `0.4490` vs `0.4564` (gray `0.4121` vs `0.4158`) | tie, not promoted: stage 2 repairs the definition but adds nothing on Mumbai |
+| A50c = two stages, encoder ×0.1, with grid corpus | APLS `0.3429`, `+0.0608` CI `[+0.0391, +0.0839]`, 95/127 wins; IoU `0.4791` (gray `0.4588`); Kolkata `+0.0591` | passes; not deployable (restricted training data) |
+| A50d = A50c without the grid corpus (control) | APLS `0.3375`, `+0.0555` CI `[+0.0371, +0.0755]`, 99/127 wins; IoU `0.4699` (gray `0.4461`); Kolkata `+0.0263` | passes; same data provenance as v3.2 → promotion candidate pending release checks |
+| A50e = A50c recipe, joint Mumbai + Bengaluru grids, balanced | APLS `0.3543`, `+0.0722` CI `[+0.0523, +0.0943]`, 99/127 wins; IoU `0.4633` (gray `0.4419`); Kolkata `+0.0928` | best routing; restricted training data; next: add Delhi |
 
 ## Promotion protocol for A46
 
@@ -224,3 +230,38 @@ All 27 historical LoRA checkpoints were inferred on the registered 102-chip sele
 `data/sample/a46_comparison_preregistration.json` froze that exact candidate, incumbent, v3.2 checkpoint, 127-chip manifest and strict 600-sample protocol before the comparison split was opened. The one permitted comparison completed 127/127 coverage. The candidate scored raw APLS `0.181165` and normalized APLS `0.301519`; the incumbent scored `0.105112` and `0.180762`; deployable v3.2 scored `0.012082` and `0.018539`. Candidate-minus-incumbent raw APLS was `+0.076053`, with 95% CI `[+0.059871, +0.092975]` and paired randomization `p=0.000100`. Fragmentation also improved: mean components fell from `11.433` to `7.937`, largest-component node fraction rose from `0.3763` to `0.5413`, and reachable-pair fraction rose from `0.2200` to `0.3859`.
 
 The metric gate passed, but **production promotion remains false**. SAM-Road++ publishes no license, so its source, patch, derived weights and predictions remain local research artifacts and cannot be redistributed or deployed. `data/sample/a46_comparison_result.json` records the license-safe result summary and hashes; licensed v3.2 remains the production checkpoint while MIT-licensed SAM-Road is evaluated next under the same protocol.
+
+## A50 Mumbai grid corpus (2026-09-30 to 2026-10-01)
+
+Data: `build_grid_corpus.py` builds a 1024 m grid over Greater Mumbai (529 cells) from locally sourced imagery and road labels. Source, terms and build settings are recorded only in the ignored local provenance file; the corpus is train-only and never committed. Build: 332 cells → **4,012** pairs (512 px, 0.5 m, ~260 km²); 126 cells skipped (sea, or within 256 m of a SpaceNet chip or held-out AOI), 42 without roads, 29 dropped by the registration-agreement floor. Per-cell registration against v3.2 has a median shift of ~1 m.
+
+Label check, before any training: the grid labels scored as if they were a prediction on the 127 frozen chips (current scorer, 600 samples).
+
+| Source (same chips, same current scorer) | Raw APLS | Normalized | Median chip |
+|---|---:|---:|---:|
+| GT self-ceiling | 0.6419 | 1.0 | — |
+| Grid labels | **0.3585** | **0.5553** | 0.338 |
+| v3.2 (`road_pan.pt`, 0.52) | 0.2821 | 0.4549 | 0.240 |
+
+Labels minus v3.2: `+0.0764`, 95% CI `[+0.0486, +0.1070]`, `p<0.001`, higher on 89/127 chips. The labels carry routing signal v3.2 misses, but reach only ~56% of the ceiling: their road definition is broader than SpaceNet's (compound loops, separately drawn carriageways). They suit training as a **supplement** to SpaceNet, not a replacement.
+
+Retrains, each scored once against v3.2 on the 127 frozen chips (current scorer) and on the 449-tile held-out IoU in RGB and gray:
+
+| Candidate | Chip APLS (v3.2 0.2821) | Paired delta, 95% CI | IoU RGB (v3.2 0.4564) | IoU gray (v3.2 0.4158) | Kolkata APLS delta (unseen) | Verdict |
+|---|---:|---|---:|---:|---|---|
+| A50: v3.2 recipe + 4,012 grid pairs, frozen encoder, epoch 10 | 0.2899 | +0.0078 `[-0.0065, +0.0227]` | 0.3997 | 0.3537 | — | rejected |
+| A50b: A50 then 5 SpaceNet-only epochs | 0.2878 | +0.0058 `[-0.0048, +0.0166]` | 0.4490 | 0.4121 | +0.0557 `[+0.0466, +0.0650]` | tie on Mumbai |
+| A50c: A50b recipe with the encoder trained at 0.1× | **0.3429** | **+0.0608 `[+0.0391, +0.0839]`** | **0.4791** | **0.4588** | **+0.0591 `[+0.0482, +0.0703]`** | passes; trained on restricted data |
+| A50d: control — A50c without the grid corpus (SpaceNet + DeepGlobe only) | 0.3375 | +0.0555 `[+0.0371, +0.0755]` | 0.4699 | 0.4461 | +0.0263 `[+0.0179, +0.0347]` | passes; same data provenance as v3.2 |
+| A50e: A50c recipe, joint from v1 with Mumbai + Bengaluru grids (3,977 each, seeded subsample) and a 0.35-ratio DeepGlobe anchor (3,399) | **0.3543** | **+0.0722 `[+0.0523, +0.0943]`** | 0.4633 | 0.4419 | **+0.0928 `[+0.0805, +0.1054]`** | passes; best routing; restricted training data |
+
+Reading: with the encoder frozen (A50, A50b) extra data cannot change the features; A50 over-predicts against SpaceNet's definition (the corpus outnumbers SpaceNet train 2.7:1 and labels more roads) and a SpaceNet-only second stage repairs that but lands on v3.2. Training the encoder at 0.1× (A50c, A50d) is what moves Mumbai: A50c minus A50d on the 127 chips is `+0.0053` `[-0.0056, +0.0165]`. The grid corpus is what moves the unseen city: on the same 400 Kolkata tiles A50c beats A50d by `+0.0328` APLS `[+0.0240, +0.0425]` and `+0.0331` IoU `[+0.0281, +0.0388]`. A50d is the first segmentation model to pass the Mumbai gate without new data sources. A second training city compounds the unseen-city gain: A50e beats A50c by `+0.0336` Kolkata APLS `[+0.0254, +0.0423]` and `+0.0286` IoU, and by `+0.0114` Mumbai chip APLS `[+0.0009, +0.0230]`; over v3.2 the Kolkata APLS gain grows `+0.026` (no corpus) → `+0.059` (Mumbai) → `+0.093` (Mumbai + Bengaluru). A50e trades some Mumbai pixel IoU for routing (0.4633 vs A50c 0.4791; it selected a 0.45 threshold, so slightly wider roads). A first A50e attempt that repeated Mumbai ×3 against an unchanged 2,000-tile anchor fell to 0.611 DeepGlobe in epoch 1 and was stopped; scaling the anchor with the data fixed it.
+
+Unseen-city check (Kolkata, test-only grid, 244 cells built with `--min-agreement 0`, 400 random 512 px tiles, paired with v3.2): labels come from the same local source as the training corpus, so the scores measure agreement with that source's road network rather than ground truth, and part of the corpus gain may be shared labelling style. Visual inspection of the largest gains shows v3.2 leaving gaps on clearly visible roads that the corpus-trained models close, with no invented roads. A50b was scored on a slightly earlier tile sample (before 16 failed cells were rebuilt); A50c and A50d share one sample.
+
+Protocol notes:
+
+- Since `d15b529` (2026-07-12) an epoch is kept only if the paired-CI lower bound of the DeepGlobe change is ≥ -0.005. With 40 DeepGlobe validation tiles the interval is about ±0.013 wide at zero change, so A50 kept **no** epoch although epoch 10 improved DeepGlobe (0.6767 vs 0.6722). v3.2 (2026-07-02) predates this rule. A50 used per-epoch snapshots and a pre-registered pick (best SpaceNet-val IoU with DeepGlobe ≥ v1 − 0.02); A50b used `deepglobe_iou_tolerance=0.03`.
+- The Mumbai grid predates the held-out-AOI exclusion; 35 tiles near the Bandra AOI were removed from training afterwards. A50/A50b saw them, so their Bandra scores are not clean; the 127-chip and 449-tile results are unaffected.
+
+**Scorer caveat (affects the A18/A46 rows above).** The registered A46 comparison scored v3.2 at raw `0.012082`; today's code scores the same checkpoint on the same 127 chips at `0.2821`. Commit `22a749f` (2026-07-26, after the 2026-07-18 comparison) changed `skeleton_to_graph` (sknw ring self-loops were previously *dropped*; now split into two routable edges) and APLS snapping (degree-offset `_snap_map` replaced by metric snapping). The first change affects only mask-derived graphs such as v3.2, not A18's graph outputs. The A18/A46 prediction graphs were not available locally, so they could not be re-scored; until they are, the A18-vs-v3.2 and A46-vs-v3.2 deltas are **not comparable** with any number produced by the current scorer, and the graph-first-beats-v3.2 reading should be treated as unverified.
