@@ -183,17 +183,28 @@ def test_per_group_sampler_draws_a_fixed_fresh_share_per_city():
     from src.pipeline.p1_segment.finetune import _PerGroupEpochSampler
 
     # base 0..9, big city 10..109 (100 pairs), small city 110..114 (5 pairs), 12 per city
-    sampler = _PerGroupEpochSampler(10, [100, 5], 12, torch.Generator().manual_seed(1))
-    first, second = list(sampler), list(sampler)
+    sampler = _PerGroupEpochSampler(10, [100, 5], 12, seed=1)
+    epochs = []
+    for epoch in (1, 2, 3):
+        sampler.set_epoch(epoch)
+        epochs.append(list(sampler))
+    first, second = epochs[0], epochs[1]
     assert len(first) == len(sampler) == 10 + 2 * 12
-    for epoch in (first, second):
-        assert sorted(i for i in epoch if i < 10) == list(range(10))          # base: every pair once
-        assert sum(10 <= i < 110 for i in epoch) == 12                         # fixed share per city
-        small = sorted(i for i in epoch if i >= 110)
+    for drawn in (first, second):
+        assert sorted(i for i in drawn if i < 10) == list(range(10))          # base: every pair once
+        assert sum(10 <= i < 110 for i in drawn) == 12                         # fixed share per city
+        small = sorted(i for i in drawn if i >= 110)
         assert len(small) == 12 and set(small) == set(range(110, 115))        # small city repeats
     assert {i for i in first if 10 <= i < 110} != {i for i in second if 10 <= i < 110}   # fresh draw
-    again = _PerGroupEpochSampler(10, [100, 5], 12, torch.Generator().manual_seed(1))
-    assert list(again) == first                                                # reproducible
+    # A resume builds a new sampler (and loader) at epoch 3: it must replay the uninterrupted
+    # run's epoch 3 whatever else consumed random numbers in between.
+    torch.randperm(1000, generator=torch.Generator().manual_seed(1))
+    torch.rand(100)
+    resumed = _PerGroupEpochSampler(10, [100, 5], 12, seed=1)
+    resumed.set_epoch(3)
+    assert list(resumed) == epochs[2]
+    plain = _PerGroupEpochSampler(7, [], 0, seed=1)                            # no groups: a shuffle
+    assert sorted(plain) == list(range(7))
 
 
 def test_finetune_trains_on_per_city_draws(tmp_path):

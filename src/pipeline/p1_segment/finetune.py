@@ -236,24 +236,31 @@ def _cosine_scheduler(optimizer, cfg: FineTuneConfig, steps_per_epoch: int, star
 class _PerGroupEpochSampler(torch.utils.data.Sampler):
     """Each epoch: every base index once, plus a fresh draw of ``per_group`` indices
     from each group's contiguous range (a group smaller than ``per_group`` is repeated
-    whole, plus a random remainder), all shuffled together. Uses the loader's seeded
-    generator, so runs are reproducible and a resume continues the same stream."""
+    whole, plus a random remainder), all shuffled together; with no groups, a plain
+    shuffle. Each epoch's draw depends only on ``(seed, epoch)`` (``set_epoch``, as in
+    ``DistributedSampler``), not on a generator the DataLoader also consumes, so a
+    resumed run replays exactly the uninterrupted run's subsets and order."""
 
-    def __init__(self, n_base: int, group_sizes: list[int], per_group: int, generator: torch.Generator):
-        self.n_base, self.group_sizes, self.per_group, self.generator = n_base, group_sizes, per_group, generator
+    def __init__(self, n_base: int, group_sizes: list[int], per_group: int, seed: int):
+        self.n_base, self.group_sizes, self.per_group, self.seed = n_base, group_sizes, per_group, seed
+        self.epoch = 1
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
 
     def __len__(self) -> int:
         return self.n_base + self.per_group * len(self.group_sizes)
 
     def __iter__(self):
+        generator = torch.Generator().manual_seed(self.seed * 100_003 + self.epoch)
         picks, start = [torch.arange(self.n_base)], self.n_base
         for size in self.group_sizes:
             reps, rest = divmod(self.per_group, size)
             picks += [torch.arange(size) + start] * reps
-            picks.append(torch.randperm(size, generator=self.generator)[:rest] + start)
+            picks.append(torch.randperm(size, generator=generator)[:rest] + start)
             start += size
         order = torch.cat(picks)
-        yield from order[torch.randperm(len(order), generator=self.generator)].tolist()
+        yield from order[torch.randperm(len(order), generator=generator)].tolist()
 
 
 def _last_path(out_path: str | Path) -> Path:
@@ -325,13 +332,13 @@ def finetune(cfg: FineTuneConfig) -> dict:
                                                      grayscale_p=cfg.grayscale_p),
                                crops_per_image=cfg.crops_per_image,
                                foreground_bias=cfg.foreground_bias)
-    sampler = (_PerGroupEpochSampler(len(train_pairs), [len(g) for g in groups], cfg.extra_per_group,
-                                     loader_generator) if groups else None)
+    # Sampling (and per-city draws) comes from (seed, epoch) alone: a resume replays it exactly.
+    sampler = _PerGroupEpochSampler(len(train_ds) - sum(len(g) for g in groups), [len(g) for g in groups],
+                                    cfg.extra_per_group if groups else 0, cfg.seed)
     if groups:
         print(f"per-epoch draw: {cfg.extra_per_group} pairs from each of {len(groups)} groups "
               f"(sizes {[len(g) for g in groups]}) + {len(train_pairs)} base = {len(sampler)} per epoch")
-    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=sampler is None,
-                              sampler=sampler, drop_last=True,
+    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, sampler=sampler, drop_last=True,
                               num_workers=cfg.num_workers, generator=loader_generator,
                               persistent_workers=cfg.num_workers > 0,
                               pin_memory=cfg.device != "cpu")
@@ -369,6 +376,7 @@ def finetune(cfg: FineTuneConfig) -> dict:
               flush=True)
     scheduler = _cosine_scheduler(optimizer, cfg, len(train_loader), start_epoch) if cfg.cosine else None
     for epoch in range(start_epoch, cfg.epochs + 1):
+        sampler.set_epoch(epoch)
         train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, cfg.device, scaler,
                                      scheduler=scheduler, max_grad_norm=cfg.max_grad_norm)
         selected_thr, ind_iou = _select_threshold(

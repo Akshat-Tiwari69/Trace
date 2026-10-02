@@ -9,9 +9,10 @@ deployed checkpoint therefore gate eligibility first:
 
 - **road-free**: per-tile share of pixels predicted as road on the validation tiles
   with no labelled road. Fails if the candidate is confidently worse than deployed by
-  more than ``FP_TOL`` of a tile. Reported per kind -- chip-edge no-data, open water,
-  and the hand-labelled **land** tiles (roofs, sheds, fields, forest, shore
-  structures; ``data/sample/a51_road_free_land_tiles.json``), the hard negatives.
+  more than ``FP_TOL`` of a tile over all of them, *or* by more than ``LAND_FP_TOL``
+  on the hand-labelled **land** tiles alone (roofs, sheds, fields, forest, shore
+  structures; ``data/sample/a51_road_free_land_tiles.json``) -- the hard negatives,
+  which the many easy water/no-data tiles would otherwise dilute. Reported per kind.
 - **DeepGlobe**: per-tile IoU on the run's held-out DeepGlobe validation tiles (the
   deployed model's v1 lineage may have seen some, which only biases this against the
   candidate). Fails if confidently worse by more than the stage-2 tolerance.
@@ -34,6 +35,8 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[3]
 LAND_TILES = ROOT / "data" / "sample" / "a51_road_free_land_tiles.json"
 FP_TOL = 0.001           # 0.1% of a tile's pixels predicted as road where there is none
+LAND_FP_TOL = 0.001      # the same limit on the land tiles alone, so gains on the many easy
+                         # water/no-data tiles cannot hide worse hallucination on roofs or fields
 INVENTED_PX = 200        # a tile "has an invented road" at this many false-positive pixels
 
 
@@ -137,7 +140,9 @@ def road_free_report(deployed: tuple[list, list], candidate: tuple[list, list], 
             "tiles_with_invented_road": {
                 "deployed": float(np.mean([deployed[1][i] >= INVENTED_PX for i in idx])),
                 "candidate": float(np.mean([candidate[1][i] >= INVENTED_PX for i in idx]))}}
-    report["passes"] = report["all"]["fp_share"]["ci_low"] <= FP_TOL
+    report["passes_all"] = report["all"]["fp_share"]["ci_low"] <= FP_TOL
+    report["passes_land"] = "land" not in report or report["land"]["fp_share"]["ci_low"] <= LAND_FP_TOL
+    report["passes"] = report["passes_all"] and report["passes_land"]
     return report
 
 
@@ -179,7 +184,8 @@ def main() -> None:
     report = {"n_val_chips": len(chips), "n_apls_scored": len(ceilings),
               "ceiling_mean": float(np.mean(list(ceilings.values()))),
               "n_road_free_tiles": {k: kinds.count(k) for k in ("land", "water", "no-data")},
-              "deployed": DEPLOYED_CHECKPOINT, "fp_tolerance": FP_TOL, "deepglobe_tolerance": dg_tol,
+              "deployed": DEPLOYED_CHECKPOINT, "fp_tolerance": FP_TOL, "land_fp_tolerance": LAND_FP_TOL,
+              "deepglobe_tolerance": dg_tol,
               "candidates": candidates, "pick": pick}
     (run_dir / "val_apls_selection.json").write_text(json.dumps(report, indent=2))
     for n, c in candidates.items():

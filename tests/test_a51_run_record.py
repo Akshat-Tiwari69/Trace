@@ -53,6 +53,33 @@ def test_road_free_gate_fails_invented_roads_and_reports_land_separately():
     assert bad["water"]["tiles_with_invented_road"]["candidate"] == 0.0
 
 
+def test_land_negatives_have_their_own_gate():
+    # Better on 30 water tiles, worse on the 10 land tiles: the overall average passes,
+    # the land limit must still fail it.
+    from src.pipeline.p1_segment.val_apls_select import INVENTED_PX, road_free_report
+
+    kinds = ["land"] * 10 + ["water"] * 30
+    deployed = ([0.0] * 10 + [0.01] * 30, [0] * 10 + [INVENTED_PX * 10] * 30)
+    candidate = ([0.006] * 10 + [0.0] * 30, [INVENTED_PX * 5] * 10 + [0] * 30)
+    report = road_free_report(deployed, candidate, kinds)
+    assert report["passes_all"] and not report["passes_land"] and not report["passes"]
+
+
+def test_rejected_stage2_falls_back_to_stage1(tmp_path):
+    pytest.importorskip("modal")
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "deploy"))
+    from modal_train import finish_stage
+
+    rejected = finish_stage(tmp_path, "stage2", {"best": None, "history": []}, {"recipe": {}}, required=False)
+    saved = json.loads((tmp_path / "stage2.json").read_text())
+    assert rejected and saved["rejected"] and (tmp_path / "stage2.done").exists()   # retries skip it
+    assert not finish_stage(tmp_path, "stage1", {"best": {"epoch": 3}}, {}, required=True)
+    with pytest.raises(RuntimeError, match="kept no epoch"):
+        finish_stage(tmp_path, "stage1", {"best": None}, {}, required=True)          # nothing to fall back on
+
+
 def test_road_free_tiles_kinds(tmp_path):
     from src.pipeline.p1_segment.val_apls_select import road_free_tiles
 

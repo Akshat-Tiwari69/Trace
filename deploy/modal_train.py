@@ -63,6 +63,23 @@ def recipe(encoder: str = "mit_b5", pilot: bool = False) -> dict:
     }
 
 
+def finish_stage(out, name: str, summary: dict, record: dict, required: bool) -> bool:
+    """Write ``<name>.json`` and ``<name>.done``; return whether the stage was rejected.
+
+    A required stage (stage 1: nothing to fall back on) that kept no epoch raises. An
+    optional one (stage 2) is recorded as rejected and still marked done, so retries
+    do not repeat it and stage 1 is published as the only candidate."""
+    import json
+
+    rejected = not summary.get("best")
+    if rejected and required:
+        raise RuntimeError(f"{name} kept no epoch")
+    (out / f"{name}.json").write_text(json.dumps({**summary, "run": record, "rejected": rejected},
+                                                 default=str, indent=2))
+    (out / f"{name}.done").touch()
+    return rejected
+
+
 def _cache_imagenet_weights() -> None:
     import segmentation_models_pytorch as smp
 
@@ -160,27 +177,28 @@ def train(run: str, spec: dict) -> None:
     common = dict(finetune_pairs=sp_train, deepglobe_dir=SOURCES["deepglobe"], device="cuda",
                   seed=spec["seed"], **spec["common"])
 
-    def stage(name: str, **kwargs) -> None:
+    def stage(name: str, required: bool, **kwargs) -> bool:
+        """Run (or skip a finished) stage; return whether it was rejected."""
         if (out / f"{name}.done").exists():
             print(f"{name} already done -> skip", flush=True)
-            return
+            return json.loads((out / f"{name}.json").read_text()).get("rejected", False)
         last = out / f"{name}.last.pt"
         summary = finetune(FineTuneConfig(**common, **kwargs, out_path=str(out / f"{name}.pt"),
                                           resume=str(last) if last.exists() else None))
-        if not summary.get("best"):
-            raise RuntimeError(f"{name} kept no epoch")
-        summary["run"] = record                # recipe, data fingerprints, code revision(s)
-        (out / f"{name}.json").write_text(json.dumps(summary, default=str, indent=2))
-        (out / f"{name}.done").touch()
+        rejected = finish_stage(out, name, summary, record, required)  # record: recipe, data, code
         runs.commit()
+        return rejected
 
-    stage("stage1", init_checkpoint=str(init), extra_train_groups=cities,
+    stage("stage1", required=True, init_checkpoint=str(init), extra_train_groups=cities,
           extra_per_group=spec["grid_per_city"], **spec["stage1"])
-    stage("stage2", init_checkpoint=str(out / "stage1.pt"), **spec["stage2"])
+    stage2_rejected = stage("stage2", required=False, init_checkpoint=str(out / "stage1.pt"),
+                            **spec["stage2"])
+    if stage2_rejected:
+        print("stage2 kept no epoch (rejected) -> stage 1 is the only candidate", flush=True)
     candidates = ["stage1.pt"] + sorted(p.name for p in out.glob("stage2.ep*.pt"))
     (out / "candidates.json").write_text(json.dumps(
         {"select_by": "SpaceNet validation-chip APLS (src.pipeline.p1_segment.val_apls_select)",
-         "candidates": candidates}, indent=2))
+         "stage2_rejected": stage2_rejected, "candidates": candidates}, indent=2))
     stop.set()
     runs.commit()
     print(f"A51 {run} DONE -> candidates {candidates}", flush=True)
