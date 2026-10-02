@@ -31,7 +31,10 @@ from __future__ import annotations
 
 import modal
 
-GRID_CITIES = ("mumbai", "bengaluru")       # training cities (test-only cities never listed)
+GRID_CITIES = ("mumbai", "bengaluru", "delhi", "chennai", "ahmedabad", "jaipur", "lucknow", "pune",
+               "bhubaneswar", "patna", "guwahati")   # training cities
+TEST_ONLY = ("kolkata", "hyderabad")        # never trained on, never uploaded to the training volume
+assert not set(GRID_CITIES) & set(TEST_ONLY)
 SOURCES = {"spacenet": "/data/spacenet/dg_format", "deepglobe": "/data/deepglobe/train",
            **{c: f"/data/{c}_grid/dg_format" for c in GRID_CITIES}}
 data = modal.Volume.from_name("trace-train-data", create_if_missing=True)
@@ -43,6 +46,9 @@ def recipe(encoder: str = "mit_b5", pilot: bool = False) -> dict:
     return {
         "encoder": encoder, "pilot": pilot, "seed": 2026, "grid_cities": list(GRID_CITIES),
         "pilot_cap": 400 if pilot else None,      # tiles per source: speed/cost check only
+        # Fresh draw per city per epoch: every city counts equally and the epoch size is fixed
+        # (repeating cities up to the largest would roughly double it with eleven cities).
+        "grid_per_city": 400 if pilot else 3000,
         "common": {"deepglobe_val": 200, "image_size": 512, "batch_size": 8, "num_workers": 8,
                    "grayscale_p": 0.7, "occlusion": True, "cldice_weight": 0.0,
                    "cosine": True, "max_grad_norm": 1.0},
@@ -138,11 +144,9 @@ def train(run: str, spec: dict) -> None:
     if spec["pilot_cap"]:
         sp_train = sp_train[: spec["pilot_cap"]]
         cities = {c: p[: spec["pilot_cap"]] for c, p in cities.items()}
-    # Balance cities roughly equally (the smaller is repeated), as in A50e.
-    n_max = max(len(p) for p in cities.values())
-    extra = [pair for p in cities.values() for pair in p * max(1, round(n_max / len(p)))]
     print(f"A51 {run}: encoder {spec['encoder']} | SpaceNet train {len(sp_train)} (held-out {len(held)} reserved) | "
-          + " | ".join(f"{c} {len(p)}" for c, p in cities.items()) + f" | grid total {len(extra)}", flush=True)
+          + " | ".join(f"{c} {len(p)}" for c, p in cities.items())
+          + f" | {spec['grid_per_city']} per city per epoch", flush=True)
 
     init = out / "init_imagenet.pt"
     if not init.exists():
@@ -168,7 +172,8 @@ def train(run: str, spec: dict) -> None:
         (out / f"{name}.done").touch()
         runs.commit()
 
-    stage("stage1", init_checkpoint=str(init), extra_train_pairs=extra, **spec["stage1"])
+    stage("stage1", init_checkpoint=str(init), extra_train_groups=cities,
+          extra_per_group=spec["grid_per_city"], **spec["stage1"])
     stage("stage2", init_checkpoint=str(out / "stage1.pt"), **spec["stage2"])
     candidates = ["stage1.pt"] + sorted(p.name for p in out.glob("stage2.ep*.pt"))
     (out / "candidates.json").write_text(json.dumps(

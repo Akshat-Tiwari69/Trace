@@ -80,6 +80,9 @@ class FineTuneConfig:
     warmup_epochs: int = 0               # A51: linear warm-up length when cosine=True
     max_grad_norm: float = 0.0           # A51: >0 clips gradients (from-ImageNet runs)
     save_every_epoch: bool = False       # A51: also write <out>.epNN.pt for every DeepGlobe-keeping epoch
+    extra_train_groups: dict | None = None   # A51: {city: pairs}, train-only, a fresh draw every epoch...
+    extra_per_group: int = 0             # ...of this many pairs per city (smaller cities repeat), so
+                                         # every city counts equally and the epoch size stays fixed
     val_fraction: float = 0.15
     deepglobe_iou_tolerance: float = 0.005   # max allowed DeepGlobe drop vs v1
     device: str = "cpu"
@@ -230,6 +233,29 @@ def _cosine_scheduler(optimizer, cfg: FineTuneConfig, steps_per_epoch: int, star
     return torch.optim.lr_scheduler.LambdaLR(optimizer, factor, last_epoch=(start_epoch - 1) * steps - 1)
 
 
+class _PerGroupEpochSampler(torch.utils.data.Sampler):
+    """Each epoch: every base index once, plus a fresh draw of ``per_group`` indices
+    from each group's contiguous range (a group smaller than ``per_group`` is repeated
+    whole, plus a random remainder), all shuffled together. Uses the loader's seeded
+    generator, so runs are reproducible and a resume continues the same stream."""
+
+    def __init__(self, n_base: int, group_sizes: list[int], per_group: int, generator: torch.Generator):
+        self.n_base, self.group_sizes, self.per_group, self.generator = n_base, group_sizes, per_group, generator
+
+    def __len__(self) -> int:
+        return self.n_base + self.per_group * len(self.group_sizes)
+
+    def __iter__(self):
+        picks, start = [torch.arange(self.n_base)], self.n_base
+        for size in self.group_sizes:
+            reps, rest = divmod(self.per_group, size)
+            picks += [torch.arange(size) + start] * reps
+            picks.append(torch.randperm(size, generator=self.generator)[:rest] + start)
+            start += size
+        order = torch.cat(picks)
+        yield from order[torch.randperm(len(order), generator=self.generator)].tolist()
+
+
 def _last_path(out_path: str | Path) -> Path:
     """Rolling full-state checkpoint path beside the best model (A19).
 
@@ -291,11 +317,21 @@ def finetune(cfg: FineTuneConfig) -> dict:
     loader_generator.manual_seed(cfg.seed)
     if resume_state and resume_state.get("loader_rng_state") is not None:
         loader_generator.set_state(resume_state["loader_rng_state"].cpu())
-    train_ds = RoadTileDataset(train_pairs, build_train_transform(cfg.image_size, occlusion=cfg.occlusion,
-                                                                  grayscale_p=cfg.grayscale_p),
+    groups = [list(pairs) for pairs in (cfg.extra_train_groups or {}).values()]
+    if groups and (cfg.extra_per_group <= 0 or not all(groups) or cfg.crops_per_image != 1):
+        raise ValueError("extra_train_groups needs extra_per_group > 0, non-empty groups and crops_per_image=1")
+    train_ds = RoadTileDataset(train_pairs + [pair for group in groups for pair in group],
+                               build_train_transform(cfg.image_size, occlusion=cfg.occlusion,
+                                                     grayscale_p=cfg.grayscale_p),
                                crops_per_image=cfg.crops_per_image,
                                foreground_bias=cfg.foreground_bias)
-    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True,
+    sampler = (_PerGroupEpochSampler(len(train_pairs), [len(g) for g in groups], cfg.extra_per_group,
+                                     loader_generator) if groups else None)
+    if groups:
+        print(f"per-epoch draw: {cfg.extra_per_group} pairs from each of {len(groups)} groups "
+              f"(sizes {[len(g) for g in groups]}) + {len(train_pairs)} base = {len(sampler)} per epoch")
+    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=sampler is None,
+                              sampler=sampler, drop_last=True,
                               num_workers=cfg.num_workers, generator=loader_generator,
                               persistent_workers=cfg.num_workers > 0,
                               pin_memory=cfg.device != "cpu")

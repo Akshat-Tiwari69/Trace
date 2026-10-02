@@ -179,6 +179,46 @@ def test_finetune_save_every_epoch_and_flags_not_beating_init(tmp_path):
     assert summary["beats_init"] == (summary["best"]["indian_iou"] > summary["v1_indian"])
 
 
+def test_per_group_sampler_draws_a_fixed_fresh_share_per_city():
+    from src.pipeline.p1_segment.finetune import _PerGroupEpochSampler
+
+    # base 0..9, big city 10..109 (100 pairs), small city 110..114 (5 pairs), 12 per city
+    sampler = _PerGroupEpochSampler(10, [100, 5], 12, torch.Generator().manual_seed(1))
+    first, second = list(sampler), list(sampler)
+    assert len(first) == len(sampler) == 10 + 2 * 12
+    for epoch in (first, second):
+        assert sorted(i for i in epoch if i < 10) == list(range(10))          # base: every pair once
+        assert sum(10 <= i < 110 for i in epoch) == 12                         # fixed share per city
+        small = sorted(i for i in epoch if i >= 110)
+        assert len(small) == 12 and set(small) == set(range(110, 115))        # small city repeats
+    assert {i for i in first if 10 <= i < 110} != {i for i in second if 10 <= i < 110}   # fresh draw
+    again = _PerGroupEpochSampler(10, [100, 5], 12, torch.Generator().manual_seed(1))
+    assert list(again) == first                                                # reproducible
+
+
+def test_finetune_trains_on_per_city_draws(tmp_path):
+    ft, dg = tmp_path / "ft", tmp_path / "dg"
+    for i in range(5):
+        _write_pair(ft, f"c{i}")
+    for i in range(6):
+        _write_pair(dg, f"d{i}")
+    cities = {}
+    for city, n in (("big", 6), ("small", 2)):
+        for i in range(n):
+            _write_pair(tmp_path / city, f"{city}{i}")
+        cities[city] = [(tmp_path / city / f"{city}{i}_sat.jpg", tmp_path / city / f"{city}{i}_mask.png")
+                        for i in range(n)]
+    init = tmp_path / "v1.pt"
+    _tiny_v1_checkpoint(init)
+    common = dict(init_checkpoint=init, finetune_dir=ft, deepglobe_dir=dg, deepglobe_subset=2,
+                  deepglobe_val=2, out_path=tmp_path / "v2.pt", image_size=64, batch_size=2, epochs=1,
+                  finetune_oversample=1, deepglobe_iou_tolerance=1.0, device="cpu")
+    summary = finetune(FineTuneConfig(extra_train_groups=cities, extra_per_group=3, **common))
+    assert summary["best"] is not None
+    with pytest.raises(ValueError, match="extra_per_group"):
+        finetune(FineTuneConfig(extra_train_groups=cities, extra_per_group=0, **common))
+
+
 def test_cosine_scheduler_warms_up_decays_and_resumes_on_the_curve():
     from src.pipeline.p1_segment.finetune import _cosine_scheduler
 
