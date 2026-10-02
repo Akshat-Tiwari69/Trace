@@ -238,6 +238,53 @@ def test_finetune_resume_continues_from_next_epoch(tmp_path):
     assert [r["epoch"] for r in resumed["history"]] == [1, 2, 3]  # epoch-1 row carried over
 
 
+def test_finetune_resume_hands_cuda_rng_states_back_on_cpu(tmp_path, monkeypatch):
+    """A51: on a GPU run the `.last` is loaded with map_location="cuda", which puts the
+    CUDA RNG states on the GPU; set_rng_state_all only takes CPU ByteTensors (this
+    crashed the first Modal resume). Simulated so it runs on CPU-only machines."""
+    import src.pipeline.p1_segment.finetune as ft_mod
+    from src.pipeline.p1_segment.finetune import _last_path
+
+    class OnGpu:  # a ByteTensor that map_location="cuda" moved to the GPU
+        def __init__(self, t):
+            self.t = t
+
+        def cpu(self):
+            return self.t
+
+    def set_states(states):
+        assert all(isinstance(s, torch.Tensor) for s in states), "RNG state must be a torch.ByteTensor"
+        received.extend(states)
+
+    def load_on_gpu(path, map_location="cpu"):
+        state = real_load(path)
+        state["cuda_rng_states"] = [OnGpu(s) for s in state["cuda_rng_states"]]
+        return state
+
+    received, real_load = [], ft_mod.load_train_state
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "manual_seed_all", lambda seed: None)
+    monkeypatch.setattr(torch.cuda, "get_rng_state_all", lambda: [torch.zeros(4, dtype=torch.uint8)])
+    monkeypatch.setattr(torch.cuda, "set_rng_state_all", set_states)
+    monkeypatch.setattr(ft_mod, "load_train_state", load_on_gpu)
+    ft, dg = tmp_path / "ft", tmp_path / "dg"
+    for i in range(5):
+        _write_pair(ft, f"c{i}")
+    for i in range(6):
+        _write_pair(dg, f"d{i}")
+    init = tmp_path / "v1.pt"
+    _tiny_v1_checkpoint(init)
+    out = tmp_path / "v2.pt"
+    common = dict(init_checkpoint=init, finetune_dir=ft, deepglobe_dir=dg,
+                  deepglobe_subset=3, deepglobe_val=2, out_path=out, image_size=64,
+                  batch_size=2, finetune_oversample=2, deepglobe_iou_tolerance=1.0, device="cpu")
+
+    finetune(FineTuneConfig(epochs=1, **common))
+    resumed = finetune(FineTuneConfig(epochs=2, resume=_last_path(out), **common))
+    assert resumed["start_epoch"] == 2
+    assert len(received) == 1 and received[0].dtype == torch.uint8
+
+
 def test_finetune_sdt_bce_weight_runs_end_to_end(tmp_path):
     """A41: --sdt-bce forwards to ComboLoss and the run completes on CPU."""
     ft, dg = tmp_path / "ft", tmp_path / "dg"

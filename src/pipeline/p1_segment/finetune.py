@@ -325,7 +325,8 @@ def finetune(cfg: FineTuneConfig) -> dict:
                 float(np_state["cached_gaussian"]),
             ))
         if torch.cuda.is_available() and resume_state.get("cuda_rng_states") is not None:
-            torch.cuda.set_rng_state_all(resume_state["cuda_rng_states"])
+            # map_location="cuda" moved these to the GPU; set_rng_state_all needs CPU ByteTensors.
+            torch.cuda.set_rng_state_all([s.cpu() for s in resume_state["cuda_rng_states"]])
         start_epoch = resume_state["epoch"] + 1
         print(f"resumed from {cfg.resume} @ epoch {resume_state['epoch']} -> starting epoch {start_epoch}",
               flush=True)
