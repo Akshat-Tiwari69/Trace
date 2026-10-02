@@ -28,8 +28,8 @@ import torch
 # Single source of truth for the deployed segmentation checkpoint (A36).
 # Every CLI default / help text / error message should reference these, not a
 # hard-coded path, so a re-deploy is a one-line change here.
-DEPLOYED_CHECKPOINT = "models/road_pan.pt"
-DEPLOYED_RELEASE = "a4-roadseg-v3.2"
+DEPLOYED_CHECKPOINT = "models/road_v3_3.pt"
+DEPLOYED_RELEASE = "a4-roadseg-v3.3"
 VALIDATION_INFERENCE_PROTOCOL = "hann_blended_probability_v1"
 
 # ImageNet stats — the MiT encoders are pretrained on ImageNet, so train-time

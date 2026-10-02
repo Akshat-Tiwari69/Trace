@@ -33,11 +33,12 @@ SpaceNet-5 Mumbai has been repeatedly consulted, so these are **development-benc
 
 | Checkpoint | Development-selected threshold | RGB IoU | Gray-proxy IoU | Legacy tile-mask APLS |
 |---|---:|---:|---:|---:|
-| **v3.2** `road_pan.pt` | 0.52 | **0.4594** | **0.4177** | **0.4987** |
+| **v3.3** `road_v3_3.pt` (deployed) | 0.50 | **0.4699** | **0.4461** | — |
+| v3.2 `road_pan.pt` | 0.52 | 0.4594 | 0.4177 | 0.4987 |
 | v3/v3.1 weights | 0.50 | 0.4493 | 0.4046 | 0.4374 |
 | v1 weights | 0.50 sweep result | 0.3993 | 0.3447 | 0.4198 |
 
-The released v1 deploy threshold is `0.44`; its row above is a development sweep at `0.50`, not the v1 release protocol. Exact fixed-threshold tables and source JSON are in [Evaluation.md](docs/Evaluation.md).
+v3.3 was scored with the current evaluation code, under which v3.2 measures 0.4564 RGB / 0.4158 gray; on the 127-chip common-unit APLS gate v3.3 scores 0.3375 vs v3.2's 0.2821 (+0.0555, 95% CI [+0.0371, +0.0755]). The released v1 deploy threshold is `0.44`; its row above is a development sweep at `0.50`, not the v1 release protocol. Exact fixed-threshold tables and source JSON are in [Evaluation.md](docs/Evaluation.md).
 
 ### Graph-first research evidence
 
@@ -76,12 +77,12 @@ Open `http://127.0.0.1:8000`. The committed sample needs no model, GPU, or Modal
 
 ## Run your own image through P1→P3
 
-Install the full environment from [SETUP.md](SETUP.md) and download `road_pan.pt` from the [`a4-roadseg-v3.2` model release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.2) into ignored `models/`.
+Install the full environment from [SETUP.md](SETUP.md) and download `road_v3_3.pt` from the [`a4-roadseg-v3.3` model release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.3) into ignored `models/`.
 
 ```bash
 python -m src.pipeline.run_pipeline \
   --image data/raw/your_tile.tif \
-  --checkpoint models/road_pan.pt \
+  --checkpoint models/road_v3_3.pt \
   --aoi your_area \
   --resolution-m 1.0 \
   --postprocess

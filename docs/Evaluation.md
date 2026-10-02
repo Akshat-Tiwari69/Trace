@@ -202,7 +202,7 @@ when every stage is reused.
 | A50 v3.2 recipe + Mumbai grid corpus (frozen encoder, epoch 10) | APLS `0.2899` vs `0.2821`, CI `[-0.0065, +0.0227]`; held-out IoU `0.3997` vs `0.4564` (gray `0.3537` vs `0.4158`) | rejected: learned a broader road definition than SpaceNet's |
 | A50b = A50 + SpaceNet-only stage 2 (5 epochs) | APLS `0.2878` vs `0.2821`, CI `[-0.0048, +0.0166]`, 70/127 wins; IoU `0.4490` vs `0.4564` (gray `0.4121` vs `0.4158`) | tie, not promoted: stage 2 repairs the definition but adds nothing on Mumbai |
 | A50c = two stages, encoder ×0.1, with grid corpus | APLS `0.3429`, `+0.0608` CI `[+0.0391, +0.0839]`, 95/127 wins; IoU `0.4791` (gray `0.4588`); Kolkata `+0.0591` | passes; not deployable (restricted training data) |
-| A50d = A50c without the grid corpus (control) | APLS `0.3375`, `+0.0555` CI `[+0.0371, +0.0755]`, 99/127 wins; IoU `0.4699` (gray `0.4461`); Kolkata `+0.0263` | passes; same data provenance as v3.2 → promotion candidate pending release checks |
+| A50d = A50c without the grid corpus (control) | APLS `0.3375`, `+0.0555` CI `[+0.0371, +0.0755]`, 99/127 wins; IoU `0.4699` (gray `0.4461`); Kolkata `+0.0263` | passes; same data provenance as v3.2 → released as `a4-roadseg-v3.3` (2026-10-02) |
 | A50e = A50c recipe, joint Mumbai + Bengaluru grids, balanced | APLS `0.3543`, `+0.0722` CI `[+0.0523, +0.0943]`, 99/127 wins; IoU `0.4633` (gray `0.4419`); Kolkata `+0.0928` | best routing; restricted training data; next: add Delhi |
 
 ## Promotion protocol for A46

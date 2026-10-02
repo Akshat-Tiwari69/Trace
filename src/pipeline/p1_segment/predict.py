@@ -10,7 +10,7 @@ mask for an image, and write it at the P1 artifact-contract path
 Example
 -------
     python -m src.pipeline.p1_segment.predict \
-        --image data/raw/panaji_tile.tif --checkpoint models/road_pan.pt --aoi panaji
+        --image data/raw/panaji_tile.tif --checkpoint models/road_v3_3.pt --aoi panaji
 
 Reads jpg/png via OpenCV and GeoTIFF via rasterio (``read_image_any``, A26):
 1-band PAN is percentile-stretched to 3-channel grey, ≥3-band imagery uses the
