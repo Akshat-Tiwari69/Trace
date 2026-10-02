@@ -48,10 +48,12 @@ image = (
 app = modal.App("trace-train", image=image)
 
 
-@app.function(gpu="A100-40GB", cpu=16, memory=65536, timeout=24 * 3600,
+# Sized from a live a51-b5 profile: GPU ~85% busy, 12 loader workers ~1 core total, 12 GB RAM.
+# Modal bills the reservation, so more cores/RAM only cost money.
+@app.function(gpu="A100-40GB", cpu=4, memory=32768, timeout=24 * 3600,
               volumes={"/data": data, "/runs": runs}, retries=modal.Retries(max_retries=2))
 def train(run: str, encoder: str = "mit_b5", epochs1: int = 12, epochs2: int = 5,
-          batch: int = 8, workers: int = 12, pilot: bool = False) -> None:
+          batch: int = 8, workers: int = 8, pilot: bool = False) -> None:
     import json
     import os
     import sys
