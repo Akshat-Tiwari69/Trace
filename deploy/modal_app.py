@@ -1,7 +1,7 @@
 """Serverless-GPU road-segmentation endpoint (Modal) for the Route Resilience app.
 
-Runs the deployed SegFormer MiT-B3 + SCSE checkpoint (`road_pan.pt`, release
-a4-roadseg-v3.2) on a T4 that scales to zero. The dashboard POSTs a base64 image
+Runs the deployed SegFormer MiT-B3 + SCSE checkpoint (`road_v3_3.pt`, release
+a4-roadseg-v3.3) on a T4 that scales to zero. The dashboard POSTs a base64 image
 with the shared key in an HTTP header and gets back a base64 binary road-mask
 PNG. Only `model.py` is
 vendored (torch/smp/numpy only), so none of the repo's heavy geo `__init__` chain
@@ -17,13 +17,15 @@ from fastapi import Request
 
 MODEL_URL = (
     "https://github.com/Akshat-Tiwari69/Trace/releases/download/"
-    "a4-roadseg-v3.2/road_pan.pt"
+    "a4-roadseg-v3.3/road_v3_3.pt"
 )
-# SHA-256 of the release asset above (== local models/road_pan.pt). The image
+# SHA-256 of the release asset above (== local models/road_v3_3.pt). The image
 # build fails closed on mismatch so a tampered/corrupted download can never be
 # baked in. Recompute (Get-FileHash / sha256sum) when a new release is deployed.
-MODEL_SHA256 = "0ebedf973c0ffe0b1148d3de38382d17ac88398c6a55f4550d661a6b1e9eed1d"
-MODEL_PATH = "/model/road_pan.pt"
+# Rollback target: a4-roadseg-v3.2/road_pan.pt,
+# sha256 0ebedf973c0ffe0b1148d3de38382d17ac88398c6a55f4550d661a6b1e9eed1d.
+MODEL_SHA256 = "944ae64e0156046db643f9805688eeb9563bce579e9c06f0156ae6a55cb8bc12"
+MODEL_PATH = "/model/road_v3_3.pt"
 
 # Payload guardrails for the public endpoint. The UI enforces the same original-
 # byte limit; derive the base64 ceiling so transport expansion cannot disagree.
@@ -57,7 +59,7 @@ def _bake_checkpoint() -> None:
         raise RuntimeError(
             f"checkpoint checksum mismatch: expected {MODEL_SHA256}, got {digest}. "
             "Refusing to bake an unverified model into the image. If this is a new "
-            "release, update MODEL_SHA256 from the local models/road_pan.pt."
+            "release, update MODEL_SHA256 from the local release checkpoint."
         )
 
 
