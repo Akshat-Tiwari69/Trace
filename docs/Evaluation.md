@@ -281,3 +281,23 @@ A51 trains MiT-B5 + SCSE U-Net from ImageNet on Modal (`deploy/modal_train.py`, 
 - **Run record.** `run.json` holds the resolved recipe, a fingerprint of each data folder (complete non-empty image–mask pairs, stems missing half a pair, SHA-256 of sorted name/size) and the code revision of every launch; a CPU pre-flight refuses empty or half-uploaded sources and any run directory recorded with a different recipe or data before a GPU is billed. Pilots get their own `-pilot` directory.
 
 A first full launch (old protocol) was stopped after epoch 1 (Indian val 0.4477, DeepGlobe 0.5505) to right-size the reservation; its resume exposed a crash restoring CUDA RNG states (fixed). It is superseded and not scored.
+
+### A51 result (`a51-mit_b5`, 2026-10-05/06)
+
+Training: stage 1 reached Indian val (pooled, road-free tiles included) 0.5198 and DeepGlobe 0.6464 at epoch 12 (v3.3 on the same tiles: 0.5122 and 0.6653), gray gap −2% (v3.3 −3%); epochs took ~26–29 min on the A100 (45,074 tiles). Stage 2 kept no epoch better than stage 1 on Indian val (best 0.5185) and was flagged `beats_init: false`. A laptop sleep cancelled the attached client during epoch 5 (fixed: the full run is now spawned); the run resumed from the epoch-4 checkpoint. Full run ≈ $18 on Modal.
+
+Selection (`val_apls_select`, 85 scorable validation chips, ceiling 0.587): all six candidates passed both checks against v3.3; **stage 1 was picked** (val APLS 0.3543; stage-2 epochs 0.3450–0.3531). For stage 1: road-free false-positive share 0.0005 vs v3.3 0.0048 (CI [−0.0073, −0.0018]); on the 36 land tiles 0.0025 vs 0.0278 (CI [−0.0426, −0.0108]), tiles with an invented road 17% vs 36%; DeepGlobe 0.6464 vs 0.6525 at each model's own threshold (Δ −0.0061, CI [−0.0199, +0.0061], passes the 0.03 limit).
+
+Final comparison, scored once on the pick, each model at its own threshold:
+
+| Metric | v3.2 | v3.3 (deployed) | A50e | **A51** | A51 − v3.3, 95% CI |
+|---|---:|---:|---:|---:|---|
+| 127 frozen chips, APLS | 0.2821 | 0.3375 | 0.3543 | **0.3839** | **+0.0463 [+0.0279, +0.0650]** |
+| Held-out IoU, RGB (508 tiles) | 0.4564 | 0.4699 | 0.4633 | **0.5256** | +0.0557 |
+| Held-out IoU, gray | 0.4158 | 0.4461 | 0.4419 | **0.5152** | +0.0691 |
+| Kolkata (unseen), APLS, 400 tiles | 0.2375 | 0.2638 | 0.3302 | **0.4117** | **+0.1479 [+0.1312, +0.1648]** |
+| Kolkata IoU | 0.2638 | 0.2771 | 0.3388 | **0.3877** | +0.1107 [+0.1015, +0.1197] |
+| Hyderabad (unseen), APLS, 400 tiles | 0.3286 | 0.3678 | 0.4442 | **0.5073** | **+0.1395 [+0.1220, +0.1562]** |
+| Hyderabad IoU | 0.3922 | 0.4087 | 0.4744 | **0.5167** | +0.1080 [+0.0986, +0.1173] |
+
+A51 minus A50e: chips +0.0295 [+0.0124, +0.0466], Kolkata APLS +0.0814, Hyderabad APLS +0.0630 (all CIs exclude zero). Baseline numbers reproduce the earlier records exactly. Reading: A51 is the best segmentation model so far on every metric, by a wide margin on unseen cities (+0.14 APLS over v3.3 on both). Caveats: the unseen-city labels come from the same map source as the training corpus, so part of that gain may be shared labelling style; and A51 trains on the restricted grid corpus, so under the v3.3 decision it is research-only unless the owner decides otherwise.

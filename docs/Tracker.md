@@ -133,7 +133,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **R33** | ✅ | Release `a4-roadseg-v3.3` (A50d) to production | Akshat | A50 | Release asset + checksum published; Modal staging run pixel-identical to local; production deploy; live upload returns threshold 0.50 and a finished analysis; docs point at v3.3 |
-| **A51** | 🔄 | Train MiT-B5 from ImageNet on Modal with everything learned so far | Akshat | A50 | `deploy/modal_train.py` pilot passes end to end; review fixes (atomic checkpoints, run record + CPU pre-flight, seeded init/augmentation, road-free tiles kept, pooled val IoU, per-epoch candidates picked by validation-chip APLS, DeepGlobe vs v3.3) tested; full run scored on the 127 chips, held-out IoU and Kolkata vs v3.3/A50e |
+| **A51** | ✅ | Train MiT-B5 from ImageNet on Modal with everything learned so far (result: best model on every metric; research-only, restricted data) | Akshat | A50 | `deploy/modal_train.py` pilot passes end to end; review fixes (atomic checkpoints, run record + CPU pre-flight, seeded init/augmentation, road-free tiles kept, pooled val IoU, per-epoch candidates picked by validation-chip APLS, DeepGlobe vs v3.3) tested; full run scored on the 127 chips, held-out IoU and Kolkata vs v3.3/A50e |
 | **X1** | ✅ | Final backup demo capture | Akshat | F9, O1, O2, F13 deployed | Live `12d0a5c` capture of the sample flow and a cold-start browser upload: 9 screenshots, both exports, `capture.json` and `x1-demo.webm` (SHA-256 `498bd8fd…c91fb8ee`) under ignored `.tmp/x1/20260929T1642Z/` |
 
 ### Research backlog disposition
@@ -207,6 +207,13 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-10-03 to 2026-10-06 (Akshat — A51: eleven-city corpus and result)**
+
+- Built nine more city grids at full municipal extent (Delhi, Chennai, Ahmedabad, Jaipur, Lucknow, Pune, Bhubaneswar, Patna, Guwahati; Hyderabad test-only) with a local controller that finishes every failed cell before moving on and verifies each Modal upload by file count. All cities ended with zero failed cells.
+- A51 (MiT-B5 from ImageNet, eleven cities at 3,000 tiles each per epoch, road-free tiles kept) trained on Modal for ≈ $18. Stage 2 did not improve on stage 1, which the validation-APLS selection picked; every candidate passed the road-free, land and DeepGlobe checks against v3.3.
+- Final scoring (`Evaluation.md` A51): 127-chip APLS 0.3839 vs v3.3 0.3375 (+0.0463, CI excludes zero); held-out IoU 0.526 RGB / 0.515 gray vs 0.470 / 0.446; unseen Kolkata +0.148 and Hyderabad +0.140 APLS over v3.3; about 10× fewer invented-road pixels on road-free tiles. A51 uses the restricted grid corpus, so v3.3 stays deployed pending an owner decision.
+- Fixed along the way: a laptop sleep cancelled the attached Modal client (full runs are now spawned); AMP-skipped steps no longer advance the LR schedule; the v3.2 vs v3.3 registration choice changes about 0.5% of cells (recorded).
 
 **2026-10-02 (Akshat — A51: Modal training)**
 
