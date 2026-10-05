@@ -266,6 +266,30 @@ def test_train_one_epoch_steps_scheduler_per_batch_and_clips():
     assert scheduler.last_epoch == 3 and loss > 0
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="AMP step skipping needs CUDA")
+def test_amp_skipped_step_does_not_advance_the_scheduler():
+    # A51: AMP skips the optimizer step on an overflowing batch; stepping the scheduler
+    # anyway drew PyTorch's "lr_scheduler.step() before optimizer.step()" warning.
+    import warnings
+
+    from src.pipeline.p1_segment.train import train_one_epoch
+
+    net = torch.nn.Conv2d(3, 1, 1).cuda()
+    batches = [(torch.randn(2, 3, 8, 8), torch.rand(2, 1, 8, 8).round()) for _ in range(3)]
+    calls = iter([float("inf"), 1.0, 1.0])                  # the first batch overflows
+
+    def loss_fn(logits, target):
+        return torch.nn.functional.binary_cross_entropy_with_logits(logits, target) * next(calls)
+
+    opt = torch.optim.SGD(net.parameters(), lr=0.1)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lambda step: 1.0)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        train_one_epoch(net, batches, opt, loss_fn, "cuda", torch.amp.GradScaler("cuda"), scheduler=scheduler)
+    assert scheduler.last_epoch == 2                         # two real steps, the skipped one not counted
+    assert not [w for w in caught if "lr_scheduler.step()" in str(w.message)]
+
+
 def test_freeze_encoder_disables_encoder_grads(tmp_path):
     model = build_model(encoder_weights=None, decoder_attention_type="scse")
     cfg = FineTuneConfig(init_checkpoint="x", finetune_dir=tmp_path, encoder_lr_scale=0.0)
