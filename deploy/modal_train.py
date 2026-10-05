@@ -217,4 +217,10 @@ def main(run: str = "", encoder: str = "mit_b5", pilot: bool = False) -> None:
     spec = recipe(encoder, pilot)
     code = {"commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain", "--", "src", "deploy"))}
     prepare.remote(run, spec, code)
-    train.remote(run, spec)
+    if pilot:
+        train.remote(run, spec)       # short: wait, so the pilot's exit code can gate the full run
+    else:
+        # Long: spawn and return. A client left attached (even with --detach) cancels the running
+        # attempt when the laptop sleeps or the network drops -- that stopped a51-mit_b5 at epoch 5.
+        call = train.spawn(run, spec)
+        print(f"spawned {run} ({call.object_id}); follow with: modal app logs trace-train", flush=True)
