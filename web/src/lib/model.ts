@@ -52,12 +52,10 @@ export function formatCoordinates([west, south, east, north]: readonly number[])
   return `${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? "N" : "S"} / ${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? "E" : "W"}`;
 }
 
-// A link without ?city= predates the picker; its scenario belongs to Panaji.
+// ?city= opens that atlas; anything else lands on the picker.
 export function initialAoi(search: string): string | null {
-  const params = new URLSearchParams(search);
-  const city = params.get("city");
-  if (city && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(city)) return city;
-  return ["mode", "junction", "failed"].some((key) => params.has(key)) ? "panaji_demo" : null;
+  const city = new URLSearchParams(search).get("city");
+  return city && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(city) ? city : null;
 }
 
 export function formatMetric(value: number | null | undefined, format: MetricFormat = {}): string {

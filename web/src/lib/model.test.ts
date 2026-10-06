@@ -68,10 +68,10 @@ describe("atlas helpers", () => {
     expect(groups.map((group) => group.map((row) => row.aoi))).toEqual([["delhi_cp_imagery", "delhi_cp_osm"], ["pune_osm"]]);
   });
 
-  it("opens Panaji for links that predate the picker", () => {
+  it("opens the named city, otherwise the picker", () => {
     expect(initialAoi("")).toBeNull();
     expect(initialAoi("?city=pune_shivajinagar_osm&mode=stress")).toBe("pune_shivajinagar_osm");
-    expect(initialAoi("?mode=stress&failed=278")).toBe("panaji_demo");
+    expect(initialAoi("?mode=stress&failed=278")).toBeNull();
     expect(initialAoi("?city=../etc")).toBeNull();
   });
 

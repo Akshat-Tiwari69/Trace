@@ -38,7 +38,7 @@ export default function MethodologyPage() {
       <section className="limits-section">
         <div><p className="eyebrow">What this sample proves</p><h2>A contract-shaped, CPU-runnable planning demonstration.</h2></div>
         <ul>
-          <li>Panaji sample graph and analysis artifacts are committed and reproducible.</li>
+          <li>OpenStreetMap city atlases and their analysis artifacts are committed and reproducible; imagery atlases record the model release and checkpoint that produced them.</li>
           <li>Mumbai model work is a repeatedly consulted development benchmark, not an untouched final test.</li>
           <li>No claim of live traffic, universal city generalization, or authoritative emergency routing is made.</li>
           <li>Graph-first research candidates stay out of production until metrics, provenance, licensing and deployment checks all pass.</li>

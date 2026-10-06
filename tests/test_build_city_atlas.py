@@ -39,8 +39,8 @@ def test_record_counts_match_the_artifacts(tmp_path):
 
 
 def test_committed_atlases_match_their_records():
-    records = [ROOT / "data/sample/panaji_demo_atlas.json", *sorted((ROOT / "data/atlas").glob("*_atlas.json"))]
-    assert len(records) == 1 + len(AREAS)
+    records = sorted((ROOT / "data/atlas").glob("*_atlas.json"))
+    assert len(records) == len(AREAS)
     for path in records:
         record = json.loads(path.read_text(encoding="utf-8"))
         graph = path.with_name(f"{record['aoi']}_graph.geojson")

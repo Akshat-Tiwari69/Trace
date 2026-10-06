@@ -44,14 +44,14 @@ def test_health_and_security_headers(client: TestClient) -> None:
 
 
 def test_sample_manifest_is_contract_shaped(client: TestClient) -> None:
-    response = client.get("/api/v1/aois/panaji_demo")
+    response = client.get("/api/v1/aois/delhi_cp_osm")
     assert response.status_code == 200
     payload = response.json()
-    assert payload["aoi"] == "panaji_demo"
-    assert payload["label"] == "Panaji, Goa"
+    assert payload["aoi"] == "delhi_cp_osm"
+    assert payload["label"] == "Connaught Place, Delhi"
     assert payload["node_count"] == len(payload["critical_nodes"])
     assert payload["edge_count"] > 0
-    assert payload["graph_url"] == "/api/v1/aois/panaji_demo/graph"
+    assert payload["graph_url"] == "/api/v1/aois/delhi_cp_osm/graph"
     assert payload["critical_nodes"][0]["rank"] == 1
     assert payload["resilience_curve"][0]["targeted_resilience_index"] == 1.0
     assert len(payload["bounds"]) == 4
@@ -65,7 +65,7 @@ def test_unknown_aoi_is_not_interpolated_into_paths(client: TestClient) -> None:
 
 
 def test_graph_artifact_has_etag_and_conditional_response(client: TestClient) -> None:
-    response = client.get("/api/v1/aois/panaji_demo/graph")
+    response = client.get("/api/v1/aois/delhi_cp_osm/graph")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/geo+json")
     assert response.json()["type"] == "FeatureCollection"
@@ -73,7 +73,7 @@ def test_graph_artifact_has_etag_and_conditional_response(client: TestClient) ->
     assert len(etag) == 66 and etag.startswith('"')
 
     cached = client.get(
-        "/api/v1/aois/panaji_demo/graph",
+        "/api/v1/aois/delhi_cp_osm/graph",
         headers={"if-none-match": etag},
     )
     assert cached.status_code == 304
@@ -83,30 +83,32 @@ def test_graph_artifact_has_etag_and_conditional_response(client: TestClient) ->
 def test_simulation_preserves_finite_baseline_universe(client: TestClient) -> None:
     response = client.post(
         "/api/v1/simulations",
-        json={"aoi": "panaji_demo", "removed_node_ids": [278]},
+        json={"aoi": "delhi_cp_osm", "removed_node_ids": [200]},
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["removed_node_ids"] == [278]
-    summary = client.get("/api/v1/aois/panaji_demo").json()
+    assert payload["removed_node_ids"] == [200]
+    summary = client.get("/api/v1/aois/delhi_cp_osm").json()
     assert payload["baseline_node_count"] == summary["node_count"]
     assert 0.0 <= payload["resilience_index"] <= 1.0
     assert payload["efficiency_loss"] >= 0.0
     assert math.isfinite(payload["baseline_efficiency"])
     assert math.isfinite(payload["perturbed_efficiency"])
     assert 0.0 <= payload["largest_cc_fraction"] <= 1.0
-    curve_zero = client.get("/api/v1/aois/panaji_demo").json()["resilience_curve"][0]
+    curve_zero = client.get("/api/v1/aois/delhi_cp_osm").json()["resilience_curve"][0]
     expected_method = curve_zero.get("efficiency_method", "exact")
     assert payload["efficiency_method"] == expected_method
     assert payload["efficiency_sample_size"] == curve_zero.get("efficiency_k")
-    assert payload["efficiency_seed"] == curve_zero.get("efficiency_seed")
+    # A seed only matters when efficiency is sampled; exact curves still record one.
+    expected_seed = curve_zero.get("efficiency_seed") if curve_zero.get("efficiency_k") else None
+    assert payload["efficiency_seed"] == expected_seed
     assert "representative_route" in payload
 
 
 def test_zero_removal_simulation_is_identity(client: TestClient) -> None:
     response = client.post(
         "/api/v1/simulations",
-        json={"aoi": "panaji_demo", "removed_node_ids": []},
+        json={"aoi": "delhi_cp_osm", "removed_node_ids": []},
     )
     assert response.status_code == 200
     payload = response.json()
@@ -120,14 +122,14 @@ def test_zero_removal_simulation_is_identity(client: TestClient) -> None:
 def test_simulation_rejects_unknown_or_unbounded_node_sets(client: TestClient) -> None:
     unknown = client.post(
         "/api/v1/simulations",
-        json={"aoi": "panaji_demo", "removed_node_ids": [9999]},
+        json={"aoi": "delhi_cp_osm", "removed_node_ids": [9999]},
     )
     assert unknown.status_code == 422
     assert unknown.json() == {"detail": "Unknown node IDs: 9999"}
 
     too_many = client.post(
         "/api/v1/simulations",
-        json={"aoi": "panaji_demo", "removed_node_ids": list(range(51))},
+        json={"aoi": "delhi_cp_osm", "removed_node_ids": list(range(51))},
     )
     assert too_many.status_code == 422
 
@@ -136,12 +138,12 @@ def test_simulation_cache_normalizes_equivalent_node_sets(client: TestClient) ->
     api.simulate.cache_clear()
     client.post(
         "/api/v1/simulations",
-        json={"aoi": "panaji_demo", "removed_node_ids": [278, 12, 278]},
+        json={"aoi": "delhi_cp_osm", "removed_node_ids": [200, 13, 200]},
     )
     before = api.simulate.cache_info()
     client.post(
         "/api/v1/simulations",
-        json={"aoi": "panaji_demo", "removed_node_ids": [12, 278]},
+        json={"aoi": "delhi_cp_osm", "removed_node_ids": [13, 200]},
     )
     after = api.simulate.cache_info()
     assert after.hits == before.hits + 1
@@ -379,7 +381,7 @@ def test_html_revalidates_after_deploys_while_hashed_assets_stay_immutable(
         page = static_client.get("/")
         revalidated = static_client.get("/", headers={"if-none-match": page.headers["etag"]})
         chunk = static_client.get("/_next/static/chunks/app.js")
-        summary = static_client.get("/api/v1/aois/panaji_demo")
+        summary = static_client.get("/api/v1/aois/delhi_cp_osm")
     assert page.headers["cache-control"] == "no-cache"
     assert revalidated.status_code == 304
     assert chunk.headers["cache-control"] == api.ARTIFACT_CACHE
@@ -396,7 +398,7 @@ def test_expensive_public_work_is_bounded(monkeypatch: pytest.MonkeyPatch) -> No
         responses = [
             guarded_client.post(
                 "/api/v1/simulations",
-                json={"aoi": "panaji_demo", "removed_node_ids": [index]},
+                json={"aoi": "delhi_cp_osm", "removed_node_ids": [index]},
             )
             for index in range(13)
         ]
@@ -459,7 +461,8 @@ def test_module_workers_are_served_as_javascript(tmp_path: Path) -> None:
 
 def test_atlas_listing_has_provenance_without_loading_graphs(client: TestClient) -> None:
     rows = {row["aoi"]: row for row in client.get("/api/v1/aois").json()["aois"]}
-    assert {"panaji_demo", "pune_shivajinagar_osm", "delhi_cp_osm"} <= set(rows)
+    assert {"pune_shivajinagar_osm", "delhi_cp_osm"} <= set(rows)
+    assert "panaji_demo" not in rows
     pune = rows["pune_shivajinagar_osm"]
     assert (pune["label"], pune["region"], pune["source"], pune["model"]) == ("Shivajinagar, Pune", "IN-MH", "osm", None)
     assert pune["node_count"] > 0 and 0 <= pune["worst_single_loss"] <= 1
