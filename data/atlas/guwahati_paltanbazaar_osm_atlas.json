@@ -1,0 +1,23 @@
+{
+  "area": "guwahati_paltanbazaar",
+  "label": "Paltan Bazaar, Guwahati",
+  "region": "IN-AS",
+  "bbox": [
+    91.74499,
+    26.173517,
+    91.76501,
+    26.191483
+  ],
+  "source": "osm",
+  "model": null,
+  "seen_in_training": null,
+  "osm_snapshot": "2026-06-27",
+  "aoi": "guwahati_paltanbazaar_osm",
+  "node_count": 719,
+  "edge_count": 927,
+  "critical_count": 72,
+  "worst_single_loss": 0.046398,
+  "graph_sha256": "42d3d8211cdc48a3f2d86db5cab85bfeb9b57d38b2831e1d330bc98ab5497645",
+  "generated_utc": "2026-10-06T08:26:17+00:00",
+  "git_commit": "031a18718a2cb446bbaae1c1a2e01b76184c4d35"
+}

@@ -1,0 +1,23 @@
+{
+  "area": "chennai_tnagar",
+  "label": "T. Nagar, Chennai",
+  "region": "IN-TN",
+  "bbox": [
+    80.230779,
+    13.038517,
+    80.249221,
+    13.056483
+  ],
+  "source": "osm",
+  "model": null,
+  "seen_in_training": null,
+  "osm_snapshot": "2026-06-26",
+  "aoi": "chennai_tnagar_osm",
+  "node_count": 955,
+  "edge_count": 1363,
+  "critical_count": 96,
+  "worst_single_loss": 0.00917,
+  "graph_sha256": "0f69d13b21e959f600f513af7cdd4458da13b23eba35574fb896d2bd7fc91557",
+  "generated_utc": "2026-10-06T08:25:54+00:00",
+  "git_commit": "031a18718a2cb446bbaae1c1a2e01b76184c4d35"
+}

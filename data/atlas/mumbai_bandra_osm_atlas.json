@@ -1,0 +1,23 @@
+{
+  "area": "mumbai_bandra",
+  "label": "Bandra, Mumbai",
+  "region": "IN-MH",
+  "bbox": [
+    72.834005,
+    19.049333,
+    72.845995,
+    19.060667
+  ],
+  "source": "osm",
+  "model": null,
+  "seen_in_training": null,
+  "osm_snapshot": "2026-06-24",
+  "aoi": "mumbai_bandra_osm",
+  "node_count": 375,
+  "edge_count": 525,
+  "critical_count": 38,
+  "worst_single_loss": 0.008936,
+  "graph_sha256": "f8d6b973275f179aca996aaec8a913485d827a54fe6a7b869da52edb81904655",
+  "generated_utc": "2026-10-06T08:27:36+00:00",
+  "git_commit": "031a18718a2cb446bbaae1c1a2e01b76184c4d35"
+}

@@ -1,0 +1,23 @@
+{
+  "area": "panaji_demo",
+  "label": "Panaji, Goa",
+  "region": "IN-GA",
+  "bbox": [
+    73.823,
+    15.488,
+    73.842,
+    15.501
+  ],
+  "source": "osm",
+  "model": null,
+  "seen_in_training": null,
+  "note": "Simulated occlusion (80 patches) was punched into the OSM mask so P2 healing has gaps to bridge.",
+  "aoi": "panaji_demo",
+  "node_count": 573,
+  "edge_count": 828,
+  "critical_count": 57,
+  "worst_single_loss": 0.015153,
+  "graph_sha256": "15dbf0d453f8676000bb49927157b218d41e57ef0a83e844008f4cd991d5fe61",
+  "generated_utc": "2026-10-06T08:18:39+00:00",
+  "git_commit": "031a18718a2cb446bbaae1c1a2e01b76184c4d35"
+}

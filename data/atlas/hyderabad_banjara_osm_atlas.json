@@ -1,0 +1,23 @@
+{
+  "area": "hyderabad_banjara",
+  "label": "Banjara Hills, Hyderabad",
+  "region": "IN-TG",
+  "bbox": [
+    78.435585,
+    17.413517,
+    78.454415,
+    17.431483
+  ],
+  "source": "osm",
+  "model": null,
+  "seen_in_training": null,
+  "osm_snapshot": "2026-06-26",
+  "aoi": "hyderabad_banjara_osm",
+  "node_count": 1172,
+  "edge_count": 1571,
+  "critical_count": 117,
+  "worst_single_loss": 0.013825,
+  "graph_sha256": "4ab575d46694790896e8abc03ae9180464958b1fa609a9ceb9f6c9482dc08c20",
+  "generated_utc": "2026-10-06T08:26:41+00:00",
+  "git_commit": "031a18718a2cb446bbaae1c1a2e01b76184c4d35"
+}

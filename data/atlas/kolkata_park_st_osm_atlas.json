@@ -1,0 +1,23 @@
+{
+  "area": "kolkata_park_st",
+  "label": "Park Street, Kolkata",
+  "region": "IN-WB",
+  "bbox": [
+    88.345273,
+    22.543517,
+    88.364727,
+    22.561483
+  ],
+  "source": "osm",
+  "model": null,
+  "seen_in_training": null,
+  "osm_snapshot": "2026-06-26",
+  "aoi": "kolkata_park_st_osm",
+  "node_count": 700,
+  "edge_count": 995,
+  "critical_count": 70,
+  "worst_single_loss": 0.024661,
+  "graph_sha256": "8d7c4886508f17469b80046af0ee9ebd5bc0c6b3599eed980046023e028c87ee",
+  "generated_utc": "2026-10-06T08:27:20+00:00",
+  "git_commit": "031a18718a2cb446bbaae1c1a2e01b76184c4d35"
+}
