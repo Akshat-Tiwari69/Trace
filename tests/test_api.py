@@ -455,3 +455,24 @@ def test_module_workers_are_served_as_javascript(tmp_path: Path) -> None:
         worker = static_client.get("/maplibre/maplibre-gl-worker.mjs")
     assert worker.status_code == 200
     assert worker.headers["content-type"].startswith("text/javascript")
+
+
+def test_atlas_listing_has_provenance_without_loading_graphs(client: TestClient) -> None:
+    rows = {row["aoi"]: row for row in client.get("/api/v1/aois").json()["aois"]}
+    assert {"panaji_demo", "pune_shivajinagar_osm", "delhi_cp_osm"} <= set(rows)
+    pune = rows["pune_shivajinagar_osm"]
+    assert (pune["label"], pune["region"], pune["source"], pune["model"]) == ("Shivajinagar, Pune", "IN-MH", "osm", None)
+    assert pune["node_count"] > 0 and 0 <= pune["worst_single_loss"] <= 1
+    assert all(row["source"] in {"osm", "imagery"} for row in rows.values())
+
+
+def test_any_registered_atlas_can_be_explored_and_stressed(client: TestClient) -> None:
+    summary = client.get("/api/v1/aois/pune_shivajinagar_osm").json()
+    assert summary["label"] == "Shivajinagar, Pune" and summary["source"] == "osm"
+    assert summary["graph_url"] == "/api/v1/aois/pune_shivajinagar_osm/graph"
+    assert client.get(summary["graph_url"]).status_code == 200
+    top = summary["critical_nodes"][0]["node_id"]
+    result = client.post("/api/v1/simulations", json={"aoi": "pune_shivajinagar_osm", "removed_node_ids": [top]}).json()
+    assert result["aoi"] == "pune_shivajinagar_osm"
+    # The precomputed targeted curve removes the top-ranked junction first.
+    assert result["resilience_index"] == pytest.approx(summary["resilience_curve"][1]["targeted_resilience_index"], abs=1e-3)

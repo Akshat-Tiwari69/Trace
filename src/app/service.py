@@ -21,7 +21,9 @@ from src.pipeline.p3_analysis.resilience import global_efficiency, resilience_in
 
 ROOT = Path(__file__).resolve().parents[2]
 SAMPLE_DIR = ROOT / "data" / "sample"
-SAMPLE_AOI = "panaji_demo"
+# Where {aoi}_atlas.json records live (build_city_atlas). The private directory
+# holds imagery-derived atlases that exist only on the application host.
+ATLAS_DIRS = (SAMPLE_DIR, ROOT / "data" / "atlas", ROOT / "data" / "atlas_private")
 DEFAULT_EFFICIENCY_SEED = 42
 
 
@@ -264,16 +266,34 @@ class AoiDataset:
     simulation_sample_size: int | None
     simulation_seed: int | None
     evidence: dict
+    record: dict
 
 
 @lru_cache(maxsize=1)
-def sample_dataset() -> AoiDataset:
-    graph_path = SAMPLE_DIR / "panaji_demo_graph.geojson"
+def atlas_registry() -> dict[str, tuple[Path, dict]]:
+    """``aoi -> (directory, atlas record)`` for every atlas present on this host."""
+    registry: dict[str, tuple[Path, dict]] = {}
+    for directory in ATLAS_DIRS:
+        for path in sorted(directory.glob("*_atlas.json")):
+            record = _json_file(path)
+            registry[str(record["aoi"])] = (directory, record)
+    return registry
+
+
+@lru_cache(maxsize=32)
+def load_dataset(aoi: str) -> AoiDataset:
+    """The analyzed atlas ``aoi``; raises ``KeyError`` for an unknown area.
+
+    ``aoi`` only selects a registry entry, so request text never reaches a path."""
+    directory, record = atlas_registry()[aoi]
+    aoi = str(record["aoi"])
+    graph_path = directory / f"{aoi}_graph.geojson"
+    evidence_path = directory / f"{aoi}_evidence_manifest.json"
     graph_bytes = graph_path.read_bytes()
     graph = _graph_from_geojson(json.loads(graph_bytes))
     xs = [float(data["x"]) for _, data in graph.nodes(data=True)]
     ys = [float(data["y"]) for _, data in graph.nodes(data=True)]
-    resilience_curve = _resilience_curve(SAMPLE_DIR / "panaji_demo_resilience.csv")
+    resilience_curve = _resilience_curve(directory / f"{aoi}_resilience.csv")
     if not resilience_curve or resilience_curve[0]["n_removed"] != 0:
         raise ValueError("sample resilience curve must begin at zero removals")
     baseline = _finite(resilience_curve[0]["targeted_efficiency"], "targeted_efficiency")
@@ -300,31 +320,44 @@ def sample_dataset() -> AoiDataset:
         graph=graph,
         graph_bytes=graph_bytes,
         graph_etag=f'"{hashlib.sha256(graph_bytes).hexdigest()}"',
-        critical_nodes=_criticality(SAMPLE_DIR / "panaji_demo_criticality.csv"),
+        critical_nodes=_criticality(directory / f"{aoi}_criticality.csv"),
         resilience_curve=resilience_curve,
         bounds=(min(xs), min(ys), max(xs), max(ys)),
         baseline_efficiency=baseline,
         simulation_baseline_efficiency=simulation_baseline,
         simulation_sample_size=sample_size,
         simulation_seed=seed,
-        evidence=_json_file(SAMPLE_DIR / "panaji_demo_evidence_manifest.json"),
+        evidence=_json_file(evidence_path) if evidence_path.exists() else {},
+        record=record,
     )
 
 
+# What the picker and the studio show about where an atlas came from.
+ATLAS_FIELDS = ("area", "label", "region", "source", "model", "seen_in_training", "note", "osm_snapshot")
+
+
+def list_atlases() -> list[dict]:
+    """Picker cards: provenance and headline stats, without loading any graph."""
+    stats = ("node_count", "edge_count", "critical_count", "worst_single_loss", "bbox")
+    rows = [
+        {"aoi": aoi, **{key: record.get(key) for key in (*ATLAS_FIELDS, *stats)}}
+        for aoi, (_, record) in atlas_registry().items()
+    ]
+    return sorted(rows, key=lambda row: (str(row["label"]), str(row["source"])))
+
+
 def aoi_summary(aoi: str) -> dict:
-    if aoi != SAMPLE_AOI:
-        raise KeyError(aoi)
-    dataset = sample_dataset()
+    dataset = load_dataset(aoi)
     return {
-        "aoi": SAMPLE_AOI,
-        "label": "Panaji, Goa",
+        "aoi": aoi,
+        **{key: dataset.record.get(key) for key in ATLAS_FIELDS},
         "coordinate_system": "EPSG:4326",
         "bounds": list(dataset.bounds),
         "node_count": dataset.graph.number_of_nodes(),
         "edge_count": dataset.graph.number_of_edges(),
         "critical_count": sum(row["is_critical"] for row in dataset.critical_nodes),
         "baseline_efficiency": dataset.baseline_efficiency,
-        "graph_url": f"/api/v1/aois/{SAMPLE_AOI}/graph",
+        "graph_url": f"/api/v1/aois/{aoi}/graph",
         "critical_nodes": dataset.critical_nodes,
         "resilience_curve": dataset.resilience_curve,
         "evidence": dataset.evidence,
@@ -333,9 +366,7 @@ def aoi_summary(aoi: str) -> dict:
 
 @lru_cache(maxsize=256)
 def _simulate_cached(aoi: str, removed_node_ids: tuple[int, ...]) -> dict:
-    if aoi != SAMPLE_AOI:
-        raise KeyError(aoi)
-    dataset = sample_dataset()
+    dataset = load_dataset(aoi)
     removed = list(removed_node_ids)
     unknown = [node for node in removed if node not in dataset.graph]
     if unknown:
@@ -360,7 +391,7 @@ def _simulate_cached(aoi: str, removed_node_ids: tuple[int, ...]) -> dict:
         else 0.0
     )
     return {
-        "aoi": SAMPLE_AOI,
+        "aoi": aoi,
         "removed_node_ids": removed,
         "baseline_node_count": dataset.graph.number_of_nodes(),
         "baseline_efficiency": _finite(metrics["baseline_efficiency"], "baseline_efficiency"),
