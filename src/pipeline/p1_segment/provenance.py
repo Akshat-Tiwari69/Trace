@@ -39,6 +39,58 @@ def git_commit() -> str | None:
         return None
 
 
+def dir_fingerprint(path: str | Path) -> dict:
+    """Cheap identity of a training-data folder: complete pairs (``<stem>_sat.jpg`` and
+    ``<stem>_mask.png`` both present and non-empty, as training pairs them), stems
+    missing half a pair, and a SHA-256 over sorted ``(name, size)`` entries. Catches
+    added, removed or resized files without reading gigabytes (A51: a mutable data
+    volume must not change a resumed run unnoticed); a same-size in-place rewrite is
+    out of scope."""
+    entries = sorted((e.name, e.stat().st_size) for e in os.scandir(path))
+    digest = hashlib.sha256("\n".join(f"{n}\t{s}" for n, s in entries).encode()).hexdigest()
+    sats = {n[: -len("_sat.jpg")]: s for n, s in entries if n.endswith("_sat.jpg")}
+    masks = {n[: -len("_mask.png")]: s for n, s in entries if n.endswith("_mask.png")}
+    complete = {stem for stem in sats.keys() & masks.keys() if sats[stem] > 0 and masks[stem] > 0}
+    return {"pairs": len(complete), "incomplete": len((sats.keys() | masks.keys()) - complete),
+            "sha256_names_sizes": digest}
+
+
+def record_run(run_dir: str | Path, record: dict, launch: dict, allow_code_change: bool = False) -> dict:
+    """Write or verify ``run_dir/run.json``: one run directory holds one recipe and
+    one dataset (A51: a pilot or a changed encoder must never reuse another run's
+    ``.done`` stages). Appends ``launch`` (code revision ``commit``/``dirty``, time)
+    on every launch. Raises ``RuntimeError`` on a recipe/data mismatch, on
+    unrecorded artifacts, or when the code differs from the previous launch (or
+    either tree was dirty) unless ``allow_code_change`` -- resuming under changed
+    code is then a deliberate, recorded choice. The file is replaced atomically."""
+    run_dir = Path(run_dir)
+    path = run_dir / "run.json"
+    record = json.loads(json.dumps(record))         # compare as JSON, the stored form
+    if path.exists():
+        saved = json.loads(path.read_text())
+        if {k: saved.get(k) for k in record} != record:
+            raise RuntimeError(f"{run_dir} was recorded with a different recipe or data; use a new run name")
+        launches = saved["launches"]
+        prev = launches[-1] if launches else {}
+        same_code = (prev.get("commit") == launch.get("commit")
+                     and not prev.get("dirty") and not launch.get("dirty"))
+        if not same_code and not allow_code_change:
+            raise RuntimeError(f"{run_dir}: code changed since the last launch ({prev.get('commit')} -> "
+                               f"{launch.get('commit')}, dirty {prev.get('dirty')}/{launch.get('dirty')}); "
+                               "pass allow_code_change to resume under the new code")
+        launch = {**launch, "allow_code_change": allow_code_change and not same_code}
+    elif run_dir.exists() and any(run_dir.iterdir()):
+        raise RuntimeError(f"{run_dir} has artifacts but no run.json; use a new run name")
+    else:
+        launches = []
+    record["launches"] = [*launches, launch]
+    run_dir.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"run.json.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(record, indent=2))
+    os.replace(tmp, path)                            # an interrupted write never truncates run.json
+    return record
+
+
 def build_provenance(
     checkpoint: str | Path,
     meta: dict,

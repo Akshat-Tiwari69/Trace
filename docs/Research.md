@@ -74,6 +74,7 @@ Raw/provider imagery is not redistributed. Dataset and imagery-provider terms mu
 - **Topology must gate promotion.** A38 and A41 improved pixel evidence while degrading APLS; both were rejected.
 - **Graph-first has measurable headroom.** A18 frozen beat v3.2 on the common chip/vector-GT frame; LoRA r=4 roughly doubled A18’s own raw/normalized APLS.
 - **File/provenance/evaluation correctness is model work.** Threshold, frame, unit, data split and coordinate mistakes can reverse a verdict.
+- **City diversity drives unseen-city routing (A51).** Training from ImageNet on eleven Indian city grids (equal per-city draws each epoch) with road-free tiles kept beat v3.3 by +0.046 APLS on the Mumbai chips and by +0.14 on two unseen cities, with ~10× fewer invented roads on road-free tiles. A SpaceNet-only second stage added nothing after this stage 1 (do not repeat without a reason).
 
 ### Negative-result ledger
 
@@ -167,6 +168,7 @@ The supported policy is simple:
 - training and heavy evaluation may use an optional local NVIDIA GPU, Colab or Kaggle;
 - recipes must fit a practical single-GPU environment or document why they do not;
 - P2/P3/dashboard remain CPU-capable;
+- cloud training (A51, Modal A100-40GB) is GPU-bound for MiT-B5 at 512 px (~85% busy, ~30 tiles/s): data loading needs about one core, so a 4-core/32 GB reservation suffices and extra workers or cores only add cost;
 - exact current installation instructions belong in `SETUP.md`, not in a timeless research claim about specific cloud quotas or GPU generations.
 
 ## Resilience research note

@@ -36,6 +36,26 @@ def test_pair_deepglobe_finds_pairs(tmp_path):
     assert len(pairs) == 2
 
 
+def _augmented_stream(pairs, seed):
+    import torch
+    from torch.utils.data import DataLoader
+
+    ds = RoadTileDataset(pairs, build_train_transform(64, occlusion=True, grayscale_p=0.5))
+    loader = DataLoader(ds, batch_size=1, num_workers=2,
+                        generator=torch.Generator().manual_seed(seed))
+    return [image for image, _ in loader]
+
+
+def test_augmentation_is_reproducible_and_distinct_per_worker(tmp_path):
+    # A51: Albumentations 2.x Compose RNGs were OS-seeded and pickled identically
+    # into every worker — unreproducible runs, and every worker drew the same stream.
+    _make_pair(tmp_path, "1")
+    pairs = pair_deepglobe(tmp_path) * 4      # one tile: differences come only from augmentation
+    first, again = _augmented_stream(pairs, 7), _augmented_stream(pairs, 7)
+    assert all(np.array_equal(a, b) for a, b in zip(first, again))     # same seed -> same run
+    assert not np.array_equal(first[0], first[1])   # items 0/1 come from workers 0/1
+
+
 def test_train_item_shapes_and_binary_mask(tmp_path):
     _make_pair(tmp_path, "1")
     ds = RoadTileDataset(pair_deepglobe(tmp_path), build_train_transform(64, occlusion=True))

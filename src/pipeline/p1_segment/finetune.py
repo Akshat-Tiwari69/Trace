@@ -76,6 +76,13 @@ class FineTuneConfig:
     cldice_weight: float = 0.1           # soft-clDice weight; 0 avoids its 8 GB skeletonize OOM (A12)
     sdt_bce_weight: float = 0.0          # A41 SDT-weighted BCE topology proxy; 0 = off
     num_workers: int = 0                 # DataLoader workers (0 = safe on low RAM, per A12)
+    cosine: bool = False                 # A51: warm-up + cosine LR decay to 3% (False = constant LR)
+    warmup_epochs: int = 0               # A51: linear warm-up length when cosine=True
+    max_grad_norm: float = 0.0           # A51: >0 clips gradients (from-ImageNet runs)
+    save_every_epoch: bool = False       # A51: also write <out>.epNN.pt for every DeepGlobe-keeping epoch
+    extra_train_groups: dict | None = None   # A51: {city: pairs}, train-only, a fresh draw every epoch...
+    extra_per_group: int = 0             # ...of this many pairs per city (smaller cities repeat), so
+                                         # every city counts equally and the epoch size stays fixed
     val_fraction: float = 0.15
     deepglobe_iou_tolerance: float = 0.005   # max allowed DeepGlobe drop vs v1
     device: str = "cpu"
@@ -154,22 +161,14 @@ def _read_val_pair(sat_path: str, mask_path: str):
 
 
 @torch.no_grad()
-def _iou_scores_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False) -> list[float]:
-    """Per-tile IoU from the Hann-blended probabilities used for calibration.
-
-    ``grayscale=True`` decolorizes each image (3-channel grey) before predicting —
-    a Cartosat-PAN proxy, so the fine-tune can watch the sensor-modality gap close
-    epoch-by-epoch instead of only at the end (A24).
-    """
-    import cv2
-
+def _iou_scores_on_pairs(model, pairs, tile_size, device, thr) -> list[float]:
+    """Per-tile IoU from the Hann-blended probabilities used for calibration
+    (DeepGlobe forget-check: the paired bootstrap needs per-tile scores)."""
     if not pairs:
         return []
     scores = []
     for sat_path, mask_path in pairs:
         img, gt = _read_val_pair(str(sat_path), str(mask_path))
-        if grayscale:
-            img = cv2.cvtColor(cv2.cvtColor(img, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
         probability = predict_large_prob(model, img, tile_size=tile_size, device=device)
         pred = probability >= thr
         inter = np.logical_and(pred, gt).sum()
@@ -179,30 +178,89 @@ def _iou_scores_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool =
 
 
 def _iou_on_pairs(model, pairs, tile_size, device, thr, grayscale: bool = False) -> float:
-    scores = _iou_scores_on_pairs(model, pairs, tile_size, device, thr, grayscale)
-    if not scores:
-        return float("nan")
-    # Plain float, not numpy float64 — this value is stored in the .last.pt
-    # train_state, which must stay weights_only=True-loadable (see model.py).
-    return float(np.mean(scores))
+    """Pooled Indian-validation IoU at one threshold (see ``_select_threshold``)."""
+    return _select_threshold(model, pairs, tile_size, device, (thr,), grayscale)[1]
 
 
 @torch.no_grad()
-def _select_threshold(model, pairs, tile_size, device, thresholds) -> tuple[float, float]:
-    """Calibrate the candidate threshold on Indian validation in one inference pass."""
+def _select_threshold(model, pairs, tile_size, device, thresholds,
+                      grayscale: bool = False) -> tuple[float, float]:
+    """Calibrate the candidate threshold on Indian validation in one inference pass.
+
+    Pooled IoU (sum of intersections / sum of unions), so road-free validation tiles
+    count through their false positives — a per-tile mean scores every road-free
+    tile 0 whatever is predicted, which hides invented roads (A51)."""
+    import cv2
+
     if not pairs:
         return float(thresholds[0]), float("nan")
-    accum = np.zeros(len(thresholds), dtype=float)
+    inter = np.zeros(len(thresholds), dtype=float)
+    union = np.zeros(len(thresholds), dtype=float)
     for sat_path, mask_path in pairs:
         image, gt = _read_val_pair(str(sat_path), str(mask_path))
+        if grayscale:
+            image = cv2.cvtColor(cv2.cvtColor(image, cv2.COLOR_RGB2GRAY), cv2.COLOR_GRAY2RGB)
         probability = predict_large_prob(model, image, tile_size=tile_size, device=device)
         for index, threshold in enumerate(thresholds):
             pred = probability >= threshold
-            union = np.logical_or(pred, gt).sum()
-            accum[index] += np.logical_and(pred, gt).sum() / max(union, 1)
-    means = accum / len(pairs)
-    best = int(np.argmax(means))
-    return float(thresholds[best]), float(means[best])
+            inter[index] += np.logical_and(pred, gt).sum()
+            union[index] += np.logical_or(pred, gt).sum()
+    ious = inter / np.maximum(union, 1)
+    best = int(np.argmax(ious))
+    # Plain floats, not numpy float64 — these land in the .last.pt train_state,
+    # which must stay weights_only=True-loadable (see model.py).
+    return float(thresholds[best]), float(ious[best])
+
+
+def _cosine_scheduler(optimizer, cfg: FineTuneConfig, steps_per_epoch: int, start_epoch: int = 1):
+    """Per-batch linear warm-up then cosine decay to 3% (the v1 ImageNet recipe's shape).
+
+    Bases are the configured decoder/encoder LRs, so a resumed run lands on the
+    same point of the curve instead of restarting it."""
+    import math
+
+    steps = max(1, steps_per_epoch)
+    total, warm = steps * cfg.epochs, steps * cfg.warmup_epochs
+
+    def factor(step: int) -> float:
+        if step < warm:
+            return (step + 1) / warm
+        phase = min(1.0, (step - warm) / max(1, total - warm))
+        return 0.03 + 0.97 * 0.5 * (1 + math.cos(math.pi * phase))
+
+    for group, base in zip(optimizer.param_groups, (cfg.lr, cfg.lr * cfg.encoder_lr_scale)):
+        group["initial_lr"] = base
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, factor, last_epoch=(start_epoch - 1) * steps - 1)
+
+
+class _PerGroupEpochSampler(torch.utils.data.Sampler):
+    """Each epoch: every base index once, plus a fresh draw of ``per_group`` indices
+    from each group's contiguous range (a group smaller than ``per_group`` is repeated
+    whole, plus a random remainder), all shuffled together; with no groups, a plain
+    shuffle. Each epoch's draw depends only on ``(seed, epoch)`` (``set_epoch``, as in
+    ``DistributedSampler``), not on a generator the DataLoader also consumes, so a
+    resumed run replays exactly the uninterrupted run's subsets and order."""
+
+    def __init__(self, n_base: int, group_sizes: list[int], per_group: int, seed: int):
+        self.n_base, self.group_sizes, self.per_group, self.seed = n_base, group_sizes, per_group, seed
+        self.epoch = 1
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+
+    def __len__(self) -> int:
+        return self.n_base + self.per_group * len(self.group_sizes)
+
+    def __iter__(self):
+        generator = torch.Generator().manual_seed(self.seed * 100_003 + self.epoch)
+        picks, start = [torch.arange(self.n_base)], self.n_base
+        for size in self.group_sizes:
+            reps, rest = divmod(self.per_group, size)
+            picks += [torch.arange(size) + start] * reps
+            picks.append(torch.randperm(size, generator=generator)[:rest] + start)
+            start += size
+        order = torch.cat(picks)
+        yield from order[torch.randperm(len(order), generator=generator)].tolist()
 
 
 def _last_path(out_path: str | Path) -> Path:
@@ -266,12 +324,24 @@ def finetune(cfg: FineTuneConfig) -> dict:
     loader_generator.manual_seed(cfg.seed)
     if resume_state and resume_state.get("loader_rng_state") is not None:
         loader_generator.set_state(resume_state["loader_rng_state"].cpu())
-    train_ds = RoadTileDataset(train_pairs, build_train_transform(cfg.image_size, occlusion=cfg.occlusion,
-                                                                  grayscale_p=cfg.grayscale_p),
+    groups = [list(pairs) for pairs in (cfg.extra_train_groups or {}).values()]
+    if groups and (cfg.extra_per_group <= 0 or not all(groups) or cfg.crops_per_image != 1):
+        raise ValueError("extra_train_groups needs extra_per_group > 0, non-empty groups and crops_per_image=1")
+    train_ds = RoadTileDataset(train_pairs + [pair for group in groups for pair in group],
+                               build_train_transform(cfg.image_size, occlusion=cfg.occlusion,
+                                                     grayscale_p=cfg.grayscale_p),
                                crops_per_image=cfg.crops_per_image,
                                foreground_bias=cfg.foreground_bias)
-    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True, drop_last=True,
-                              num_workers=cfg.num_workers, generator=loader_generator)
+    # Sampling (and per-city draws) comes from (seed, epoch) alone: a resume replays it exactly.
+    sampler = _PerGroupEpochSampler(len(train_ds) - sum(len(g) for g in groups), [len(g) for g in groups],
+                                    cfg.extra_per_group if groups else 0, cfg.seed)
+    if groups:
+        print(f"per-epoch draw: {cfg.extra_per_group} pairs from each of {len(groups)} groups "
+              f"(sizes {[len(g) for g in groups]}) + {len(train_pairs)} base = {len(sampler)} per epoch")
+    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, sampler=sampler, drop_last=True,
+                              num_workers=cfg.num_workers, generator=loader_generator,
+                              persistent_workers=cfg.num_workers > 0,
+                              pin_memory=cfg.device != "cpu")
     loss_fn = ComboLoss(bce_weight=0.4, dice_weight=0.4, lovasz_weight=0.2, cldice_weight=cfg.cldice_weight,
                        sdt_bce_weight=cfg.sdt_bce_weight)
     optimizer = _build_optimizer(model, cfg)
@@ -299,12 +369,19 @@ def finetune(cfg: FineTuneConfig) -> dict:
                 float(np_state["cached_gaussian"]),
             ))
         if torch.cuda.is_available() and resume_state.get("cuda_rng_states") is not None:
-            torch.cuda.set_rng_state_all(resume_state["cuda_rng_states"])
+            # map_location="cuda" moved these to the GPU; set_rng_state_all needs CPU ByteTensors.
+            torch.cuda.set_rng_state_all([s.cpu() for s in resume_state["cuda_rng_states"]])
         start_epoch = resume_state["epoch"] + 1
         print(f"resumed from {cfg.resume} @ epoch {resume_state['epoch']} -> starting epoch {start_epoch}",
               flush=True)
+    scheduler = _cosine_scheduler(optimizer, cfg, len(train_loader), start_epoch) if cfg.cosine else None
+    if scheduler is not None and resume_state and resume_state.get("scheduler"):
+        # The saved position, not epoch x batches: AMP-skipped steps do not advance the curve.
+        scheduler.load_state_dict(resume_state["scheduler"])
     for epoch in range(start_epoch, cfg.epochs + 1):
-        train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, cfg.device, scaler)
+        sampler.set_epoch(epoch)
+        train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, cfg.device, scaler,
+                                     scheduler=scheduler, max_grad_norm=cfg.max_grad_norm)
         selected_thr, ind_iou = _select_threshold(
             model, indian_val, cfg.image_size, cfg.device, cfg.selection_thresholds
         )
@@ -332,20 +409,23 @@ def finetune(cfg: FineTuneConfig) -> dict:
               f"(v1 {base_ind:.4f}) | DeepGlobe {dg_iou:.4f} (v1 {base_dg:.4f}){gap} | "
               f"DG delta CI [{dg_ci.ci_low:+.4f},{dg_ci.ci_high:+.4f}] | "
               f"{'KEEPS dg' if keeps_dg else 'regresses dg'}")
+        epoch_meta = {
+            **{k: meta.get(k) for k in ("encoder", "arch", "decoder_attention_type", "image_size")},
+            "threshold": selected_thr,
+            "finetuned_from": str(cfg.init_checkpoint), "encoder_frozen": frozen,
+            "indian_val_iou": float(ind_iou), "deepglobe_val_iou": float(dg_iou),
+            "indian_gray_val_iou": float(gray_iou),  # A24: Cartosat-PAN proxy
+            "v1_indian_val_iou": float(base_ind), "v1_deepglobe_val_iou": float(base_dg),
+            "deepglobe_delta_ci_low": dg_ci.ci_low,
+            "deepglobe_delta_ci_high": dg_ci.ci_high,
+            "validation_inference_protocol": VALIDATION_INFERENCE_PROTOCOL,
+            "epoch": epoch,
+        }
+        if cfg.save_every_epoch and keeps_dg:  # A51: candidates for routing-APLS selection
+            save_checkpoint(model, out.with_name(f"{out.stem}.ep{epoch:02d}{out.suffix}"), meta=epoch_meta)
         if score > best_score:
             best_score, best_row = score, row
-            save_checkpoint(model, out, meta={
-                **{k: meta.get(k) for k in ("encoder", "arch", "decoder_attention_type", "image_size")},
-                "threshold": selected_thr,
-                "finetuned_from": str(cfg.init_checkpoint), "encoder_frozen": frozen,
-                "indian_val_iou": float(ind_iou), "deepglobe_val_iou": float(dg_iou),
-                "indian_gray_val_iou": float(gray_iou),  # A24: Cartosat-PAN proxy
-                "v1_indian_val_iou": float(base_ind), "v1_deepglobe_val_iou": float(base_dg),
-                "deepglobe_delta_ci_low": dg_ci.ci_low,
-                "deepglobe_delta_ci_high": dg_ci.ci_high,
-                "validation_inference_protocol": VALIDATION_INFERENCE_PROTOCOL,
-                "epoch": epoch,
-            })
+            save_checkpoint(model, out, meta=epoch_meta)
             print(f"  saved new best -> {out} (Indian {ind_iou:.4f}, DeepGlobe {dg_iou:.4f})")
         # A19: rolling full-state checkpoint so a kill mid-run can --resume from here.
         save_checkpoint(model, last, meta={
@@ -368,6 +448,7 @@ def finetune(cfg: FineTuneConfig) -> dict:
                 "cached_gaussian": float(np.random.get_state()[4]),
             },
             "cuda_rng_states": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            "scheduler": scheduler.state_dict() if scheduler is not None else None,
         })
 
     if best_row is None:
@@ -378,7 +459,13 @@ def finetune(cfg: FineTuneConfig) -> dict:
               f"(v1 {base_ind:.4f}, {best_row['indian_iou']-base_ind:+.4f}) | "
               f"DeepGlobe {best_row['deepglobe_iou']:.4f} (v1 {base_dg:.4f}, "
               f"{best_row['deepglobe_iou']-base_dg:+.4f}) -> {out}")
-    return {"best": best_row, "v1_deepglobe": base_dg, "v1_indian": base_ind, "history": history,
+    # A51: an epoch can "win" while every epoch is worse than the starting checkpoint.
+    beats_init = best_row is not None and best_row["indian_iou"] > base_ind
+    if best_row is not None and not beats_init:
+        print(f"WARNING: no epoch beat the starting checkpoint on Indian val ({base_ind:.4f}); "
+              f"keep {cfg.init_checkpoint} as a candidate.")
+    return {"best": best_row, "beats_init": beats_init,
+            "v1_deepglobe": base_dg, "v1_indian": base_ind, "history": history,
             "n_train": len(train_pairs), "start_epoch": start_epoch, "resumed": bool(cfg.resume),
             "validation_inference_protocol": VALIDATION_INFERENCE_PROTOCOL}
 

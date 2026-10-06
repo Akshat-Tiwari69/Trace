@@ -20,8 +20,14 @@ def train_one_epoch(
     loss_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
     device: str = "cpu",
     scaler: torch.amp.GradScaler | None = None,
+    scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
+    max_grad_norm: float = 0.0,
 ) -> float:
-    """Run one training epoch; return the mean batch loss."""
+    """Run one training epoch; return the mean batch loss.
+
+    ``scheduler`` (if given) steps once per batch the optimizer actually took (AMP
+    skips steps whose gradients overflowed while the loss scale calibrates);
+    ``max_grad_norm > 0`` clips gradients (the v1 ImageNet recipe used 1.0)."""
     model.train()
     use_amp = scaler is not None and device != "cpu"
     total, n = 0.0, 0
@@ -33,11 +39,21 @@ def train_one_epoch(
             loss = loss_fn(logits, masks)
         if use_amp:
             scaler.scale(loss).backward()
+            if max_grad_norm > 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+            scale = scaler.get_scale()
             scaler.step(optimizer)
             scaler.update()
+            stepped = scaler.get_scale() >= scale   # update() lowers the scale only after a skipped step
         else:
             loss.backward()
+            if max_grad_norm > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
+            stepped = True
+        if scheduler is not None and stepped:
+            scheduler.step()
         total += float(loss.item())
         n += 1
     return total / max(n, 1)

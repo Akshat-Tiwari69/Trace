@@ -150,6 +150,20 @@ class RoadTileDataset(Dataset):
         self.transform = transform
         self.crops_per_image = max(1, crops_per_image)
         self.foreground_bias = foreground_bias
+        self._transform_seed: int | None = None
+
+    def _seed_transform(self) -> None:
+        """Albumentations 2.x ``Compose`` keeps private RNGs (OS-entropy seeded by
+        default) that pickle identically into every DataLoader worker: runs were
+        unreproducible and all workers drew the same augmentation stream. Reseed
+        this process's copy once from torch's seed — the worker seed PyTorch derives
+        from the loader generator (distinct per worker), or the global seed with
+        ``num_workers=0``."""
+        info = torch.utils.data.get_worker_info()
+        seed = (info.seed if info is not None else torch.initial_seed()) % 2**32
+        if seed != self._transform_seed and hasattr(self.transform, "set_random_seed"):
+            self.transform.set_random_seed(seed)
+        self._transform_seed = seed
 
     def __len__(self) -> int:
         return len(self.pairs) * self.crops_per_image
@@ -166,6 +180,7 @@ class RoadTileDataset(Dataset):
 
         image, mask = self._read(*self.pairs[idx % len(self.pairs)])
         if self.transform is not None:
+            self._seed_transform()
             out = self.transform(image=image, mask=mask)
             if (self.foreground_bias > 0 and mask.any()
                     and random.random() < self.foreground_bias):

@@ -15,7 +15,9 @@ P2 then skeletonises.
 
 from __future__ import annotations
 
+import os
 import pickle
+import uuid
 import warnings
 from itertools import islice
 from pathlib import Path
@@ -98,10 +100,14 @@ def save_checkpoint(
     blob: dict[str, Any] = {"state_dict": _unwrap(model).state_dict(), "meta": meta or {}}
     if train_state is not None:
         blob["train_state"] = train_state
-    torch.save(blob, path)
+    # Atomic: a kill mid-save must never truncate the checkpoint a resume needs.
+    tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex[:8]}.tmp")   # unique: no two writers share it
+    torch.save(blob, tmp)
+    os.replace(tmp, path)
 
 
-def load_checkpoint_blob(path: str | Path, map_location: str = "cpu") -> dict[str, Any]:
+def load_checkpoint_blob(path: str | Path, map_location: str = "cpu",
+                         allow_pickle: bool = True) -> dict[str, Any]:
     """Read a checkpoint dict, preferring torch's safe ``weights_only=True`` path.
 
     Checkpoints written by :func:`save_checkpoint` hold only tensors and
@@ -112,10 +118,14 @@ def load_checkpoint_blob(path: str | Path, map_location: str = "cpu") -> dict[st
     those fall back to a full pickle load with a one-time warning, since
     re-serialising the already-deployed checkpoint is out of scope here.
     ``map_location`` (default "cpu") keeps GPU-trained checkpoints CPU-safe.
+    ``allow_pickle=False`` refuses that fallback: use it for checkpoints from a
+    source you do not control (a full pickle load can run arbitrary code).
     """
     try:
         return torch.load(path, map_location=map_location, weights_only=True)
     except pickle.UnpicklingError:
+        if not allow_pickle:
+            raise ValueError(f"{path}: needs an unrestricted pickle load; refused (untrusted source)") from None
         warnings.warn(
             f"{path}: legacy pickled checkpoint (weights_only=True load failed) — "
             "falling back to a full pickle load. Re-save with save_checkpoint() to "
@@ -139,6 +149,7 @@ def load_checkpoint(
     path: str | Path,
     encoder: str | None = None,
     map_location: str = "cpu",
+    allow_pickle: bool = True,
 ) -> tuple[torch.nn.Module, dict[str, Any]]:
     """Rebuild the model (random encoder, no download) and load saved weights.
 
@@ -148,7 +159,7 @@ def load_checkpoint(
     silently rebuilt as mit_b0/unet — unless ``encoder`` explicitly asserts the
     architecture.
     """
-    ckpt = load_checkpoint_blob(path, map_location=map_location)
+    ckpt = load_checkpoint_blob(path, map_location=map_location, allow_pickle=allow_pickle)
     meta = ckpt.get("meta") or {}
     if not meta and encoder is None:
         raise ValueError(f"{path} has no 'meta' — cannot verify architecture; refusing to guess")
