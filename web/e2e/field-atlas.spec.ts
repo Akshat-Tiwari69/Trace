@@ -114,3 +114,8 @@ test("map canvas fills its frame", async ({ page }) => {
   expect(frame!.height).toBeGreaterThan(0);
   expect(map!.height).toBeCloseTo(frame!.height, 1);
 });
+
+test("a shared scenario URL shows its metrics without pressing Run", async ({ page }) => {
+  await page.goto("/?mode=stress&junction=278&failed=278");
+  await expect(page.getByText("20.0% efficiency lost")).toBeVisible();
+});
