@@ -23,7 +23,12 @@ export function MetricStrip({ nodeCount, edgeCount, criticalCount, simulation }:
       <div><span>Junctions</span><strong>{nodeCount}</strong></div>
       <div><span>Road links</span><strong>{edgeCount}</strong></div>
       <div><span>Critical</span><strong>{criticalCount}</strong></div>
-      <div><span>Active component</span><strong>{formatMetric(simulation?.active_largest_cc_fraction ?? simulation?.largest_cc_fraction, { digits: 3 })}</strong></div>
+      <div>
+        <span>Active component</span>
+        {simulation
+          ? <strong>{formatMetric(simulation.active_largest_cc_fraction ?? simulation.largest_cc_fraction, { digits: 3 })}</strong>
+          : <strong aria-label="No failures simulated">—</strong>}
+      </div>
     </section>
   );
 }

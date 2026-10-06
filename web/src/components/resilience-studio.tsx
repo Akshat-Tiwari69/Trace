@@ -185,7 +185,7 @@ export function ResilienceStudio() {
         </div>
         <ModeSwitcher mode={mode} onChange={changeMode} />
         <nav className="top-actions" aria-label="Project actions">
-          <Link href="/methodology">Method</Link>
+          <Link href="/methodology" prefetch={false}>Method</Link>
           <ExportMenu summary={summary} graph={graph} removedNodes={removedNodes} simulation={simulation} />
           <button type="button" className="upload-trigger" onClick={() => setUploadOpen(true)}>
             Analyze imagery

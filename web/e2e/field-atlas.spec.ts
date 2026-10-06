@@ -113,9 +113,17 @@ test("map canvas fills its frame", async ({ page }) => {
   expect(map).not.toBeNull();
   expect(frame!.height).toBeGreaterThan(0);
   expect(map!.height).toBeCloseTo(frame!.height, 1);
+  await expect(page.getByText("Drawing the road network")).toBeHidden();
 });
 
 test("a shared scenario URL shows its metrics without pressing Run", async ({ page }) => {
   await page.goto("/?mode=stress&junction=278&failed=278");
   await expect(page.getByText("20.0% efficiency lost")).toBeVisible();
+});
+
+test("the network still draws when the basemap style fails", async ({ page }) => {
+  await page.route("https://tiles.openfreemap.org/styles/positron", (route) => route.fulfill({ status: 503, body: "" }));
+  await page.reload();
+  await expect(page.getByText("Basemap tiles are unavailable")).toBeVisible();
+  await expect(page.getByText("Drawing the road network")).toBeHidden();
 });
