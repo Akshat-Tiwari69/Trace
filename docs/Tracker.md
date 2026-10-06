@@ -229,7 +229,7 @@ flowchart LR
 **2026-10-06 (Akshat — C2/C3: atlas API and picker)**
 
 - The API serves any registered atlas (`GET /api/v1/aois`; the Panaji singleton is gone) and `/` is now a city picker. Verified locally with 13 OSM + 6 v4 imagery atlases: Delhi CP imagery opens with "Extracted from imagery · a4-roadseg-v4 · Area unseen by the model"; failing its top junction J-257 costs 13.8% (RI 0.862, active component 0.552), matching the picker's precomputed figure.
-- Observed: v4-extracted networks are more fragile than OSM's on the same ground (Bandra worst single failure 19.3% vs 0.9%) because extraction leaves gaps; the picker shows both side by side rather than hiding it.
+- All 13 v4 imagery atlases built (320–1,310 junctions). Worst single-junction loss, imagery vs OSM on the same square: within a few points for most areas, but Bandra 19.3% vs 0.9% and Delhi CP 13.8% vs 3.4% (extraction gaps make one junction carry more), while Bhubaneswar goes the other way (2.3% vs 18.8%). The picker shows both sources side by side.
 
 **2026-10-06 (Akshat — C1: city atlases)**
 
