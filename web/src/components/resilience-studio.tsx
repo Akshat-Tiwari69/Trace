@@ -188,7 +188,7 @@ export function ResilienceStudio() {
           <Link href="/methodology" prefetch={false}>Method</Link>
           <ExportMenu summary={summary} graph={graph} removedNodes={removedNodes} simulation={simulation} />
           <button type="button" className="upload-trigger" onClick={() => setUploadOpen(true)}>
-            Analyze imagery
+            Analyze<span className="label-extra"> imagery</span>
             <svg aria-hidden="true" viewBox="0 0 18 18"><path d="M9 3v12M3 9h12" /></svg>
           </button>
         </nav>

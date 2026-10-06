@@ -133,7 +133,8 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F14** | ✅ | Shared scenario URLs show their metrics on load | Akshat | — | A `failed=` link restores RI/loss in every mode without pressing Run (was "Baseline intact" outside Recover); browser back/forward re-runs the scenario in every mode; e2e regression; frontend gates green; PR opened into `dev` |
 | **F15** | ✅ | maplibre-gl 6 and vitest 5 majors (closes D2/D3) | Akshat | F14 | maplibre 6.12 worker served from versioned `/maplibre/<version>/` (Turbopack does not emit it) as `text/javascript`; Map/Total JS budgets raised 350→430 / 520→615 KiB by owner decision (worker re-downloads its shared module); frontend gates + API test green; PR opened into `dev` |
 | **F16** | ✅ | Map loading state and honest baseline labels | Akshat | F15 | Network overlay attaches on `style.load` (no longer waits for basemap tiles) behind a "Drawing the road network" state; a failed basemap style falls back to a plain background so the network still draws; baseline Active component shows "—" instead of "Not available"; Methodology prefetch 404 removed (F12-W1); unit + e2e regressions; PR opened into `dev` |
-| **F17–F19** | ⏳ | Web UX polish from the 2026-10-06 audit | Akshat | F16 | Mobile layout (incl. a reachable Method link); readable stress results; upload-dialog guidance — one PR each, before new features (city atlas picker) |
+| **F17** | ✅ | Phone and tablet layout | Akshat | F16 | ≤900 px: scenario controls above the map (rail flattened with `display: contents`), compact place card, map 52–55 dvh; metric strip keeps RI + active component; Method link and a labelled Analyze button stay visible; legend moved bottom-left so it never covers scale/attribution; 375 px e2e; PR opened into `dev` |
+| **F18–F19** | ⏳ | Web UX polish from the 2026-10-06 audit | Akshat | F17 | Readable stress results; upload-dialog guidance — one PR each, before new features (city atlas picker) |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **R34** | ✅ | Release `a4-roadseg-v4` (A51) to production | Akshat | A51 | Pre-release asset + checksum; Modal staging run on the production image matches local inference (2 boundary pixels); production deploy; live upload; promoted to Latest; docs point at v4 |
@@ -213,6 +214,10 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-10-06 (Akshat — F17: phone layout)**
+
+- At 375 px the map used the whole first screen and *Run stress test* sat ~1,300 px below it; the strip showed only RI and junction count, the upload button was an unlabelled "+", the Method link was hidden and the legend covered the attribution. Now (verified locally at 375 and 1440 px): controls precede the map, the strip keeps RI and active component, Method and "Analyze" are visible, the legend sits bottom-left at every width, no horizontal overflow.
 
 **2026-10-06 (Akshat — F16: map loading and labels)**
 

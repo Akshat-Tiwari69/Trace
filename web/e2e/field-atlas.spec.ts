@@ -127,3 +127,14 @@ test("the network still draws when the basemap style fails", async ({ page }) =>
   await expect(page.getByText("Basemap tiles are unavailable")).toBeVisible();
   await expect(page.getByText("Drawing the road network")).toBeHidden();
 });
+
+test("on a phone the scenario controls come before the map", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto("/?mode=stress");
+  const run = await page.getByRole("button", { name: "Run stress test" }).boundingBox();
+  const map = await page.locator(".map-stage").boundingBox();
+  expect(run!.y + run!.height).toBeLessThan(map!.y);
+  await expect(page.getByRole("link", { name: "Method" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Analyze imagery/ })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
