@@ -141,6 +141,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **C2** | ✅ | Atlas registry API | Akshat | C1 | `GET /api/v1/aois` lists every atlas on the host; summary/graph/simulation serve any registered `aoi` (registry lookup only, never a path); the Panaji singleton is gone; deploy README covers copying imagery atlases to the host; tests; PR opened into `dev` |
 | **C3** | ✅ | City picker | Akshat | C2 | `/` lists every atlas as area cards (source, model release, unseen/training chip, junctions, worst single-junction loss); `?city=` opens a studio for any atlas, whose place card shows the real source/region/coordinates instead of "Verified sample"; links without `city` (pre-picker shares) open Panaji; unit + e2e tests; PR opened into `dev` |
 | **U1** | ✅ | Stress-test an uploaded network | Akshat | C3 | `POST /api/v1/analyses/{job_id}/simulations` runs the atlas failure simulation on the uploaded graph (image space, no fake georeference); the upload result lets you fail any of its top five critical junctions and shows the loss and connected share, with the failed junction ringed on the overlay; API + e2e tests; PR opened into `dev` |
+| **C5** | ✅ | Remove Panaji from the app (owner decision) | Akshat | U1 | Panaji is no longer a registered atlas: not in the picker or API; links without `?city=` open the picker; the `data/sample/panaji_demo_*` files stay as the §4 sample/test fixture; API tests use the Delhi CP OSM atlas; PR opened into `dev` |
 | **C4** | ⏳ | v4 imagery atlases on the host | Akshat | C3 + merged/deployed release | All 13 imagery atlases built locally; copy to the host (`deploy/README.md`) once the C-series release is deployed — needs owner go-ahead |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
@@ -221,6 +222,10 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-10-06 (Akshat — C5: Panaji out of the app)**
+
+- Owner decision: the app no longer offers Panaji (no imagery for it). Its sample files remain as the committed §4 fixture for the batch pipeline and tests. Moving the API tests to Delhi CP surfaced a test-only gap: exact-efficiency curves still record a seed that the simulation correctly reports as unused; the test now compares the seed only for sampled efficiency.
 
 **2026-10-06 (Akshat — U1: stress-test an upload)**
 

@@ -137,7 +137,7 @@ test("map canvas fills its frame", async ({ page }) => {
 });
 
 test("a shared scenario URL shows its metrics without pressing Run", async ({ page }) => {
-  await page.goto("/?mode=stress&junction=278&failed=278");
+  await page.goto("/?city=panaji_demo&mode=stress&junction=278&failed=278");
   await expect(page.getByText("20.0% efficiency lost")).toBeVisible();
 });
 
@@ -150,7 +150,7 @@ test("the network still draws when the basemap style fails", async ({ page }) =>
 
 test("on a phone the scenario controls come before the map", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto("/?mode=stress");
+  await page.goto("/?city=panaji_demo&mode=stress");
   const run = await page.getByRole("button", { name: "Run stress test" }).boundingBox();
   const map = await page.locator(".map-stage").boundingBox();
   expect(run!.y + run!.height).toBeLessThan(map!.y);
