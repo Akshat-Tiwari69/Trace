@@ -195,7 +195,23 @@
   .live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 0 4px rgba(113, 194, 162, .14); }
   .place-card .eyebrow { margin-top: 31px; color: rgba(244, 240, 230, .52); }
   .place-card h1 { position: relative; z-index: 1; margin-top: 4px; font: 600 36px/.98 var(--display); letter-spacing: -.04em; }
-  .place-card > p:last-child { margin-top: 12px; color: rgba(244, 240, 230, .65); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .place-card > .place-coords { margin-top: 12px; color: rgba(244, 240, 230, .65); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .place-card > .place-chip { position: relative; z-index: 1; display: inline-block; margin-top: 10px; padding: 4px 8px; border: 1px solid rgba(113, 194, 162, .5); color: var(--mint); font-size: 10px; font-weight: 600; letter-spacing: .04em; }
+
+  .picker-topbar { grid-template-columns: 1fr auto; }
+  .picker { max-width: 1240px; margin: 0 auto; padding: 48px 22px 64px; }
+  .picker-intro { max-width: 680px; margin-bottom: 32px; }
+  .picker-intro h1 { margin: 8px 0 12px; font: 600 clamp(32px, 5vw, 54px)/1 var(--display); letter-spacing: -.04em; }
+  .picker-intro p { color: var(--muted); font-size: 15px; line-height: 1.55; }
+  .picker-loading { color: var(--muted); }
+  .city-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
+  .city-card { display: flex; flex-direction: column; gap: 8px; padding: 18px; border: 1px solid var(--ink); background: var(--paper); }
+  .city-card h2 { margin: 2px 0 6px; font: 600 25px/1.05 var(--display); letter-spacing: -.03em; }
+  .city-source { display: grid; gap: 3px; padding: 11px 12px; border: 1px solid var(--line); color: var(--ink); background: var(--paper-2); text-decoration: none; }
+  .city-source:hover, .city-source:focus-visible { border-color: var(--ink); background: rgba(113, 194, 162, .16); }
+  .city-source strong { font-size: 13px; }
+  .city-source small { color: var(--coral-dark); font-size: 11px; font-weight: 600; }
+  .city-source span { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 
   .eyebrow { font-size: 9px; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; }
   .context-card { padding: 22px; background: var(--paper); }

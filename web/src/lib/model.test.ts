@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampResilience, criticalityCsv, formatMetric, parseNodeIds, scenarioGeoJson, scenarioKey } from "@/lib/model";
+import { clampResilience, criticalityCsv, formatCoordinates, formatMetric, groupAtlases, initialAoi, parseNodeIds, scenarioGeoJson, scenarioKey, sourceLabel, trainingLabel } from "@/lib/model";
 
 describe("workspace model helpers", () => {
   it("never turns an empty or malformed URL list into junction 0", () => {
@@ -47,5 +47,35 @@ describe("workspace model helpers", () => {
     ], [7]);
     expect(csv).toContain("rank,node_id,betweenness,is_critical,is_articulation,scenario_status\r\n");
     expect(csv).toContain("1,7,0.3,true,false,failed\r\n");
+  });
+});
+
+describe("atlas helpers", () => {
+  const osm = { aoi: "delhi_cp_osm", area: "delhi_cp", label: "Connaught Place, Delhi", source: "osm" as const, model: null, seen_in_training: null };
+  const imagery = { ...osm, aoi: "delhi_cp_imagery", source: "imagery" as const, model: { release: "a4-roadseg-v4", checkpoint: "road_v4.pt", sha256: "x" }, seen_in_training: false };
+
+  it("names the source and only claims training status for model output", () => {
+    expect(sourceLabel(osm)).toBe("OpenStreetMap roads");
+    expect(sourceLabel(imagery)).toBe("Extracted from imagery · a4-roadseg-v4");
+    expect(trainingLabel(osm)).toBeNull();
+    expect(trainingLabel(imagery)).toBe("Area unseen by the model");
+    expect(trainingLabel({ ...imagery, seen_in_training: true })).toBe("Area inside the training corpus");
+  });
+
+  it("groups an area's sources with imagery first, areas by name", () => {
+    const pune = { ...osm, aoi: "pune_osm", area: "pune", label: "Shivajinagar, Pune" };
+    const groups = groupAtlases([pune, osm, imagery]);
+    expect(groups.map((group) => group.map((row) => row.aoi))).toEqual([["delhi_cp_imagery", "delhi_cp_osm"], ["pune_osm"]]);
+  });
+
+  it("opens Panaji for links that predate the picker", () => {
+    expect(initialAoi("")).toBeNull();
+    expect(initialAoi("?city=pune_shivajinagar_osm&mode=stress")).toBe("pune_shivajinagar_osm");
+    expect(initialAoi("?mode=stress&failed=278")).toBe("panaji_demo");
+    expect(initialAoi("?city=../etc")).toBeNull();
+  });
+
+  it("formats the area centre", () => {
+    expect(formatCoordinates([73.823, 15.488, 73.842, 15.501])).toBe("15.49° N / 73.83° E");
   });
 });

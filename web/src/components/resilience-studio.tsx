@@ -22,7 +22,7 @@ import {
   type GeoJsonCollection,
   type SimulationResult,
 } from "@/lib/api";
-import { formatMetric, parseNodeIds, scenarioKey } from "@/lib/model";
+import { formatCoordinates, formatMetric, parseNodeIds, scenarioKey, sourceLabel, trainingLabel } from "@/lib/model";
 import type { WorkspaceMode } from "@/lib/types";
 
 const NetworkMap = dynamic(() => import("@/components/network-map"), {
@@ -43,7 +43,7 @@ function readInitialState() {
   };
 }
 
-export function ResilienceStudio() {
+export function ResilienceStudio({ aoi }: { aoi: string }) {
   const [summary, setSummary] = useState<AoiSummary | null>(null);
   const [graph, setGraph] = useState<GeoJsonCollection | null>(null);
   const [mode, setMode] = useState<WorkspaceMode>("explore");
@@ -67,7 +67,7 @@ export function ResilienceStudio() {
     setBusy(true);
     setError(null);
     try {
-      const next = await runSimulation("panaji_demo", nodes);
+      const next = await runSimulation(aoi, nodes);
       if (run === simulationRun.current) setSimulation(next);
     } catch (reason) {
       if (run === simulationRun.current) {
@@ -76,7 +76,7 @@ export function ResilienceStudio() {
     } finally {
       if (run === simulationRun.current) setBusy(false);
     }
-  }, []);
+  }, [aoi]);
 
   useEffect(() => {
     const initial = readInitialState();
@@ -87,7 +87,7 @@ export function ResilienceStudio() {
       setSelectedNode(initial.selected);
       setRemovedNodes(initial.failed);
     });
-    fetchAoi("panaji_demo")
+    fetchAoi(aoi)
       .then(async (value) => ({ value, graph: await fetchGraph(value.graph_url) }))
       .then(({ value, graph: graphData }) => {
         if (!active) return;
@@ -106,17 +106,17 @@ export function ResilienceStudio() {
         if (active) setError(reason instanceof Error ? reason.message : "The atlas could not be loaded");
       });
     return () => { active = false; };
-  }, [runFor]);
+  }, [aoi, runFor]);
 
   useEffect(() => {
     if (!summary) return;
-    const params = new URLSearchParams();
+    const params = new URLSearchParams({ city: aoi });
     if (mode !== "explore") params.set("mode", mode);
     if (selectedNode != null) params.set("junction", String(selectedNode));
     if (removedNodes.length) params.set("failed", removedNodes.join(","));
     const query = params.toString();
-    window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
-  }, [mode, removedNodes, selectedNode, summary]);
+    window.history.replaceState(null, "", `?${query}`);
+  }, [aoi, mode, removedNodes, selectedNode, summary]);
 
   // A result for a different failure set must not read as current.
   const stale = simulation != null && scenarioKey(simulation.removed_node_ids) !== scenarioKey(removedNodes);
@@ -188,6 +188,9 @@ export function ResilienceStudio() {
         </div>
         <ModeSwitcher mode={mode} onChange={changeMode} />
         <nav className="top-actions" aria-label="Project actions">
+          {/* A full load: AppRoot picks the picker or a studio from the URL once. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/">Cities</a>
           <Link href="/methodology" prefetch={false}>Method</Link>
           <ExportMenu summary={summary} graph={graph} removedNodes={removedNodes} simulation={simulation} />
           <button type="button" className="upload-trigger" onClick={() => setUploadOpen(true)}>
@@ -200,10 +203,11 @@ export function ResilienceStudio() {
       <main className="workspace" id="workspace-panel" role="tabpanel" aria-labelledby={`mode-tab-${mode}`}>
         <aside className="left-rail" aria-label="Analysis controls">
           <section className="place-card">
-            <div><span className="live-dot" /> Verified sample</div>
-            <p className="eyebrow">Area of interest · IN-GA</p>
+            <div><span className="live-dot" /> {sourceLabel(summary)}</div>
+            <p className="eyebrow">Area of interest{summary.region ? ` · ${summary.region}` : ""}</p>
             <h1>{summary.label}</h1>
-            <p>15.49° N&nbsp; / &nbsp;73.83° E</p>
+            <p className="place-coords">{formatCoordinates(summary.bounds)}</p>
+            {trainingLabel(summary) ? <p className="place-chip">{trainingLabel(summary)}</p> : null}
           </section>
 
           <ScenarioPanel
@@ -251,6 +255,7 @@ export function ResilienceStudio() {
             removedNodes={removedNodes}
             compareValue={compareValue}
             onSelectNode={setSelectedNode}
+            label={summary.label}
           />
           <div className="map-legend" aria-label="Map legend">
             <span><i className="legend-road" /> Road network</span>
@@ -268,7 +273,7 @@ export function ResilienceStudio() {
               <p className="eyebrow">Selected junction</p>
               <h2>J-{selected.node_id}</h2>
               <p className="insight-lede">
-                This junction carries {formatMetric(selected.betweenness * 100, { digits: 1 })}% of normalized routing centrality in the sample network.
+                This junction carries {formatMetric(selected.betweenness * 100, { digits: 1 })}% of normalized routing centrality in this network.
               </p>
               <dl className="insight-metrics">
                 <div><dt>Criticality</dt><dd>{formatMetric(selected.betweenness, { digits: 3 })}</dd></div>

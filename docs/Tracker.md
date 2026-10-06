@@ -139,7 +139,8 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F19** | ✅ | Upload-dialog guidance and layout nit | Akshat | F18 | Status line names the next step (image → consent → ready) instead of "Preparing upload", and the GPU stage (the upload request waits for Modal) shows elapsed seconds and the cold-start expectation; "Map layers" legend no longer touches its divider; unit tests; PR opened into `dev` |
 | **C1** | ✅ | Regenerable city atlases | Akshat | F19 | `build_city_atlas` builds one square area per corpus city from OSM (committed `data/atlas/`, 13 areas) or from local imagery + a checkpoint (ignored `data/atlas_private/`, host-only); each `{aoi}_atlas.json` records source, model + SHA-256, seen-in-training, bbox, headline stats and graph SHA-256; Panaji registered; tests; PR opened into `dev` |
 | **C2** | ✅ | Atlas registry API | Akshat | C1 | `GET /api/v1/aois` lists every atlas on the host; summary/graph/simulation serve any registered `aoi` (registry lookup only, never a path); the Panaji singleton is gone; deploy README covers copying imagery atlases to the host; tests; PR opened into `dev` |
-| **C3–C4, U1** | ⏳ | Picker UI; imagery atlases on the host; uploads in the studio | Akshat | C2 | Picker as the landing page with source badges; v4 imagery atlases deployed; uploaded analyses explorable |
+| **C3** | ✅ | City picker | Akshat | C2 | `/` lists every atlas as area cards (source, model release, unseen/training chip, junctions, worst single-junction loss); `?city=` opens a studio for any atlas, whose place card shows the real source/region/coordinates instead of "Verified sample"; links without `city` (pre-picker shares) open Panaji; unit + e2e tests; PR opened into `dev` |
+| **C4, U1** | ⏳ | Imagery atlases on the host; uploads in the studio | Akshat | C3 | v4 imagery atlases for all 13 areas copied to the host; uploaded analyses explorable |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **R34** | ✅ | Release `a4-roadseg-v4` (A51) to production | Akshat | A51 | Pre-release asset + checksum; Modal staging run on the production image matches local inference (2 boundary pixels); production deploy; live upload; promoted to Latest; docs point at v4 |
@@ -219,6 +220,11 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-10-06 (Akshat — C2/C3: atlas API and picker)**
+
+- The API serves any registered atlas (`GET /api/v1/aois`; the Panaji singleton is gone) and `/` is now a city picker. Verified locally with 13 OSM + 6 v4 imagery atlases: Delhi CP imagery opens with "Extracted from imagery · a4-roadseg-v4 · Area unseen by the model"; failing its top junction J-257 costs 13.8% (RI 0.862, active component 0.552), matching the picker's precomputed figure.
+- Observed: v4-extracted networks are more fragile than OSM's on the same ground (Bandra worst single failure 19.3% vs 0.9%) because extraction leaves gaps; the picker shows both side by side rather than hiding it.
 
 **2026-10-06 (Akshat — C1: city atlases)**
 

@@ -1,5 +1,5 @@
-import { ResilienceStudio } from "@/components/resilience-studio";
+import { AppRoot } from "@/components/app-root";
 
 export default function HomePage() {
-  return <ResilienceStudio />;
+  return <AppRoot />;
 }

@@ -13,7 +13,27 @@ export class ApiError extends Error {
   }
 }
 
-export type AoiSummary = {
+// Where an atlas's road network came from (build_city_atlas records).
+export type AtlasProvenance = {
+  area?: string;
+  region?: string | null;
+  source?: "osm" | "imagery";
+  model?: { release: string; checkpoint: string; sha256: string } | null;
+  seen_in_training?: boolean | null;
+  note?: string | null;
+  osm_snapshot?: string | null;
+};
+
+export type AtlasListing = AtlasProvenance & {
+  aoi: string;
+  label: string;
+  node_count: number;
+  edge_count: number;
+  critical_count: number;
+  worst_single_loss: number;
+};
+
+export type AoiSummary = AtlasProvenance & {
   aoi: string;
   label: string;
   coordinate_system: string;
@@ -127,6 +147,10 @@ function checkedAnalysisUrl(path: string): string {
     throw new ApiError("Invalid analysis URL", 400);
   }
   return path;
+}
+
+export function fetchAtlases(): Promise<{ aois: AtlasListing[] }> {
+  return fetchJson("/api/v1/aois");
 }
 
 export function fetchAoi(aoi: string): Promise<AoiSummary> {
