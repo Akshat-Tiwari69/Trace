@@ -46,7 +46,8 @@ All endpoints are same-origin in production.
 | Method/path | Purpose | Cache |
 |---|---|---|
 | `GET /healthz` | Process readiness | no cache |
-| `GET /api/v1/aois/{aoi}` | Sample metadata, criticality, resilience curve, evidence | short public cache |
+| `GET /api/v1/aois` | Registered city atlases: source (OSM/imagery), model, seen-in-training, headline stats | short public cache |
+| `GET /api/v1/aois/{aoi}` | Atlas metadata and provenance, criticality, resilience curve, evidence | short public cache |
 | `GET /api/v1/aois/{aoi}/graph` | Authoritative GeoJSON | immutable/ETag |
 | `POST /api/v1/simulations` | Deterministic CPU node-removal scenario | no store; bounded LRU server cache |
 | `POST /api/v1/analyses` | Validate image, call Modal P1, enqueue P2/P3 | no store |

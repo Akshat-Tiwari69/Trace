@@ -28,11 +28,11 @@ from starlette.staticfiles import StaticFiles
 
 from src.app import job_queue, modal_client
 from src.app.service import (
-    SAMPLE_AOI,
     analysis_graph_geojson,
     analysis_payload,
     aoi_summary,
-    sample_dataset,
+    list_atlases,
+    load_dataset,
     simulate,
 )
 
@@ -274,6 +274,11 @@ def create_app(
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/api/v1/aois")
+    def get_aois(response: Response) -> dict:
+        response.headers["Cache-Control"] = SUMMARY_CACHE
+        return {"aois": list_atlases()}
+
     @app.get("/api/v1/aois/{aoi}")
     def get_aoi(aoi: str, response: Response) -> dict:
         try:
@@ -285,9 +290,10 @@ def create_app(
 
     @app.get("/api/v1/aois/{aoi}/graph")
     def get_graph(aoi: str, request: Request) -> Response:
-        if aoi != SAMPLE_AOI:
-            raise HTTPException(status_code=404, detail="Area not found")
-        dataset = sample_dataset()
+        try:
+            dataset = load_dataset(aoi)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Area not found") from exc
         headers = {"ETag": dataset.graph_etag, "Cache-Control": ARTIFACT_CACHE}
         if request.headers.get("if-none-match") == dataset.graph_etag:
             return Response(status_code=304, headers=headers)

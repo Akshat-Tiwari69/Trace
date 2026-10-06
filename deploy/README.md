@@ -102,6 +102,17 @@ Before deployment, verify:
 
 Rotate the shared key by updating Modal first, then `~/.config/roadresilience/env`, restarting the app, and running the upload smoke below.
 
+### Imagery city atlases (host-only)
+
+OSM city atlases are committed under `data/atlas/`. Imagery-derived atlases are built locally (`python -m src.pipeline.build_city_atlas --source imagery …`) into the ignored `data/atlas_private/`, because the imagery terms forbid redistribution. Copy them to the host; `update.sh`'s `git reset --hard` leaves ignored files in place, so they survive releases:
+
+```bash
+scp data/atlas_private/* ubuntu@<host>:~/Trace/data/atlas_private/
+systemctl --user restart roadresilience.service   # the atlas registry is read once per process
+```
+
+After a new segmentation release, rebuild them with the new checkpoint and `--release`, copy, and restart. Each `{aoi}_atlas.json` records the release and checkpoint SHA-256 shown in the app.
+
 ## 5. Release, health gate, and rollback
 
 Update `DEPLOY_REF` to the newly approved immutable ref, then trigger the systemd unit so it receives the environment file:
