@@ -1,0 +1,23 @@
+{
+  "area": "ahmedabad_navrangpura",
+  "label": "Navrangpura, Ahmedabad",
+  "region": "IN-GJ",
+  "bbox": [
+    72.555239,
+    23.023517,
+    72.574761,
+    23.041483
+  ],
+  "source": "osm",
+  "model": null,
+  "seen_in_training": null,
+  "osm_snapshot": "2026-06-26",
+  "aoi": "ahmedabad_navrangpura_osm",
+  "node_count": 850,
+  "edge_count": 1241,
+  "critical_count": 85,
+  "worst_single_loss": 0.031043,
+  "graph_sha256": "9802c1a4f1b9cf4b470225b177c8f32e5e85b829363502395d90e161bae75bc3",
+  "generated_utc": "2026-10-06T08:25:03+00:00",
+  "git_commit": "031a18718a2cb446bbaae1c1a2e01b76184c4d35"
+}

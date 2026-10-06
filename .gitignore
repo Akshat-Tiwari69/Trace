@@ -9,6 +9,8 @@ data/processed/*
 data/outputs/*
 data/finetune/*
 data/finetune_rural/*
+# Imagery-derived city atlases: the imagery terms forbid redistribution; host-only.
+data/atlas_private/
 models/*
 
 # local GPU environments and caches (machine-local, never committed)

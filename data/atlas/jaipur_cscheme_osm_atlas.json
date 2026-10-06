@@ -1,0 +1,23 @@
+{
+  "area": "jaipur_cscheme",
+  "label": "C-Scheme, Jaipur",
+  "region": "IN-RJ",
+  "bbox": [
+    75.794926,
+    26.903517,
+    75.815074,
+    26.921483
+  ],
+  "source": "osm",
+  "model": null,
+  "seen_in_training": null,
+  "osm_snapshot": "2026-06-27",
+  "aoi": "jaipur_cscheme_osm",
+  "node_count": 784,
+  "edge_count": 1160,
+  "critical_count": 78,
+  "worst_single_loss": 0.026669,
+  "graph_sha256": "ed340b26de4e1e09f48889279c774aee0d3aa512c3ec682f1a21632b8972c09a",
+  "generated_utc": "2026-10-06T08:27:03+00:00",
+  "git_commit": "031a18718a2cb446bbaae1c1a2e01b76184c4d35"
+}

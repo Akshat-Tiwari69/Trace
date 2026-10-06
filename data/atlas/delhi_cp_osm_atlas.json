@@ -1,0 +1,23 @@
+{
+  "area": "delhi_cp",
+  "label": "Connaught Place, Delhi",
+  "region": "IN-DL",
+  "bbox": [
+    77.214005,
+    28.629738,
+    77.225995,
+    28.640262
+  ],
+  "source": "osm",
+  "model": null,
+  "seen_in_training": null,
+  "osm_snapshot": "2026-06-24",
+  "aoi": "delhi_cp_osm",
+  "node_count": 249,
+  "edge_count": 349,
+  "critical_count": 25,
+  "worst_single_loss": 0.033515,
+  "graph_sha256": "69921c859a959e0e87833bbd8a20ca6ed50a3f5f67c83ff56a9eb738203b2f11",
+  "generated_utc": "2026-10-06T08:25:58+00:00",
+  "git_commit": "031a18718a2cb446bbaae1c1a2e01b76184c4d35"
+}

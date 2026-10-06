@@ -1,0 +1,23 @@
+{
+  "area": "lucknow_hazratganj",
+  "label": "Hazratganj, Lucknow",
+  "region": "IN-UP",
+  "bbox": [
+    80.934931,
+    26.843517,
+    80.955069,
+    26.861483
+  ],
+  "source": "osm",
+  "model": null,
+  "seen_in_training": null,
+  "osm_snapshot": "2026-06-27",
+  "aoi": "lucknow_hazratganj_osm",
+  "node_count": 469,
+  "edge_count": 644,
+  "critical_count": 47,
+  "worst_single_loss": 0.03332,
+  "graph_sha256": "d4187a7a24cd69794132400b5a18f6d61b86d907465fcd16f7cd8fe768f9c03c",
+  "generated_utc": "2026-10-06T08:27:30+00:00",
+  "git_commit": "031a18718a2cb446bbaae1c1a2e01b76184c4d35"
+}

@@ -136,7 +136,8 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F17** | ✅ | Phone and tablet layout | Akshat | F16 | ≤900 px: scenario controls above the map (rail flattened with `display: contents`), compact place card, map 52–55 dvh; metric strip keeps RI + active component; Method link and a labelled Analyze button stay visible; legend moved bottom-left so it never covers scale/attribution; 375 px e2e; PR opened into `dev` |
 | **F18** | ✅ | Readable, never-stale stress results | Akshat | F17 | Result card beside the controls (efficiency lost, RI, active component, link to the curve); a result for a different failure set is marked out of date in the card and strip until re-run; strip delta readable (7→9 px); lighter articulation rings; unit tests; PR opened into `dev` |
 | **F19** | ✅ | Upload-dialog guidance and layout nit | Akshat | F18 | Status line names the next step (image → consent → ready) instead of "Preparing upload", and the GPU stage (the upload request waits for Modal) shows elapsed seconds and the cold-start expectation; "Map layers" legend no longer touches its divider; unit tests; PR opened into `dev` |
-| **C1–C4, U1** | ⏳ | City atlas picker; open uploads in the studio | Akshat | F14–F19 | Regenerable per-city atlases (imagery + OSM, source badge), API registry, picker UI, all corpus cities; uploaded analyses open in the studio |
+| **C1** | ✅ | Regenerable city atlases | Akshat | F19 | `build_city_atlas` builds one square area per corpus city from OSM (committed `data/atlas/`, 13 areas) or from local imagery + a checkpoint (ignored `data/atlas_private/`, host-only); each `{aoi}_atlas.json` records source, model + SHA-256, seen-in-training, bbox, headline stats and graph SHA-256; Panaji registered; tests; PR opened into `dev` |
+| **C2–C4, U1** | ⏳ | Atlas API, picker UI, imagery atlases on the host; uploads in the studio | Akshat | C1 | `GET /api/v1/aois` registry; picker as the landing page with source badges; v4 imagery atlases deployed; uploaded analyses explorable |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **R34** | ✅ | Release `a4-roadseg-v4` (A51) to production | Akshat | A51 | Pre-release asset + checksum; Modal staging run on the production image matches local inference (2 boundary pixels); production deploy; live upload; promoted to Latest; docs point at v4 |
@@ -216,6 +217,12 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-10-06 (Akshat — C1: city atlases)**
+
+- `src/pipeline/build_city_atlas.py` builds the city picker's areas: a square around one fixed neighbourhood per corpus city (2 km, or the largest square inside the cached OSM extract for Mumbai Bandra, Bengaluru Indiranagar and Delhi CP), from OSM (the Panaji path without simulated occlusion; clipped from the cached extracts, no Overpass request) or from local imagery through the full P1–P3 pipeline. Imagery atlases record the release, checkpoint SHA-256 and whether the area was in the training corpus (only the five `DEFAULT_CITIES` areas and the test-only Kolkata/Hyderabad are unseen).
+- 13 OSM atlases committed (249–1,172 junctions, 6.9 MB); the Panaji sample now carries a record (573/828/57, worst single loss 1.5%) noting its simulated occlusion. v4 imagery atlases are built locally (Delhi CP: 414 junctions vs OSM's 249, extent matches the OSM atlas; 55% of its junctions lie within 15 m of an OSM drive road — not an accuracy claim).
+- Overpass refused connections from this machine for most of the session (both backends in turn); the cached-extract path avoids it.
 
 **2026-10-06 (Akshat — F19: upload guidance)**
 

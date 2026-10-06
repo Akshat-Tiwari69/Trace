@@ -1,0 +1,23 @@
+{
+  "area": "bengaluru_indiranagar",
+  "label": "Indiranagar, Bengaluru",
+  "region": "IN-KA",
+  "bbox": [
+    77.639005,
+    12.969158,
+    77.650995,
+    12.980842
+  ],
+  "source": "osm",
+  "model": null,
+  "seen_in_training": null,
+  "osm_snapshot": "2026-06-24",
+  "aoi": "bengaluru_indiranagar_osm",
+  "node_count": 425,
+  "edge_count": 596,
+  "critical_count": 42,
+  "worst_single_loss": 0.018933,
+  "graph_sha256": "2b176ae1d000b29d5006c9b006d129ea8582063b5c954ac13b86cdaa966771cf",
+  "generated_utc": "2026-10-06T08:25:15+00:00",
+  "git_commit": "031a18718a2cb446bbaae1c1a2e01b76184c4d35"
+}
