@@ -26,8 +26,16 @@ function wait(milliseconds: number) {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-function statusCopy(job: AnalysisJob | null) {
-  if (!job) return "Preparing upload";
+type UploadState = { job: AnalysisJob | null; busy: boolean; hasFile: boolean; consent: boolean; elapsed: number };
+
+// Says what happens next. The upload request itself waits for GPU segmentation
+// (a cold start can take ~30 s), so that stage needs its own visible progress.
+export function statusCopy({ job, busy, hasFile, consent, elapsed }: UploadState) {
+  if (!job) {
+    if (busy) return `Uploading and extracting roads on the GPU · ${elapsed} s (a cold start can take ~30 s)`;
+    if (!hasFile) return "Choose an image to begin";
+    return consent ? "Ready to extract" : "Confirm processing consent to continue";
+  }
   if (job.status === "queued") {
     return job.position > 0 ? `Queued · ${job.position} ahead` : "Queued · next in line";
   }
@@ -50,6 +58,14 @@ export function UploadDialog({ open, onClose }: Props) {
   const [resultGraph, setResultGraph] = useState<GeoJsonCollection | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    if (!busy) return;
+    const started = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -126,6 +142,7 @@ export function UploadDialog({ open, onClose }: Props) {
     }
     const run = ++runRef.current;
     setBusy(true);
+    setElapsed(0);
     setError(null);
     setResult(null);
     try {
@@ -238,7 +255,7 @@ export function UploadDialog({ open, onClose }: Props) {
             </label>
 
             <div className="upload-submit-row">
-              <p role="status" aria-live="polite"><span className={busy ? "status-pulse" : ""} />{statusCopy(job)}</p>
+              <p role="status" aria-live="polite"><span className={busy ? "status-pulse" : ""} />{statusCopy({ job, busy, hasFile: file != null, consent, elapsed })}</p>
               <button className="button-primary" type="submit" disabled={busy}>{busy ? "Analyzing…" : "Extract road network"}</button>
             </div>
             {error ? <div className="form-error" role="alert">{error}</div> : null}

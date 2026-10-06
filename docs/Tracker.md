@@ -135,7 +135,8 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F16** | ✅ | Map loading state and honest baseline labels | Akshat | F15 | Network overlay attaches on `style.load` (no longer waits for basemap tiles) behind a "Drawing the road network" state; a failed basemap style falls back to a plain background so the network still draws; baseline Active component shows "—" instead of "Not available"; Methodology prefetch 404 removed (F12-W1); unit + e2e regressions; PR opened into `dev` |
 | **F17** | ✅ | Phone and tablet layout | Akshat | F16 | ≤900 px: scenario controls above the map (rail flattened with `display: contents`), compact place card, map 52–55 dvh; metric strip keeps RI + active component; Method link and a labelled Analyze button stay visible; legend moved bottom-left so it never covers scale/attribution; 375 px e2e; PR opened into `dev` |
 | **F18** | ✅ | Readable, never-stale stress results | Akshat | F17 | Result card beside the controls (efficiency lost, RI, active component, link to the curve); a result for a different failure set is marked out of date in the card and strip until re-run; strip delta readable (7→9 px); lighter articulation rings; unit tests; PR opened into `dev` |
-| **F19** | ⏳ | Upload-dialog guidance | Akshat | F18 | Disabled-reason, image preview, GPU-stage messaging; then the city atlas picker (C1–C4) and U1 |
+| **F19** | ✅ | Upload-dialog guidance and layout nit | Akshat | F18 | Status line names the next step (image → consent → ready) instead of "Preparing upload", and the GPU stage (the upload request waits for Modal) shows elapsed seconds and the cold-start expectation; "Map layers" legend no longer touches its divider; unit tests; PR opened into `dev` |
+| **C1–C4, U1** | ⏳ | City atlas picker; open uploads in the studio | Akshat | F14–F19 | Regenerable per-city atlases (imagery + OSM, source badge), API registry, picker UI, all corpus cities; uploaded analyses open in the studio |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **R34** | ✅ | Release `a4-roadseg-v4` (A51) to production | Akshat | A51 | Pre-release asset + checksum; Modal staging run on the production image matches local inference (2 boundary pixels); production deploy; live upload; promoted to Latest; docs point at v4 |
@@ -215,6 +216,10 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-10-06 (Akshat — F19: upload guidance)**
+
+- The upload status read "Preparing upload" both before anything happened and for the whole GPU stage (the POST waits for Modal segmentation, ~23 s on a cold start in X1). It now names the next step and, while uploading, shows elapsed seconds and that a cold start can take ~30 s; queue/analysis states are unchanged. Verified locally (image → consent → ready; preview shown); the GPU stage was not triggered locally (it calls the production Modal endpoint) and is unit-tested. Phase 1 of the audit (F14–F19) is complete.
 
 **2026-10-06 (Akshat — F18: stress results)**
 
