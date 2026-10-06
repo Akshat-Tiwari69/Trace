@@ -57,48 +57,6 @@ export function ResilienceStudio() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const simulationRun = useRef(0);
 
-  useEffect(() => {
-    const initial = readInitialState();
-    let active = true;
-    if (initial) queueMicrotask(() => {
-      if (!active) return;
-      setMode(initial.mode);
-      setSelectedNode(initial.selected);
-      setRemovedNodes(initial.failed);
-    });
-    fetchAoi("panaji_demo")
-      .then(async (value) => ({ value, graph: await fetchGraph(value.graph_url) }))
-      .then(({ value, graph: graphData }) => {
-        if (!active) return;
-        setSummary(value);
-        setGraph(graphData);
-        const selectable = new Set(value.critical_nodes.map((row) => row.node_id));
-        setSelectedNode((current) => current != null && selectable.has(current)
-          ? current
-          : value.critical_nodes[0]?.node_id ?? null);
-        setRemovedNodes((current) => current.filter((nodeId) => selectable.has(nodeId)));
-      })
-      .catch((reason: unknown) => {
-        if (active) setError(reason instanceof Error ? reason.message : "The atlas could not be loaded");
-      });
-    return () => { active = false; };
-  }, []);
-
-  useEffect(() => {
-    if (!summary) return;
-    const params = new URLSearchParams();
-    if (mode !== "explore") params.set("mode", mode);
-    if (selectedNode != null) params.set("junction", String(selectedNode));
-    if (removedNodes.length) params.set("failed", removedNodes.join(","));
-    const query = params.toString();
-    window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
-  }, [mode, removedNodes, selectedNode, summary]);
-
-  const selected = useMemo(
-    () => summary?.critical_nodes.find((row) => row.node_id === selectedNode) ?? null,
-    [selectedNode, summary],
-  );
-
   const runFor = useCallback(async (nodes: number[]) => {
     const run = ++simulationRun.current;
     if (!nodes.length) {
@@ -120,6 +78,51 @@ export function ResilienceStudio() {
     }
   }, []);
 
+  useEffect(() => {
+    const initial = readInitialState();
+    let active = true;
+    if (initial) queueMicrotask(() => {
+      if (!active) return;
+      setMode(initial.mode);
+      setSelectedNode(initial.selected);
+      setRemovedNodes(initial.failed);
+    });
+    fetchAoi("panaji_demo")
+      .then(async (value) => ({ value, graph: await fetchGraph(value.graph_url) }))
+      .then(({ value, graph: graphData }) => {
+        if (!active) return;
+        setSummary(value);
+        setGraph(graphData);
+        const selectable = new Set(value.critical_nodes.map((row) => row.node_id));
+        setSelectedNode((current) => current != null && selectable.has(current)
+          ? current
+          : value.critical_nodes[0]?.node_id ?? null);
+        setRemovedNodes((current) => current.filter((nodeId) => selectable.has(nodeId)));
+        // A scenario restored from a shared URL must show its metrics, not "baseline intact".
+        const restored = (initial?.failed ?? []).filter((nodeId) => selectable.has(nodeId));
+        if (restored.length) void runFor(restored);
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : "The atlas could not be loaded");
+      });
+    return () => { active = false; };
+  }, [runFor]);
+
+  useEffect(() => {
+    if (!summary) return;
+    const params = new URLSearchParams();
+    if (mode !== "explore") params.set("mode", mode);
+    if (selectedNode != null) params.set("junction", String(selectedNode));
+    if (removedNodes.length) params.set("failed", removedNodes.join(","));
+    const query = params.toString();
+    window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
+  }, [mode, removedNodes, selectedNode, summary]);
+
+  const selected = useMemo(
+    () => summary?.critical_nodes.find((row) => row.node_id === selectedNode) ?? null,
+    [selectedNode, summary],
+  );
+
   const toggleRemoved = useCallback((nodeId: number) => {
     const next = removedNodes.includes(nodeId)
       ? removedNodes.filter((value) => value !== nodeId)
@@ -140,7 +143,7 @@ export function ResilienceStudio() {
       setMode(initial.mode);
       setSelectedNode(initial.selected);
       setRemovedNodes(initial.failed);
-      if (initial.mode === "recover") void runFor(initial.failed);
+      void runFor(initial.failed);
     };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
