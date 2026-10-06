@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-10-02 · **Phase:** maintenance + A50 data work · **Overall:** F12, OPS-3 and F13 are live at immutable commit `12d0a5c`; segmentation model `a4-roadseg-v3.3` is live on Modal; multi-city grid corpus (A50) in progress
+**Last updated:** 2026-10-06 · **Phase:** maintenance + A50 data work · **Overall:** F12, OPS-3 and F13 are live at immutable commit `12d0a5c`; segmentation model `a4-roadseg-v4` is live on Modal; multi-city grid corpus (A50) in progress
 
 ---
 
@@ -68,7 +68,7 @@ Two entry paths share the same P2/P3 logic:
 Current release state:
 
 - Public application: `https://trace.tiwaribabu.in`; verified checkout `12d0a5c0fd510b347537c69b35c78d60c9bf5c99` (O2 + OPS-3 + F13), with strict Host/SNI rejection live through the shared Caddy root
-- Production segmentation model: `a4-roadseg-v3.3` (`road_v3_3.pt`, threshold `0.50`, SHA-256 `944ae64e…bc12`), deployed to Modal 2026-10-02 and verified by a staging run (pixel-identical to local) and a live upload; rollback target `a4-roadseg-v3.2` (`road_pan.pt`, `0.52`)
+- Production segmentation model: `a4-roadseg-v4` (`road_v4.pt`, MiT-B5, threshold `0.55`, SHA-256 `5daf088a…05f3`), deployed to Modal 2026-10-06 by owner decision (trained on the restricted city-grid corpus; not license-reviewed) and verified by a staging run (2 of 1,048,576 pixels differ, both within 0.0001 of the threshold across torch versions) and a live upload; rollback target `a4-roadseg-v3.3` (`road_v3_3.pt`, `0.50`, licensed)
 - Current research direction: graph-first SAM-Road++/A18, validated by a common-unit chip APLS gate but not deploy-ready
 
 F9 implementation result: the replacement changes only the presentation/application boundary, retains Python P1–P3 logic and file artifacts, passes browser/accessibility/performance gates, and removes the Streamlit/Folium presentation instead of maintaining two stacks.
@@ -132,6 +132,7 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F13** | ✅ | Let uploads wait for the GPU call | Akshat | — | The upload POST uses `UPLOAD_TIMEOUT_MS` (390 s, above the server's worst-case Modal retry budget of ~365 s) instead of the 10 s default; unit regression; frontend gates green; PR opened into `dev` |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
+| **R34** | ✅ | Release `a4-roadseg-v4` (A51) to production | Akshat | A51 | Pre-release asset + checksum; Modal staging run on the production image matches local inference (2 boundary pixels); production deploy; live upload; promoted to Latest; docs point at v4 |
 | **R33** | ✅ | Release `a4-roadseg-v3.3` (A50d) to production | Akshat | A50 | Release asset + checksum published; Modal staging run pixel-identical to local; production deploy; live upload returns threshold 0.50 and a finished analysis; docs point at v3.3 |
 | **A51** | ✅ | Train MiT-B5 from ImageNet on Modal with everything learned so far (result: best model on every metric; research-only, restricted data) | Akshat | A50 | `deploy/modal_train.py` pilot passes end to end; review fixes (atomic checkpoints, run record + CPU pre-flight, seeded init/augmentation, road-free tiles kept, pooled val IoU, per-epoch candidates picked by validation-chip APLS, DeepGlobe vs v3.3) tested; full run scored on the 127 chips, held-out IoU and Kolkata vs v3.3/A50e |
 | **X1** | ✅ | Final backup demo capture | Akshat | F9, O1, O2, F13 deployed | Live `12d0a5c` capture of the sample flow and a cold-start browser upload: 9 screenshots, both exports, `capture.json` and `x1-demo.webm` (SHA-256 `498bd8fd…c91fb8ee`) under ignored `.tmp/x1/20260929T1642Z/` |
@@ -186,6 +187,7 @@ flowchart LR
 | Streamlit + Folium as permanent stack | superseded 2026-07-14 | Akshat authorized a full web replacement; preserve domain contracts and CPU deployment while selecting the new presentation/API stack through research and measured budgets |
 | File artifacts, no database/login | 🔒 | Small-team reproducibility and simple operations |
 | Modal is the sole remote inference boundary | 🔒 | GPU work stays off the ARM host; P2/P3 remain in-process |
+| v4 deployed (A51) | 🔒 2026-10-06 | Owner decision: A51 beats v3.3 on every metric (127-chip APLS +0.046, CI excludes zero; unseen-city APLS +0.14; ~10x fewer invented roads) and is deployed although it trains on the restricted city-grid corpus (not license-reviewed). Supersedes "models trained on the restricted grid corpus stay research-only" for this release; v3.3 stays the licensed rollback |
 | v3.3 deployed (A50d) | 🔒 2026-10-02 | Licensed gate win: same training sources as v3.2, chip APLS 0.3375 vs 0.2821 (+0.0555, CI excludes zero) and higher RGB/gray IoU. Supersedes "v3.2 remains deployed". Models trained on the restricted grid corpus (A50c/A50e) stay research-only |
 | Mumbai is a development benchmark | 🔒 | Repeated model consultation invalidates untouched-test claims |
 | Promotion metric = strict common-unit chip APLS with paired uncertainty | 🔒 | Prevents tile/chip frame confounds and requires coverage/comparability |
@@ -207,6 +209,11 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-10-06 (Akshat — R34: v4 released)**
+
+- Released A51 stage 1 as `a4-roadseg-v4` (`road_v4.pt`, SHA-256 `5daf088a4fd0a57041db84e1513df173a16088bf80dd76adc60185cfce0b05f3`, threshold 0.55, 84.8M parameters) by owner decision. A Modal staging run on the production image (torch 2.4.1, smp 0.3.4, T4) verified the checksum; its mask on a public DeepGlobe test tile differs from local inference on 2 of 1,048,576 pixels, both at probability 0.5499 (threshold boundary, different torch versions). Deployed `roadresilience-seg` with the v4 pin; one consented production upload of the same tile returned threshold 0.55 and a finished analysis (50 junctions, 54 links, RI 0.771, 5 critical), after which the release was promoted to Latest. Rollback: restore the v3.3 pin (`a4-roadseg-v3.3/road_v3_3.pt`, `944ae64e…bc12`) and redeploy, or `modal app rollback roadresilience-seg`.
+- P2 gap healing on the chip graphs adds +0.009 APLS for v4 and +0.014 for v3.3 on the 127 chips (`Evaluation.md`); v4 still leads by +0.041 with both healed.
 
 **2026-10-03 to 2026-10-06 (Akshat — A51: eleven-city corpus and result)**
 
