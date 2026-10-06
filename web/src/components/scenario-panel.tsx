@@ -1,3 +1,5 @@
+import type { SimulationResult } from "@/lib/api";
+import { formatMetric } from "@/lib/model";
 import type { CriticalNode, WorkspaceMode } from "@/lib/types";
 
 type Props = {
@@ -6,12 +8,14 @@ type Props = {
   criticalNodes: CriticalNode[];
   removed: number[];
   busy: boolean;
+  simulation: SimulationResult | null;
+  stale: boolean;
   onToggleRemoved: (nodeId: number) => void;
   onRun: () => void;
   onReset: () => void;
 };
 
-export function ScenarioPanel({ mode, selected, criticalNodes, removed, busy, onToggleRemoved, onRun, onReset }: Props) {
+export function ScenarioPanel({ mode, selected, criticalNodes, removed, busy, simulation, stale, onToggleRemoved, onRun, onReset }: Props) {
   if (mode === "explore") {
     return (
       <section className="context-card">
@@ -81,6 +85,17 @@ export function ScenarioPanel({ mode, selected, criticalNodes, removed, busy, on
           <button type="button" className="clear-chip" onClick={onReset}>Clear all</button>
         </div>
       )}
+      {simulation && removed.length > 0 ? (
+        <div className="scenario-result" role="status" data-stale={stale || undefined}>
+          {stale ? <p>The failure set changed. Run the stress test to update these numbers.</p> : null}
+          <dl>
+            <div><dt>Efficiency lost</dt><dd>{formatMetric(simulation.efficiency_loss * 100, { digits: 1, suffix: "%" })}</dd></div>
+            <div><dt>Resilience index</dt><dd>{formatMetric(simulation.resilience_index, { digits: 3 })}</dd></div>
+            <div><dt>Active component</dt><dd>{formatMetric(simulation.active_largest_cc_fraction ?? simulation.largest_cc_fraction, { digits: 3 })}</dd></div>
+          </dl>
+          <a href="#resilience-timeline">Compare with the progressive-stress curve</a>
+        </div>
+      ) : null}
     </section>
   );
 }

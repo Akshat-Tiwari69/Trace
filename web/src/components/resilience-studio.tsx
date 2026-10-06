@@ -22,7 +22,7 @@ import {
   type GeoJsonCollection,
   type SimulationResult,
 } from "@/lib/api";
-import { formatMetric, parseNodeIds } from "@/lib/model";
+import { formatMetric, parseNodeIds, scenarioKey } from "@/lib/model";
 import type { WorkspaceMode } from "@/lib/types";
 
 const NetworkMap = dynamic(() => import("@/components/network-map"), {
@@ -118,6 +118,9 @@ export function ResilienceStudio() {
     window.history.replaceState(null, "", query ? `?${query}` : window.location.pathname);
   }, [mode, removedNodes, selectedNode, summary]);
 
+  // A result for a different failure set must not read as current.
+  const stale = simulation != null && scenarioKey(simulation.removed_node_ids) !== scenarioKey(removedNodes);
+
   const selected = useMemo(
     () => summary?.critical_nodes.find((row) => row.node_id === selectedNode) ?? null,
     [selectedNode, summary],
@@ -209,6 +212,8 @@ export function ResilienceStudio() {
             criticalNodes={summary.critical_nodes}
             removed={removedNodes}
             busy={busy}
+            simulation={simulation}
+            stale={stale}
             onToggleRemoved={toggleRemoved}
             onRun={() => void runFor(removedNodes)}
             onReset={resetScenario}
@@ -235,6 +240,7 @@ export function ResilienceStudio() {
             edgeCount={summary.edge_count}
             criticalCount={summary.critical_count}
             simulation={simulation}
+            stale={stale}
           />
           <NetworkMap
             graph={graph}
@@ -297,7 +303,7 @@ export function ResilienceStudio() {
           <footer><span>Metric</span><strong>Baseline-normalized global efficiency</strong></footer>
         </aside>
 
-        <section className="timeline-panel" aria-label="Resilience timeline">
+        <section className="timeline-panel" id="resilience-timeline" aria-label="Resilience timeline">
           <div className="timeline-copy">
             <span className="eyebrow">Progressive stress</span>
             <h2>How quickly does the city fragment?</h2>
