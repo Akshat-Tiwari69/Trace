@@ -173,6 +173,14 @@ export function runSimulation(aoi: string, removedNodeIds: readonly number[]): P
   });
 }
 
+export function runAnalysisSimulation(jobId: string, removedNodeIds: readonly number[]): Promise<SimulationResult> {
+  return fetchJson(checkedAnalysisUrl(`/api/v1/analyses/${encodeURIComponent(jobId)}/simulations`), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ removed_node_ids: [...new Set(removedNodeIds)].sort((a, b) => a - b) }),
+  });
+}
+
 // The server answers only after the Modal GPU call: up to 3 attempts of 120 s
 // plus 4.5 s backoff (src/app/modal_client.py), and cold starts alone routinely
 // exceed the 10 s default used for other requests.

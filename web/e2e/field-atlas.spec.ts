@@ -53,8 +53,11 @@ async function mockApi(page: Page) {
     if (pathname.endsWith("/result")) return route.fulfill({ json: {
       id: "a".repeat(32), status: "done", n_nodes: 42, n_edges: 57, resolution_m: .5,
       resilience_index: .812, top_node: 7, summary: { critical_junctions: 4, articulation_points: 2 },
-      criticality: [], graph_url: `/api/v1/analyses/${"a".repeat(32)}/graph`,
+      criticality: [{ node_id: 7, rank: 1, betweenness: .4, is_critical: true, is_articulation: true, x: 0, y: 0 }], graph_url: `/api/v1/analyses/${"a".repeat(32)}/graph`,
       exports: { json: `/api/v1/analyses/${"a".repeat(32)}/result`, geojson: `/api/v1/analyses/${"a".repeat(32)}/graph` },
+    } });
+    if (pathname === `/api/v1/analyses/${"a".repeat(32)}/simulations`) return route.fulfill({ json: {
+      removed_node_ids: [7], resilience_index: .66, efficiency_loss: .34, largest_cc_fraction: .7, active_largest_cc_fraction: .7,
     } });
     if (pathname.endsWith("/graph")) return route.fulfill({ json: { type: "FeatureCollection", features: [] } });
     return route.abort();
@@ -110,6 +113,9 @@ test("upload dialog supports Escape and completes the queued workflow", async ({
   await page.getByRole("button", { name: "Extract road network" }).click();
   await expect(page.getByText("Worst-junction resilience")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByText("0.812")).toBeVisible();
+
+  await page.getByRole("button", { name: "J-7" }).click();
+  await expect(page.getByText(/Failing J-7 costs 34.0% of network efficiency/)).toBeVisible();
 });
 
 test("reflows without horizontal overflow at target widths", async ({ page }) => {

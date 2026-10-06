@@ -32,6 +32,7 @@ from src.app.service import (
     analysis_payload,
     aoi_summary,
     list_atlases,
+    simulate_analysis,
     load_dataset,
     simulate,
 )
@@ -57,6 +58,10 @@ class SimulationRequest(BaseModel):
     @classmethod
     def normalize_nodes(cls, values: list[int]) -> list[int]:
         return sorted(set(values))
+
+
+class AnalysisSimulationRequest(BaseModel):
+    removed_node_ids: list[int] = Field(min_length=1, max_length=50)
 
 
 class _RateLimiter:
@@ -404,6 +409,21 @@ def create_app(
     @app.get("/api/v1/analyses/{job_id}/result")
     def get_analysis_result(job_id: str) -> dict:
         return analysis_payload(_finished_result(job_id), job_id)
+
+    @app.post("/api/v1/analyses/{job_id}/simulations")
+    def run_analysis_simulation(
+        job_id: str, request: Request, body: AnalysisSimulationRequest
+    ) -> dict:
+        if not simulation_limiter.allow(_client_key(request), time.monotonic()):
+            raise HTTPException(
+                status_code=429,
+                detail="Simulation rate limit exceeded",
+                headers={"Retry-After": "60"},
+            )
+        try:
+            return simulate_analysis(_finished_result(job_id), body.removed_node_ids)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/api/v1/analyses/{job_id}/graph")
     def get_analysis_graph(job_id: str) -> Response:
