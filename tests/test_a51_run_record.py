@@ -80,6 +80,65 @@ def test_rejected_stage2_falls_back_to_stage1(tmp_path):
         finish_stage(tmp_path, "stage1", {"best": None}, {}, required=True)          # nothing to fall back on
 
 
+def test_candidate_list_publishes_stage1_alone_when_stage2_is_rejected(tmp_path):
+    # The list train() publishes, not just finish_stage's return value.
+    pytest.importorskip("modal")
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "deploy"))
+    from modal_train import publish_candidates
+
+    (tmp_path / "stage1.pt").touch()
+    (tmp_path / "stage2.ep01.pt").touch()
+    assert publish_candidates(tmp_path, stage2_rejected=True) == ["stage1.pt"]
+    assert json.loads((tmp_path / "candidates.json").read_text())["candidates"] == ["stage1.pt"]
+    assert publish_candidates(tmp_path, stage2_rejected=False) == ["stage1.pt", "stage2.ep01.pt"]
+
+
+def test_claim_run_allows_one_launch_per_run(tmp_path):
+    pytest.importorskip("modal")
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "deploy"))
+    from modal_train import claim_run, release_run
+
+    class Store(dict):          # the Modal Dict surface claim_run uses: atomic put-if-absent
+        def put(self, key, value, skip_if_exists=False):
+            if skip_if_exists and key in self:
+                return False
+            self[key] = value
+            return True
+
+    store = Store()
+    claim_run(store, "a51", {"launch": 1})
+    with pytest.raises(SystemExit, match="locked by an earlier launch"):
+        claim_run(store, "a51", {"launch": 2})                     # a second concurrent launch
+    claim_run(store, "a51", {"launch": 3}, takeover=True)         # deliberate takeover of a dead launch
+    assert store["a51"] == {"launch": 3}
+    release_run(store, "a51")
+    release_run(store, "a51")                                     # releasing twice is harmless
+    claim_run(store, "a51", {"launch": 4})
+
+
+def test_selector_refuses_unsafe_candidates_and_changed_assets(tmp_path):
+    from src.pipeline.p1_segment.val_apls_select import candidate_paths, check_assets
+
+    assert candidate_paths(tmp_path, ["stage1.pt"]) == [(tmp_path / "stage1.pt").resolve()]
+    for bad in ("../outside.pt", "sub/stage1.pt", "stage1.pkl", str(tmp_path / "abs.pt")):
+        with pytest.raises(SystemExit, match="refusing candidate"):
+            candidate_paths(tmp_path, [bad])
+    import hashlib
+
+    asset = tmp_path / "land.json"
+    asset.write_text('{"land_tiles": []}')
+    record = {"assets": {"land_tiles": hashlib.sha256(asset.read_bytes()).hexdigest()}}
+    check_assets(record, {"land_tiles": asset})                   # unchanged: fine
+    asset.write_text('{"land_tiles": ["x"]}')
+    with pytest.raises(SystemExit, match="differs from the run"):
+        check_assets(record, {"land_tiles": asset})
+    check_assets({}, {"land_tiles": asset})                       # older runs: note only
+
+
 def test_road_free_tiles_kinds(tmp_path):
     from src.pipeline.p1_segment.val_apls_select import road_free_tiles
 
@@ -102,14 +161,22 @@ def test_road_free_tiles_kinds(tmp_path):
 def test_record_run_refuses_a_different_recipe_or_unrecorded_artifacts(tmp_path):
     run = tmp_path / "a51-mit_b5"
     full = {"recipe": {"encoder": "mit_b5", "pilot": False}, "data": {"spacenet": {"pairs": 2}}}
-    record_run(run, full, {"commit": "abc"})
-    again = record_run(run, full, {"commit": "def"})                   # same recipe: a resume
-    assert [launch["commit"] for launch in again["launches"]] == ["abc", "def"]
+    record_run(run, full, {"commit": "abc", "dirty": False})
+    again = record_run(run, full, {"commit": "abc", "dirty": False})   # same recipe and code: a resume
+    assert [launch["commit"] for launch in again["launches"]] == ["abc", "abc"]
     for changed in ({**full, "recipe": {"encoder": "mit_b5", "pilot": True}},   # pilot vs full
                     {**full, "recipe": {"encoder": "mit_b3", "pilot": False}},  # another encoder
                     {**full, "data": {"spacenet": {"pairs": 3}}}):              # data changed
         with pytest.raises(RuntimeError, match="different recipe or data"):
-            record_run(run, changed, {"commit": "ghi"})
+            record_run(run, changed, {"commit": "abc", "dirty": False})
+    # Changed (or uncommitted) code must not silently reuse the run's checkpoints...
+    for code in ({"commit": "def", "dirty": False}, {"commit": "abc", "dirty": True}):
+        with pytest.raises(RuntimeError, match="code changed"):
+            record_run(run, full, code)
+    # ...unless that is a deliberate, recorded choice.
+    resumed = record_run(run, full, {"commit": "def", "dirty": False}, allow_code_change=True)
+    assert resumed["launches"][-1] == {"commit": "def", "dirty": False, "allow_code_change": True}
+    assert not list(run.glob("*.tmp"))                                  # written via an atomic replace
     legacy = tmp_path / "a51-b5"
     legacy.mkdir()
     (legacy / "stage1.done").touch()

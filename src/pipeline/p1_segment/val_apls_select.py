@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 import numpy as np
@@ -38,6 +39,33 @@ FP_TOL = 0.001           # 0.1% of a tile's pixels predicted as road where there
 LAND_FP_TOL = 0.001      # the same limit on the land tiles alone, so gains on the many easy
                          # water/no-data tiles cannot hide worse hallucination on roofs or fields
 INVENTED_PX = 200        # a tile "has an invented road" at this many false-positive pixels
+
+
+def candidate_paths(run_dir: Path, names: list[str]) -> list[Path]:
+    """``candidates.json`` entries as checkpoint paths, refusing anything but a plain
+    ``*.pt`` file name inside ``run_dir`` (no traversal out of the run directory)."""
+    run_dir = Path(run_dir).resolve()
+    paths = []
+    for name in names:
+        path = (run_dir / name).resolve()
+        if not re.fullmatch(r"[\w.-]+\.pt", name) or path.parent != run_dir:
+            raise SystemExit(f"refusing candidate {name!r}: not a plain .pt file in {run_dir}")
+        paths.append(path)
+    return paths
+
+
+def check_assets(record: dict, files: dict[str, Path]) -> None:
+    """The held-out manifest and land-tile labels must be the ones the run recorded
+    (they decide the validation chips and the land gate)."""
+    import hashlib
+
+    recorded = record.get("assets")
+    if recorded is None:
+        print("note: run.json predates recorded validation assets; using the local copies")
+        return
+    for name, path in files.items():
+        if hashlib.sha256(Path(path).read_bytes()).hexdigest() != recorded.get(name):
+            raise SystemExit(f"local {name} ({path}) differs from the run's; selection would not match it")
 
 
 def validation_split(record: dict, corpus: Path | None = None, deepglobe: Path | None = None,
@@ -160,12 +188,16 @@ def main() -> None:
     spec, device = record["recipe"], "cuda" if torch.cuda.is_available() else "cpu"
     size, dg_tol = spec["common"]["image_size"], spec["stage2"]["deepglobe_iou_tolerance"]
 
+    from src.pipeline.p1_segment.eval_spacenet import DEFAULT_MANIFEST
+
+    check_assets(record, {"heldout_manifest": ROOT / DEFAULT_MANIFEST, "land_tiles": LAND_TILES})
     chips, indian_val, dg_val = validation_split(record)
     tiles = road_free_tiles(indian_val, set(json.loads(LAND_TILES.read_text())["land_tiles"]))
     kinds = [kind for _, kind in tiles]
     models = {}
-    for name, path in [("deployed", ROOT / DEPLOYED_CHECKPOINT)] + [(n, run_dir / n) for n in names]:
-        model, meta = load_checkpoint(path, map_location=device)
+    for name, path in [("deployed", ROOT / DEPLOYED_CHECKPOINT)] + list(zip(names, candidate_paths(run_dir, names))):
+        # Candidates come from a run directory: never fall back to an unrestricted pickle load.
+        model, meta = load_checkpoint(path, map_location=device, allow_pickle=False)
         models[name] = (model.to(device).eval(), float(meta["threshold"]))
     fp = {n: false_positives(m, t, tiles, size, device) for n, (m, t) in models.items()}
     dg = {n: _iou_scores_on_pairs(m, dg_val, size, device, t) for n, (m, t) in models.items()}

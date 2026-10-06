@@ -116,6 +116,20 @@ def test_save_checkpoint_is_atomic_when_interrupted(tmp_path, monkeypatch):
     assert load_checkpoint_blob(ckpt)["meta"]["epoch"] == 1
 
 
+class _NotWeightsOnly:      # module-level so it pickles: weights_only loading rejects it
+    pass
+
+
+def test_untrusted_checkpoint_refuses_unrestricted_pickle(tmp_path):
+    # A51 review: a malicious checkpoint must not reach the full-pickle fallback.
+    ckpt = tmp_path / "evil.pt"
+    torch.save({"state_dict": {}, "meta": {}, "payload": _NotWeightsOnly()}, ckpt)
+    with pytest.raises(ValueError, match="refused"):
+        load_checkpoint_blob(ckpt, allow_pickle=False)
+    with pytest.warns(UserWarning, match="legacy pickled checkpoint"):
+        assert "payload" in load_checkpoint_blob(ckpt)              # trusted default unchanged
+
+
 def test_checkpoint_roundtrip(tmp_path):
     model = build_model(encoder_weights=None)
     image = (np.random.rand(64, 64, 3) * 255).astype(np.uint8)

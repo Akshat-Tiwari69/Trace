@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
@@ -207,7 +209,7 @@ def test_per_group_sampler_draws_a_fixed_fresh_share_per_city():
     assert sorted(plain) == list(range(7))
 
 
-def test_finetune_trains_on_per_city_draws(tmp_path):
+def test_finetune_trains_on_per_city_draws(tmp_path, monkeypatch):
     ft, dg = tmp_path / "ft", tmp_path / "dg"
     for i in range(5):
         _write_pair(ft, f"c{i}")
@@ -224,8 +226,18 @@ def test_finetune_trains_on_per_city_draws(tmp_path):
     common = dict(init_checkpoint=init, finetune_dir=ft, deepglobe_dir=dg, deepglobe_subset=2,
                   deepglobe_val=2, out_path=tmp_path / "v2.pt", image_size=64, batch_size=2, epochs=1,
                   finetune_oversample=1, deepglobe_iou_tolerance=1.0, device="cpu")
+    import src.pipeline.p1_segment.finetune as finetune_module
+
+    drawn, real = [], finetune_module.train_one_epoch
+
+    def spy(model, loader, *args, **kwargs):          # what the epoch actually trains on
+        drawn.append([Path(loader.dataset.pairs[i][0]).parent.name for i in loader.sampler])
+        return real(model, loader, *args, **kwargs)
+
+    monkeypatch.setattr(finetune_module, "train_one_epoch", spy)
     summary = finetune(FineTuneConfig(extra_train_groups=cities, extra_per_group=3, **common))
     assert summary["best"] is not None
+    assert drawn[0].count("big") == 3 and drawn[0].count("small") == 3   # 3 per city, small one repeated
     with pytest.raises(ValueError, match="extra_per_group"):
         finetune(FineTuneConfig(extra_train_groups=cities, extra_per_group=0, **common))
 
@@ -261,9 +273,13 @@ def test_train_one_epoch_steps_scheduler_per_batch_and_clips():
     batches = [(torch.randn(2, 3, 8, 8), torch.rand(2, 1, 8, 8).round()) for _ in range(3)]
     opt = torch.optim.SGD(net.parameters(), lr=0.1)
     scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lambda step: 1.0)
+    before = torch.cat([p.detach().flatten().clone() for p in net.parameters()])
     loss = train_one_epoch(net, batches, opt, torch.nn.functional.binary_cross_entropy_with_logits,
                            "cpu", None, scheduler=scheduler, max_grad_norm=1e-3)
+    moved = torch.cat([p.detach().flatten() for p in net.parameters()]) - before
     assert scheduler.last_epoch == 3 and loss > 0
+    # plain SGD: each step moves the weights by lr x (clipped) gradient, so 3 steps <= 3 x 0.1 x 1e-3
+    assert 0 < moved.norm() <= 3 * 0.1 * 1e-3 + 1e-9
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="AMP step skipping needs CUDA")
@@ -350,6 +366,43 @@ def test_finetune_resume_continues_from_next_epoch(tmp_path):
     resumed = finetune(FineTuneConfig(epochs=3, resume=last, **common))   # run B: resume → epochs 2,3
     assert resumed["start_epoch"] == 2                       # did NOT restart at epoch 1
     assert [r["epoch"] for r in resumed["history"]] == [1, 2, 3]  # epoch-1 row carried over
+
+
+def test_resume_restores_the_saved_scheduler_position(tmp_path, monkeypatch):
+    # A51 review: with AMP-skipped steps the curve sits behind epoch x batches, so a resume
+    # must restore the saved scheduler, not rebuild its position from the epoch count.
+    import src.pipeline.p1_segment.finetune as finetune_module
+    from src.pipeline.p1_segment.finetune import _last_path
+    from src.pipeline.p1_segment.model import load_checkpoint_blob
+
+    ft, dg = tmp_path / "ft", tmp_path / "dg"
+    for i in range(5):
+        _write_pair(ft, f"c{i}")
+    for i in range(6):
+        _write_pair(dg, f"d{i}")
+    init = tmp_path / "v1.pt"
+    _tiny_v1_checkpoint(init)
+    out = tmp_path / "v2.pt"
+    common = dict(init_checkpoint=init, finetune_dir=ft, deepglobe_dir=dg, deepglobe_subset=3,
+                  deepglobe_val=2, out_path=out, image_size=64, batch_size=2, finetune_oversample=2,
+                  deepglobe_iou_tolerance=1.0, device="cpu", cosine=True, warmup_epochs=1)
+    finetune(FineTuneConfig(epochs=1, **common))
+    last = _last_path(out)
+    blob = load_checkpoint_blob(last)
+    steps = blob["train_state"]["scheduler"]["last_epoch"]
+    assert steps > 0                                   # the real position is saved
+    blob["train_state"]["scheduler"]["last_epoch"] = steps - 1   # as if one step had been skipped
+    torch.save(blob, last)
+
+    seen, real = [], finetune_module.train_one_epoch
+
+    def spy(model, loader, *args, **kwargs):
+        seen.append(kwargs["scheduler"].last_epoch)
+        return real(model, loader, *args, **kwargs)
+
+    monkeypatch.setattr(finetune_module, "train_one_epoch", spy)
+    finetune(FineTuneConfig(epochs=2, resume=last, **common))
+    assert seen == [steps - 1]                         # continued from the saved position
 
 
 def test_finetune_resume_hands_cuda_rng_states_back_on_cpu(tmp_path, monkeypatch):

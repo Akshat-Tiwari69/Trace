@@ -39,6 +39,10 @@ SOURCES = {"spacenet": "/data/spacenet/dg_format", "deepglobe": "/data/deepglobe
            **{c: f"/data/{c}_grid/dg_format" for c in GRID_CITIES}}
 data = modal.Volume.from_name("trace-train-data", create_if_missing=True)
 runs = modal.Volume.from_name("trace-train-runs", create_if_missing=True)
+locks = modal.Dict.from_name("trace-train-locks", create_if_missing=True)   # one launch per run at a time
+# Validation/selection inputs that must not change under a run (hashed into run.json).
+ASSETS = {"heldout_manifest": "data/sample/spacenet_mumbai_heldout_chips.json",
+          "land_tiles": "data/sample/a51_road_free_land_tiles.json"}
 
 
 def recipe(encoder: str = "mit_b5", pilot: bool = False) -> dict:
@@ -80,6 +84,37 @@ def finish_stage(out, name: str, summary: dict, record: dict, required: bool) ->
     return rejected
 
 
+def claim_run(lock_store, run: str, owner: dict, takeover: bool = False) -> None:
+    """One launch per run directory at a time: an atomic put-if-absent on a Modal Dict
+    (a file on a volume cannot be claimed atomically across containers). A launch that
+    died without releasing needs ``takeover`` -- a deliberate choice, never automatic."""
+    if lock_store.put(run, owner, skip_if_exists=True):
+        return
+    if not takeover:
+        raise SystemExit(f"{run} is locked by an earlier launch ({lock_store.get(run)}); "
+                         "if that launch is no longer running, re-run with --takeover")
+    lock_store.put(run, owner)
+
+
+def release_run(lock_store, run: str) -> None:
+    try:
+        lock_store.pop(run)
+    except KeyError:
+        pass
+
+
+def publish_candidates(out, stage2_rejected: bool) -> list[str]:
+    """Write ``candidates.json``: stage 1 plus every kept stage-2 epoch (only stage 1 when
+    stage 2 was rejected), for ``val_apls_select``."""
+    import json
+
+    candidates = ["stage1.pt"] + ([] if stage2_rejected else sorted(p.name for p in out.glob("stage2.ep*.pt")))
+    (out / "candidates.json").write_text(json.dumps(
+        {"select_by": "SpaceNet validation-chip APLS (src.pipeline.p1_segment.val_apls_select)",
+         "stage2_rejected": stage2_rejected, "candidates": candidates}, indent=2))
+    return candidates
+
+
 def _cache_imagenet_weights() -> None:
     import segmentation_models_pytorch as smp
 
@@ -102,9 +137,10 @@ app = modal.App("trace-train", image=image)
 
 
 @app.function(cpu=1, memory=2048, timeout=1800, volumes={"/data": data, "/runs": runs})
-def prepare(run: str, spec: dict, code: dict) -> None:
-    """CPU pre-flight (no GPU billed, no retries): every source must have pairs, and an
-    existing run directory must have been recorded with this exact recipe and data."""
+def prepare(run: str, spec: dict, code: dict, assets: dict, allow_code_change: bool = False) -> None:
+    """CPU pre-flight (no GPU billed, no retries): every source must have complete pairs,
+    and an existing run directory must have been recorded with this exact recipe, data,
+    validation assets and (unless ``allow_code_change``) code revision."""
     import sys
     from datetime import datetime, timezone
 
@@ -117,8 +153,8 @@ def prepare(run: str, spec: dict, code: dict) -> None:
         raise RuntimeError("data volume not ready: " + ", ".join(
             f"{n} ({fp['pairs']} complete pairs, {fp['incomplete']} missing an image or mask)"
             for n, fp in bad.items()))
-    record_run(f"/runs/{run}", {"recipe": spec, "data": fingerprints},
-               {**code, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+    record_run(f"/runs/{run}", {"recipe": spec, "data": fingerprints, "assets": assets},
+               {**code, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}, allow_code_change)
     runs.commit()
     print(f"{run}: data OK " + " | ".join(f"{k} {v['pairs']}" for k, v in fingerprints.items()), flush=True)
 
@@ -195,18 +231,20 @@ def train(run: str, spec: dict) -> None:
                             **spec["stage2"])
     if stage2_rejected:
         print("stage2 kept no epoch (rejected) -> stage 1 is the only candidate", flush=True)
-    candidates = ["stage1.pt"] + sorted(p.name for p in out.glob("stage2.ep*.pt"))
-    (out / "candidates.json").write_text(json.dumps(
-        {"select_by": "SpaceNet validation-chip APLS (src.pipeline.p1_segment.val_apls_select)",
-         "stage2_rejected": stage2_rejected, "candidates": candidates}, indent=2))
+    candidates = publish_candidates(out, stage2_rejected)
     stop.set()
     runs.commit()
+    release_run(locks, run)
     print(f"A51 {run} DONE -> candidates {candidates}", flush=True)
 
 
 @app.local_entrypoint()
-def main(run: str = "", encoder: str = "mit_b5", pilot: bool = False) -> None:
+def main(run: str = "", encoder: str = "mit_b5", pilot: bool = False,
+         takeover: bool = False, allow_code_change: bool = False) -> None:
+    import hashlib
     import subprocess
+    from datetime import datetime, timezone
+    from pathlib import Path
 
     def git(*args: str) -> str:
         return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
@@ -216,10 +254,16 @@ def main(run: str = "", encoder: str = "mit_b5", pilot: bool = False) -> None:
         run += "-pilot"
     spec = recipe(encoder, pilot)
     code = {"commit": git("rev-parse", "HEAD"), "dirty": bool(git("status", "--porcelain", "--", "src", "deploy"))}
-    prepare.remote(run, spec, code)
-    if pilot:
-        train.remote(run, spec)       # short: wait, so the pilot's exit code can gate the full run
-    else:
+    assets = {name: hashlib.sha256(Path(path).read_bytes()).hexdigest() for name, path in ASSETS.items()}
+    claim_run(locks, run, {**code, "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}, takeover)
+    try:
+        prepare.remote(run, spec, code, assets, allow_code_change)
+        if pilot:
+            train.remote(run, spec)   # short: wait, so the pilot's exit code can gate the full run
+    except BaseException:
+        release_run(locks, run)       # nothing of this launch is running: free the run
+        raise
+    if not pilot:
         # Long: spawn and return. A client left attached (even with --detach) cancels the running
         # attempt when the laptop sleeps or the network drops -- that stopped a51-mit_b5 at epoch 5.
         call = train.spawn(run, spec)

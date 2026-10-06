@@ -375,6 +375,9 @@ def finetune(cfg: FineTuneConfig) -> dict:
         print(f"resumed from {cfg.resume} @ epoch {resume_state['epoch']} -> starting epoch {start_epoch}",
               flush=True)
     scheduler = _cosine_scheduler(optimizer, cfg, len(train_loader), start_epoch) if cfg.cosine else None
+    if scheduler is not None and resume_state and resume_state.get("scheduler"):
+        # The saved position, not epoch x batches: AMP-skipped steps do not advance the curve.
+        scheduler.load_state_dict(resume_state["scheduler"])
     for epoch in range(start_epoch, cfg.epochs + 1):
         sampler.set_epoch(epoch)
         train_loss = train_one_epoch(model, train_loader, optimizer, loss_fn, cfg.device, scaler,
@@ -445,6 +448,7 @@ def finetune(cfg: FineTuneConfig) -> dict:
                 "cached_gaussian": float(np.random.get_state()[4]),
             },
             "cuda_rng_states": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+            "scheduler": scheduler.state_dict() if scheduler is not None else None,
         })
 
     if best_row is None:

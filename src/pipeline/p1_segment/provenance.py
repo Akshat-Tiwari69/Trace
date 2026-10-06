@@ -55,11 +55,14 @@ def dir_fingerprint(path: str | Path) -> dict:
             "sha256_names_sizes": digest}
 
 
-def record_run(run_dir: str | Path, record: dict, launch: dict) -> dict:
+def record_run(run_dir: str | Path, record: dict, launch: dict, allow_code_change: bool = False) -> dict:
     """Write or verify ``run_dir/run.json``: one run directory holds one recipe and
     one dataset (A51: a pilot or a changed encoder must never reuse another run's
-    ``.done`` stages). Appends ``launch`` (code revision, time) on every launch.
-    Raises ``RuntimeError`` on a recipe/data mismatch or on unrecorded artifacts."""
+    ``.done`` stages). Appends ``launch`` (code revision ``commit``/``dirty``, time)
+    on every launch. Raises ``RuntimeError`` on a recipe/data mismatch, on
+    unrecorded artifacts, or when the code differs from the previous launch (or
+    either tree was dirty) unless ``allow_code_change`` -- resuming under changed
+    code is then a deliberate, recorded choice. The file is replaced atomically."""
     run_dir = Path(run_dir)
     path = run_dir / "run.json"
     record = json.loads(json.dumps(record))         # compare as JSON, the stored form
@@ -68,13 +71,23 @@ def record_run(run_dir: str | Path, record: dict, launch: dict) -> dict:
         if {k: saved.get(k) for k in record} != record:
             raise RuntimeError(f"{run_dir} was recorded with a different recipe or data; use a new run name")
         launches = saved["launches"]
+        prev = launches[-1] if launches else {}
+        same_code = (prev.get("commit") == launch.get("commit")
+                     and not prev.get("dirty") and not launch.get("dirty"))
+        if not same_code and not allow_code_change:
+            raise RuntimeError(f"{run_dir}: code changed since the last launch ({prev.get('commit')} -> "
+                               f"{launch.get('commit')}, dirty {prev.get('dirty')}/{launch.get('dirty')}); "
+                               "pass allow_code_change to resume under the new code")
+        launch = {**launch, "allow_code_change": allow_code_change and not same_code}
     elif run_dir.exists() and any(run_dir.iterdir()):
         raise RuntimeError(f"{run_dir} has artifacts but no run.json; use a new run name")
     else:
         launches = []
     record["launches"] = [*launches, launch]
     run_dir.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(record, indent=2))
+    tmp = path.with_name(f"run.json.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(record, indent=2))
+    os.replace(tmp, path)                            # an interrupted write never truncates run.json
     return record
 
 
