@@ -132,7 +132,8 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **F13** | ✅ | Let uploads wait for the GPU call | Akshat | — | The upload POST uses `UPLOAD_TIMEOUT_MS` (390 s, above the server's worst-case Modal retry budget of ~365 s) instead of the 10 s default; unit regression; frontend gates green; PR opened into `dev` |
 | **F14** | ✅ | Shared scenario URLs show their metrics on load | Akshat | — | A `failed=` link restores RI/loss in every mode without pressing Run (was "Baseline intact" outside Recover); browser back/forward re-runs the scenario in every mode; e2e regression; frontend gates green; PR opened into `dev` |
 | **F15** | ✅ | maplibre-gl 6 and vitest 5 majors (closes D2/D3) | Akshat | F14 | maplibre 6.12 worker served from versioned `/maplibre/<version>/` (Turbopack does not emit it) as `text/javascript`; Map/Total JS budgets raised 350→430 / 520→615 KiB by owner decision (worker re-downloads its shared module); frontend gates + API test green; PR opened into `dev` |
-| **F16–F19** | ⏳ | Web UX polish from the 2026-10-06 audit | Akshat | F15 | Map loading state and honest baseline labels; mobile layout; readable stress results; upload-dialog guidance — one PR each, before new features (city atlas picker) |
+| **F16** | ✅ | Map loading state and honest baseline labels | Akshat | F15 | Network overlay attaches on `style.load` (no longer waits for basemap tiles) behind a "Drawing the road network" state; a failed basemap style falls back to a plain background so the network still draws; baseline Active component shows "—" instead of "Not available"; Methodology prefetch 404 removed (F12-W1); unit + e2e regressions; PR opened into `dev` |
+| **F17–F19** | ⏳ | Web UX polish from the 2026-10-06 audit | Akshat | F16 | Mobile layout (incl. a reachable Method link); readable stress results; upload-dialog guidance — one PR each, before new features (city atlas picker) |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **R34** | ✅ | Release `a4-roadseg-v4` (A51) to production | Akshat | A51 | Pre-release asset + checksum; Modal staging run on the production image matches local inference (2 boundary pixels); production deploy; live upload; promoted to Latest; docs point at v4 |
@@ -212,6 +213,10 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-10-06 (Akshat — F16: map loading and labels)**
+
+- The network overlay now attaches on `style.load` behind a "Drawing the road network" state: `load` also waits for every basemap tile source (the audit's 6–8 s blank map). If the basemap style itself fails, the map switches to a plain background and still draws the network (the existing warning previously promised this but the network never appeared). Verified locally: the Panaji network, the failed J-278 and its dashed links render on maplibre 6. Baseline Active component reads "—"; the Methodology link no longer prefetches (F12-W1 404). Found: the Method link is hidden on phone widths (F17).
 
 **2026-10-06 (Akshat — F15: maplibre 6 / vitest 5)**
 

@@ -26,6 +26,12 @@ const EDGE_FILTER: FilterSpecification = ["==", ["get", "feature_type"], "edge"]
 const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
 // Copied into public/ by scripts/copy-maplibre-worker.mjs (prebuild/predev).
 const WORKER_URL = `/maplibre/${maplibregl.getVersion()}/maplibre-gl-worker.mjs`;
+// Used when the basemap style itself cannot load, so the network still draws.
+const FALLBACK_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {},
+  layers: [{ id: "background", type: "background", paint: { "background-color": "#e9ece6" } }],
+};
 const ROAD_SHIELD_LAYERS = new Set([
   "highway-shield-non-us",
   "highway-shield-us-interstate",
@@ -76,6 +82,7 @@ export default function NetworkMap({
   const selectRef = useRef(onSelectNode);
   const stateRef = useRef({ layers, mode, removedNodes, selectedNode, compareValue });
   const [basemapWarning, setBasemapWarning] = useState(false);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => { selectRef.current = onSelectNode; }, [onSelectNode]);
   useEffect(() => {
@@ -100,11 +107,17 @@ export default function NetworkMap({
     map.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
+    let styleLoaded = false;
     map.on("error", (event) => {
       const message = String(event.error?.message ?? "");
-      if (/style|tile|source|sprite|glyph/i.test(message)) setBasemapWarning(true);
+      if (!/style|tile|source|sprite|glyph/i.test(message)) return;
+      setBasemapWarning(true);
+      if (!styleLoaded) map.setStyle(FALLBACK_STYLE);
     });
-    map.on("load", () => {
+    // style.load, not load: load also waits for every basemap tile source, which kept
+    // the network off the map for seconds on slow tiles.
+    map.once("style.load", () => {
+      styleLoaded = true;
       const canvas = map.getCanvas();
       canvas.setAttribute("aria-label", "Interactive road resilience map of Panaji");
       canvas.setAttribute("role", "region");
@@ -215,6 +228,7 @@ export default function NetworkMap({
       map.setLayoutProperty("critical-nodes", "visibility", state.layers.critical ? "visible" : "none");
       map.setLayoutProperty("bridged-roads", "visibility", state.layers.bridged ? "visible" : "none");
       map.setLayoutProperty("spof-nodes", "visibility", state.layers.spof ? "visible" : "none");
+      setReady(true);
     });
     map.setStyle(BASEMAP_STYLE, { transformStyle: nullSafeBasemapStyle });
     return () => {
@@ -225,8 +239,7 @@ export default function NetworkMap({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map?.isStyleLoaded()) return;
-    (map.getSource("network") as GeoJSONSource | undefined)?.setData(graph as never);
+    (map?.getSource("network") as GeoJSONSource | undefined)?.setData(graph as never);
   }, [graph]);
 
   useEffect(() => {
@@ -246,6 +259,7 @@ export default function NetworkMap({
   return (
     <div className="map-frame">
       <div ref={containerRef} className="network-map" />
+      {ready ? null : <div className="map-loading" role="status"><span /> Drawing the road network…</div>}
       <p className="sr-only">Use arrow keys to pan the map, plus and minus to zoom. All critical junctions are also available in the ranking table.</p>
       {mode === "compare" ? (
         <div className="compare-map-labels" aria-hidden="true">
