@@ -444,3 +444,14 @@ def test_representative_reroute_discloses_disconnection_and_finite_detour() -> N
     assert finite["baseline_path"] == [0, 1, 2]
     assert finite["rerouted_path"] == [0, 3, 2]
     assert finite["travel_time_delta_pct"] == 100.0
+
+
+def test_module_workers_are_served_as_javascript(tmp_path: Path) -> None:
+    # Browsers refuse module workers served as text/plain (Windows' registry lacks .mjs).
+    (tmp_path / "index.html").write_text("<h1>Field atlas</h1>", encoding="utf-8")
+    (tmp_path / "maplibre").mkdir()
+    (tmp_path / "maplibre" / "maplibre-gl-worker.mjs").write_text("export {}", encoding="utf-8")
+    with TestClient(create_app(web_out=tmp_path, start_worker=False)) as static_client:
+        worker = static_client.get("/maplibre/maplibre-gl-worker.mjs")
+    assert worker.status_code == 200
+    assert worker.headers["content-type"].startswith("text/javascript")

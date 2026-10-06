@@ -3,7 +3,8 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import { useEffect, useRef, useState } from "react";
-import maplibregl, { type FilterSpecification, type GeoJSONSource, type StyleSpecification } from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
+import type { FilterSpecification, GeoJSONSource, StyleSpecification } from "maplibre-gl";
 
 import type { GeoJsonCollection } from "@/lib/api";
 import type { WorkspaceMode } from "@/lib/types";
@@ -23,6 +24,8 @@ type Props = {
 
 const EDGE_FILTER: FilterSpecification = ["==", ["get", "feature_type"], "edge"];
 const BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
+// Copied into public/ by scripts/copy-maplibre-worker.mjs (prebuild/predev).
+const WORKER_URL = `/maplibre/${maplibregl.getVersion()}/maplibre-gl-worker.mjs`;
 const ROAD_SHIELD_LAYERS = new Set([
   "highway-shield-non-us",
   "highway-shield-us-interstate",
@@ -81,6 +84,7 @@ export default function NetworkMap({
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
+    maplibregl.setWorkerUrl(WORKER_URL);
     const map = new maplibregl.Map({
       container: containerRef.current,
       bounds: [[bounds[0], bounds[1]], [bounds[2], bounds[3]]],
