@@ -7,6 +7,7 @@ import io
 import json
 import logging
 import math
+import mimetypes
 import os
 from pathlib import Path
 import re
@@ -411,6 +412,8 @@ def create_app(
 
     static_dir = Path(web_out or os.getenv("TRACE_WEB_OUT", "web/out"))
     if (static_dir / "index.html").is_file():
+        # The map's module worker is .mjs, which some platform registries don't know.
+        mimetypes.add_type("text/javascript", ".mjs")
         app.mount("/", StaticFiles(directory=static_dir, html=True), name="web")
     return app
 

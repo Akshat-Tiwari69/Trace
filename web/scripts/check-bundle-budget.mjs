@@ -1,13 +1,14 @@
 import { gzipSync } from "node:zlib";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { extname, join, relative, resolve } from "node:path";
+import { extname, join, relative, resolve, sep } from "node:path";
 
 const OUT = resolve("out");
 const LIMITS = {
   // Next 16 + React 19's measured route/runtime floor is ~197 KiB gzip.
   "Non-map JavaScript": 205,
-  "Map JavaScript": 350,
-  "Total JavaScript": 520,
+  // maplibre-gl 6's module worker re-downloads its ~145 KiB shared module (F15).
+  "Map JavaScript": 430,
+  "Total JavaScript": 615,
   CSS: 35,
   Fonts: 100,
   "Initial shell": 650,
@@ -25,7 +26,10 @@ function gzipKiB(path) {
 }
 
 const emitted = files(OUT);
-const scripts = emitted.filter((path) => extname(path) === ".js");
+// Turbopack also copies every maplibre .mjs into _next/static/media; nothing requests
+// those copies. The worker the map really loads is public/maplibre/<version>/.
+const scripts = emitted.filter((path) => [".js", ".mjs"].includes(extname(path))
+  && !relative(OUT, path).split(sep).join("/").startsWith("_next/static/media/"));
 const mapScripts = scripts.filter((path) => /maplibre|mercatorcoordinate|webglcontextattributes/i.test(readFileSync(path, "utf8")));
 const mapSet = new Set(mapScripts);
 const css = emitted.filter((path) => extname(path) === ".css");

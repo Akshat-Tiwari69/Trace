@@ -31,8 +31,8 @@
 - [x] **F12-C1 — Empty `failed=` URL pre-failed junction 0.** `Number("")` is `0`, so every fresh visit silently added J-0 to the scenario (J-278 alone showed 2.2% loss instead of 1.5%). Fixed with `parseNodeIds()` and a unit regression.
 - [x] **F12-D1 — `next` critical/high advisories.** Updated to 16.3.6 with non-breaking transitive fixes (npm audit 11 → 3).
 - [x] **O2 — Deploy F12.** Live at `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` since 2026-09-28 22:27:56 UTC; public J-278 scenario verified.
-- [ ] **D2 — `maplibre-gl` critical advisory (DOM.sanitize XSS).** Low exposure (no popups/`setHTML`; attribution comes from the OpenFreeMap style), but the fix needs the 6.x major upgrade with map regression checks.
-- [ ] **D3 — `vitest` moderate advisory.** Test-only; needs the 5.x major upgrade.
+- [x] **D2 — `maplibre-gl` critical advisory (DOM.sanitize XSS).** Fixed in F15 (maplibre-gl 6.12; worker served from `/maplibre/<version>/`).
+- [x] **D3 — `vitest` moderate advisory.** Fixed in F15 (vitest 5.0.3, vite 8). Remaining: 5 high `braces` advisories under `eslint-config-next` (lint-time only; no patched release).
 - [ ] **D4 — Python dependencies are not vulnerability-scanned** and GitHub Dependabot alerts are disabled for the repository.
 - [ ] **OPS-1 — No external uptime monitoring.** A transient network-path outage (~21:40–21:45 UTC 2026-09-28) was noticed only by manual probing; the host itself stayed up.
 - [x] **F13 — Browser uploads aborted after 10 s.** The upload POST inherited the 10 s default while the server waits for the Modal call, so cold-start uploads failed in the UI although the server finished them. Now uses a 390 s `UPLOAD_TIMEOUT_MS`, above the server's worst-case Modal retry budget. Live at `12d0a5c`; a cold-start browser upload completed in 23 s during X1.

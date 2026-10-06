@@ -79,8 +79,8 @@ Budgets are release gates, not aspirations:
 | Surface | Budget |
 |---|---:|
 | Non-map first-party JavaScript | ≤ 205 KiB gzip (measured framework floor; optimize toward 170 KiB) |
-| Map JavaScript | ≤ 350 KiB gzip |
-| Total first-party JavaScript | ≤ 520 KiB gzip |
+| Map JavaScript | ≤ 430 KiB gzip (raised from 350 in F15: the maplibre-gl 6 module worker re-downloads its shared module) |
+| Total first-party JavaScript | ≤ 615 KiB gzip (raised from 520 in F15) |
 | CSS | ≤ 35 KiB gzip |
 | Fonts | ≤ 100 KiB total |
 | Initial static shell | ≤ 650 KiB |

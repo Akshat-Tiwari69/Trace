@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node scripts/copy-maplibre-worker.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-maplibre-worker.mjs",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
@@ -15,7 +17,7 @@
     "budget": "node scripts/check-bundle-budget.mjs"
   },
   "dependencies": {
-    "maplibre-gl": "5.24.0",
+    "maplibre-gl": "6.12.0",
     "next": "16.3.6",
     "react": "19.2.7",
     "react-dom": "19.2.7"
@@ -28,12 +30,12 @@
     "@types/node": "26.1.1",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "4.7.0",
+    "@vitejs/plugin-react": "6.1.2",
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.6",
     "jsdom": "26.1.0",
     "typescript": "6.0.3",
-    "vite": "6.4.3",
-    "vitest": "3.2.7"
+    "vite": "8.3.3",
+    "vitest": "5.0.3"
   }
 }
