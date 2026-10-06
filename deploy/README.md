@@ -135,7 +135,7 @@ systemctl --user status roadresilience.service roadresilience-update.timer
 journalctl --user -u roadresilience.service -n 100 --no-pager
 curl -fsS http://127.0.0.1:8000/healthz
 curl -fsS https://trace.tiwaribabu.in/healthz
-curl -fsS https://trace.tiwaribabu.in/api/v1/aois/panaji_demo
+curl -fsS https://trace.tiwaribabu.in/api/v1/aois/delhi_cp_osm
 curl --http1.1 --resolve trace.tiwaribabu.in:443:127.0.0.1 \
   -o /dev/null -sS -w '%{http_code}\n' \
   -H 'Host: invalid.example' \

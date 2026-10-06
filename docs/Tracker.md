@@ -67,7 +67,7 @@ Two entry paths share the same P2/P3 logic:
 
 Current release state:
 
-- Public application: `https://trace.tiwaribabu.in`; verified checkout `12d0a5c0fd510b347537c69b35c78d60c9bf5c99` (O2 + OPS-3 + F13), with strict Host/SNI rejection live through the shared Caddy root
+- Public application: `https://trace.tiwaribabu.in`; verified checkout `30bf7453b50d5865aa526b3f8e7dd60adb1a10a1` (O3: web UX audit fixes, city atlas picker, upload stress test; rollback target `12d0a5c`), with strict Host/SNI rejection live through the shared Caddy root; 13 v4 imagery atlases are host-only under `data/atlas_private/`
 - Production segmentation model: `a4-roadseg-v4` (`road_v4.pt`, MiT-B5, threshold `0.55`, SHA-256 `5daf088a…05f3`), deployed to Modal 2026-10-06 by owner decision (trained on the restricted city-grid corpus; not license-reviewed) and verified by a staging run (2 of 1,048,576 pixels differ, both within 0.0001 of the threshold across torch versions) and a live upload; rollback target `a4-roadseg-v3.3` (`road_v3_3.pt`, `0.50`, licensed)
 - Current research direction: graph-first SAM-Road++/A18, validated by a common-unit chip APLS gate but not deploy-ready
 
@@ -213,12 +213,12 @@ flowchart LR
 
 ## §9 · Status Snapshot
 
-- **Product:** end-to-end batch and hosted-upload paths exist; the sample field atlas and CPU analysis are runnable.
-- **Quality:** local release gates pass: 391 Python tests, frontend lint/typecheck, 17 unit tests, production build/budgets, and 4 Chromium journeys including the F11 map-height regression.
-- **Deployment:** Oracle is live at exact commit `12d0a5c0fd510b347537c69b35c78d60c9bf5c99` (O2 + OPS-3 + F13) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, simulation, and a public upload-to-export run are verified.
-- **Model:** `a4-roadseg-v3.3` is deployed (A50d: encoder fine-tuned at 0.1×, same sources as v3.2; chip APLS +0.0555 vs v3.2). The A46 graph-first comparison predates scorer changes and is unverified; SAM-Road++ remains undeployable (no published license).
+- **Product:** end-to-end batch and hosted-upload paths exist; the app opens on a city picker over 13 areas (v4 imagery + OSM atlases) and uploads can be stress-tested; the Panaji sample remains the batch/test fixture.
+- **Quality:** release gates pass: 440 Python tests, frontend lint/typecheck, 28 unit tests, production build/budgets, and 8 Chromium journeys in CI (map height, basemap fallback, phone layout, picker, shared scenarios, upload stress test).
+- **Deployment:** Oracle is live at exact commit `30bf7453b50d5865aa526b3f8e7dd60adb1a10a1` (O3; rollback `12d0a5c`) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; health, atlas listing, an imagery-atlas simulation, the maplibre 6 worker and the picker/studio were verified live. SSH/listener hardening and strict Host/SNI rejection are unchanged.
+- **Model:** `a4-roadseg-v4` is deployed on Modal (A51 MiT-B5, threshold 0.55; owner decision, restricted training data; rollback `a4-roadseg-v3.3`). The A46 graph-first comparison predates scorer changes and is unverified; SAM-Road++ remains undeployable (no published license).
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** A50 — finish the gated retrain on the local GPU and score it under the current scorer; re-score the A18/A46 graphs under the same scorer. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
+- **Immediate work:** A50 — finish the gated retrain on the local GPU and score it under the current scorer; re-score the A18/A46 graphs under the same scorer. Open follow-ups (Python dependency scanning, uptime monitoring, lint-time `braces` advisories) are listed in `bugs.md`.
 
 ---
 
