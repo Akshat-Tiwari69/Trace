@@ -1,3 +1,5 @@
+import type { AtlasProvenance } from "@/lib/api";
+
 export type MetricFormat = {
   digits?: number;
   prefix?: string;
@@ -19,6 +21,43 @@ export function scenarioKey(nodeIds: readonly number[]): string {
 export function parseNodeIds(value: string | null): number[] {
   const ids = (value ?? "").split(",").filter((part) => /^\d+$/.test(part)).map(Number).filter(Number.isSafeInteger);
   return [...new Set(ids)].sort((a, b) => a - b);
+}
+
+export function sourceLabel(atlas: AtlasProvenance): string {
+  if (atlas.source === "imagery") return `Extracted from imagery · ${atlas.model?.release ?? "unknown model"}`;
+  return "OpenStreetMap roads";
+}
+
+// Only imagery atlases have a model; OSM networks are not model output.
+export function trainingLabel(atlas: AtlasProvenance): string | null {
+  if (atlas.source !== "imagery" || atlas.seen_in_training == null) return null;
+  return atlas.seen_in_training ? "Area inside the training corpus" : "Area unseen by the model";
+}
+
+const cityName = (label: string) => label.split(", ").at(-1) ?? label;
+
+// Imagery first: it is the product's own extraction; OSM is the reference.
+export function groupAtlases<T extends AtlasProvenance & { aoi: string; label: string }>(rows: readonly T[]): T[][] {
+  const groups = new Map<string, T[]>();
+  for (const row of rows) groups.set(row.area ?? row.aoi, [...(groups.get(row.area ?? row.aoi) ?? []), row]);
+  return [...groups.values()]
+    .map((group) => [...group].sort((a, b) => (a.source === "imagery" ? 0 : 1) - (b.source === "imagery" ? 0 : 1)))
+    // Labels read "Neighbourhood, City": order by city.
+    .sort((a, b) => cityName(a[0].label).localeCompare(cityName(b[0].label)));
+}
+
+export function formatCoordinates([west, south, east, north]: readonly number[]): string {
+  const lat = (south + north) / 2;
+  const lon = (west + east) / 2;
+  return `${Math.abs(lat).toFixed(2)}° ${lat >= 0 ? "N" : "S"} / ${Math.abs(lon).toFixed(2)}° ${lon >= 0 ? "E" : "W"}`;
+}
+
+// A link without ?city= predates the picker; its scenario belongs to Panaji.
+export function initialAoi(search: string): string | null {
+  const params = new URLSearchParams(search);
+  const city = params.get("city");
+  if (city && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(city)) return city;
+  return ["mode", "junction", "failed"].some((key) => params.has(key)) ? "panaji_demo" : null;
 }
 
 export function formatMetric(value: number | null | undefined, format: MetricFormat = {}): string {

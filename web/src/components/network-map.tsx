@@ -20,6 +20,7 @@ type Props = {
   removedNodes: number[];
   compareValue: number;
   onSelectNode: (nodeId: number) => void;
+  label: string;
 };
 
 const EDGE_FILTER: FilterSpecification = ["==", ["get", "feature_type"], "edge"];
@@ -76,6 +77,7 @@ export default function NetworkMap({
   removedNodes,
   compareValue,
   onSelectNode,
+  label,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -119,7 +121,7 @@ export default function NetworkMap({
     map.once("style.load", () => {
       styleLoaded = true;
       const canvas = map.getCanvas();
-      canvas.setAttribute("aria-label", "Interactive road resilience map of Panaji");
+      canvas.setAttribute("aria-label", `Interactive road resilience map of ${label}`);
       canvas.setAttribute("role", "region");
       map.addSource("network", { type: "geojson", data: graph as never });
       map.addLayer({
@@ -237,7 +239,7 @@ export default function NetworkMap({
       map.remove();
       mapRef.current = null;
     };
-  }, [bounds, graph]);
+  }, [bounds, graph, label]);
 
   useEffect(() => {
     const map = mapRef.current;

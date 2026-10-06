@@ -31,6 +31,10 @@ async function mockApi(page: Page) {
   }));
   await page.route("**/api/v1/**", async (route) => {
     const { pathname } = new URL(route.request().url());
+    if (pathname === "/api/v1/aois") return route.fulfill({ json: { aois: [
+      { aoi: "panaji_demo", area: "panaji_demo", label: "Panaji, Goa", region: "IN-GA", source: "osm", model: null, seen_in_training: null, node_count: 364, edge_count: 535, critical_count: 2, worst_single_loss: .2 },
+      { aoi: "delhi_cp_imagery", area: "delhi_cp", label: "Connaught Place, Delhi", region: "IN-DL", source: "imagery", model: { release: "a4-roadseg-v4", checkpoint: "road_v4.pt", sha256: "x" }, seen_in_training: false, node_count: 414, edge_count: 500, critical_count: 41, worst_single_loss: .138 },
+    ] } });
     if (pathname === "/api/v1/aois/panaji_demo") return route.fulfill({ json: summary });
     if (pathname === "/api/v1/aois/panaji_demo/graph") return route.fulfill({ json: graph });
     if (pathname === "/api/v1/simulations") return route.fulfill({ json: {
@@ -59,7 +63,17 @@ async function mockApi(page: Page) {
 
 test.beforeEach(async ({ page }) => {
   await mockApi(page);
+  await page.goto("/?city=panaji_demo");
+  await expect(page.getByRole("heading", { name: "Panaji, Goa" })).toBeVisible();
+});
+
+test("the landing page lists cities by source and opens one", async ({ page }) => {
   await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Which junction would break the city?" })).toBeVisible();
+  await expect(page.getByText("Extracted from imagery · a4-roadseg-v4")).toBeVisible();
+  await expect(page.getByText("Area unseen by the model")).toBeVisible();
+  await page.getByRole("link", { name: /OpenStreetMap roads/ }).click();
+  await expect(page).toHaveURL(/city=panaji_demo/);
   await expect(page.getByRole("heading", { name: "Panaji, Goa" })).toBeVisible();
 });
 
