@@ -240,7 +240,9 @@
   .compare-control p { margin-top: 8px; color: var(--muted); font-size: 10px; }
 
   .layer-list { margin: 0; padding: 20px 22px 17px; border: 0; }
-  .layer-list legend { padding: 0; font: 600 17px/1 var(--display); }
+  /* A legend sits in the fieldset border and ignores its padding; floating it puts it inside. */
+  .layer-list legend { float: left; width: 100%; padding: 0 0 10px; font: 600 17px/1 var(--display); }
+  .layer-list legend + * { clear: both; }
   .layer-toggle { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 10px; min-height: 54px; border-bottom: 1px solid var(--line); }
   .layer-toggle:last-child { border-bottom: 0; }
   .layer-toggle > span:nth-child(2) { display: grid; }
