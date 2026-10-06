@@ -3,7 +3,7 @@
 > **Source of truth for current ownership, active work, contracts, and locked decisions.**
 > Detailed experiment evidence belongs in `Evaluation.md` and `Research.md`; this file stays concise enough to route the next task correctly.
 
-**Last updated:** 2026-10-06 · **Phase:** maintenance + A50 data work · **Overall:** F12, OPS-3 and F13 are live at immutable commit `12d0a5c`; segmentation model `a4-roadseg-v4` is live on Modal; multi-city grid corpus (A50) in progress
+**Last updated:** 2026-10-06 · **Phase:** maintenance + A50 data work · **Overall:** the web UX + city atlas release (F14–F19, C1–C5, U1) is live at immutable commit `30bf745`; segmentation model `a4-roadseg-v4` is live on Modal; multi-city grid corpus (A50) in progress
 
 ---
 
@@ -67,7 +67,7 @@ Two entry paths share the same P2/P3 logic:
 
 Current release state:
 
-- Public application: `https://trace.tiwaribabu.in`; verified checkout `12d0a5c0fd510b347537c69b35c78d60c9bf5c99` (O2 + OPS-3 + F13), with strict Host/SNI rejection live through the shared Caddy root
+- Public application: `https://trace.tiwaribabu.in`; verified checkout `30bf7453b50d5865aa526b3f8e7dd60adb1a10a1` (O3: web UX audit fixes, city atlas picker, upload stress test; rollback target `12d0a5c`), with strict Host/SNI rejection live through the shared Caddy root; 13 v4 imagery atlases are host-only under `data/atlas_private/`
 - Production segmentation model: `a4-roadseg-v4` (`road_v4.pt`, MiT-B5, threshold `0.55`, SHA-256 `5daf088a…05f3`), deployed to Modal 2026-10-06 by owner decision (trained on the restricted city-grid corpus; not license-reviewed) and verified by a staging run (2 of 1,048,576 pixels differ, both within 0.0001 of the threshold across torch versions) and a live upload; rollback target `a4-roadseg-v3.3` (`road_v3_3.pt`, `0.50`, licensed)
 - Current research direction: graph-first SAM-Road++/A18, validated by a common-unit chip APLS gate but not deploy-ready
 
@@ -142,7 +142,8 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **C3** | ✅ | City picker | Akshat | C2 | `/` lists every atlas as area cards (source, model release, unseen/training chip, junctions, worst single-junction loss); `?city=` opens a studio for any atlas, whose place card shows the real source/region/coordinates instead of "Verified sample"; links without `city` (pre-picker shares) open Panaji; unit + e2e tests; PR opened into `dev` |
 | **U1** | ✅ | Stress-test an uploaded network | Akshat | C3 | `POST /api/v1/analyses/{job_id}/simulations` runs the atlas failure simulation on the uploaded graph (image space, no fake georeference); the upload result lets you fail any of its top five critical junctions and shows the loss and connected share, with the failed junction ringed on the overlay; API + e2e tests; PR opened into `dev` |
 | **C5** | ✅ | Remove Panaji from the app (owner decision) | Akshat | U1 | Panaji is no longer a registered atlas: not in the picker or API; links without `?city=` open the picker; the `data/sample/panaji_demo_*` files stay as the §4 sample/test fixture; API tests use the Delhi CP OSM atlas; PR opened into `dev` |
-| **C4** | ⏳ | v4 imagery atlases on the host | Akshat | C3 + merged/deployed release | All 13 imagery atlases built locally; copy to the host (`deploy/README.md`) once the C-series release is deployed — needs owner go-ahead |
+| **C4** | ✅ | v4 imagery atlases on the host | Akshat | C3 | 13 imagery atlases (52 files) copied to `~/Trace/data/atlas_private/`; all graph SHA-256s match the local build |
+| **O3** | ✅ | Deploy the web UX + city atlas release | Akshat | F14–F19, C1–C5, U1 merged | #150–#160 merged (owner-authorized admin merge; merged tree identical to the CI-tested #160 head); `DEPLOY_REF` `30bf7453b50d5865aa526b3f8e7dd60adb1a10a1` rolled out healthy; live picker, imagery studio, simulation and map worker verified |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **R34** | ✅ | Release `a4-roadseg-v4` (A51) to production | Akshat | A51 | Pre-release asset + checksum; Modal staging run on the production image matches local inference (2 boundary pixels); production deploy; live upload; promoted to Latest; docs point at v4 |
@@ -212,16 +213,21 @@ flowchart LR
 
 ## §9 · Status Snapshot
 
-- **Product:** end-to-end batch and hosted-upload paths exist; the sample field atlas and CPU analysis are runnable.
-- **Quality:** local release gates pass: 391 Python tests, frontend lint/typecheck, 17 unit tests, production build/budgets, and 4 Chromium journeys including the F11 map-height regression.
-- **Deployment:** Oracle is live at exact commit `12d0a5c0fd510b347537c69b35c78d60c9bf5c99` (O2 + OPS-3 + F13) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; Modal v3.2/checksum, SSH/listener hardening, strict Host/SNI rejection, simulation, and a public upload-to-export run are verified.
-- **Model:** `a4-roadseg-v3.3` is deployed (A50d: encoder fine-tuned at 0.1×, same sources as v3.2; chip APLS +0.0555 vs v3.2). The A46 graph-first comparison predates scorer changes and is unverified; SAM-Road++ remains undeployable (no published license).
+- **Product:** end-to-end batch and hosted-upload paths exist; the app opens on a city picker over 13 areas (v4 imagery + OSM atlases) and uploads can be stress-tested; the Panaji sample remains the batch/test fixture.
+- **Quality:** release gates pass: 440 Python tests, frontend lint/typecheck, 28 unit tests, production build/budgets, and 8 Chromium journeys in CI (map height, basemap fallback, phone layout, picker, shared scenarios, upload stress test).
+- **Deployment:** Oracle is live at exact commit `30bf7453b50d5865aa526b3f8e7dd60adb1a10a1` (O3; rollback `12d0a5c`) on a fully patched Ubuntu 24.04 host running kernel `7.0.0-1011-oracle`; health, atlas listing, an imagery-atlas simulation, the maplibre 6 worker and the picker/studio were verified live. SSH/listener hardening and strict Host/SNI rejection are unchanged.
+- **Model:** `a4-roadseg-v4` is deployed on Modal (A51 MiT-B5, threshold 0.55; owner decision, restricted training data; rollback `a4-roadseg-v3.3`). The A46 graph-first comparison predates scorer changes and is unverified; SAM-Road++ remains undeployable (no published license).
 - **Evidence gap:** no untouched new-city/new-sensor final test and no labeled real Cartosat-PAN evaluation.
-- **Immediate work:** A50 — finish the gated retrain on the local GPU and score it under the current scorer; re-score the A18/A46 graphs under the same scorer. Open follow-ups (maplibre/vitest majors, Python dependency scanning, uptime monitoring) are listed in `bugs.md`.
+- **Immediate work:** A50 — finish the gated retrain on the local GPU and score it under the current scorer; re-score the A18/A46 graphs under the same scorer. Open follow-ups (Python dependency scanning, uptime monitoring, lint-time `braces` advisories) are listed in `bugs.md`.
 
 ---
 
 ## §10 · Daily Log
+
+**2026-10-06 (Akshat — C4/O3: imagery atlases and deploy)**
+
+- Copied the 13 v4 imagery atlases to the host (checksums match). Merged #150–#160 into `dev` with owner-authorized admin merges (branch protection requires a review the owner cannot give their own PRs); `30bf745`'s tree equals the CI-tested #160 head. Pinned `DEPLOY_REF` to `30bf7453b50d5865aa526b3f8e7dd60adb1a10a1` (from `12d0a5c`); the updater exited 0 and the service is active.
+- Live checks: `/healthz` ok; `/api/v1/aois` lists 26 atlases (13 imagery, no Panaji); Delhi CP imagery J-257 → 13.8% loss (matches local); the maplibre 6 worker is served as `text/javascript`; the picker shows 13 cities and the Bandra imagery studio draws its network with no console errors.
 
 **2026-10-06 (Akshat — C5: Panaji out of the app)**
 
