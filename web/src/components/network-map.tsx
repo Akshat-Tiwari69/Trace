@@ -185,10 +185,12 @@ export default function NetworkMap({
         source: "network",
         filter: nodeFilter("is_articulation", true),
         paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, 5, 16, 10],
-          "circle-color": "rgba(229,184,78,.2)",
+          // Lighter than critical markers: in the dense core these rings used to bury the network.
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 11, 3, 16, 8],
+          "circle-color": "rgba(229,184,78,.12)",
           "circle-stroke-color": "#7d5910",
-          "circle-stroke-width": 2,
+          "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 11, 1, 16, 1.6],
+          "circle-stroke-opacity": 0.75,
         },
       });
       map.addLayer({

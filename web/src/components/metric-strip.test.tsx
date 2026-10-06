@@ -11,3 +11,12 @@ describe("MetricStrip", () => {
     expect(screen.queryByText("Not available")).not.toBeInTheDocument();
   });
 });
+
+describe("MetricStrip stale result", () => {
+  it("does not present an out-of-date result as current", () => {
+    const simulation = { aoi: "a", removed_node_ids: [7], resilience_index: .985, efficiency_loss: .015, largest_cc_fraction: .99 };
+    render(<MetricStrip nodeCount={1} edgeCount={1} criticalCount={1} simulation={simulation} stale />);
+    expect(screen.getByText("Out of date: run again")).toBeInTheDocument();
+    expect(screen.queryByText(/efficiency lost/)).not.toBeInTheDocument();
+  });
+});

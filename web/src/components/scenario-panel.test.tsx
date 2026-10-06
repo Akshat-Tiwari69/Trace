@@ -16,6 +16,8 @@ describe("ScenarioPanel", () => {
       criticalNodes={criticalNodes}
       removed={[3, 7]}
       busy={false}
+      simulation={null}
+      stale={false}
       onToggleRemoved={vi.fn()}
       onRun={vi.fn()}
       onReset={vi.fn()}
@@ -35,6 +37,8 @@ describe("ScenarioPanel", () => {
       criticalNodes={criticalNodes}
       removed={[7]}
       busy={false}
+      simulation={null}
+      stale={false}
       onToggleRemoved={vi.fn()}
       onRun={vi.fn()}
       onReset={vi.fn()}
@@ -50,6 +54,8 @@ describe("ScenarioPanel", () => {
       criticalNodes={criticalNodes}
       removed={[7]}
       busy={false}
+      simulation={null}
+      stale={false}
       onToggleRemoved={vi.fn()}
       onRun={vi.fn()}
       onReset={vi.fn()}
@@ -57,5 +63,28 @@ describe("ScenarioPanel", () => {
 
     expect(screen.getByText("J-7 is in the failure set.")).toBeInTheDocument();
     expect(screen.queryByText(/ready to add/)).not.toBeInTheDocument();
+  });
+});
+
+describe("ScenarioPanel stress result", () => {
+  const simulation = {
+    aoi: "panaji_demo", removed_node_ids: [7], resilience_index: .985, efficiency_loss: .015,
+    largest_cc_fraction: .99, active_largest_cc_fraction: .99,
+  };
+  const props = {
+    mode: "stress" as const, selected: criticalNodes[0], criticalNodes, removed: [7], busy: false,
+    onToggleRemoved: vi.fn(), onRun: vi.fn(), onReset: vi.fn(),
+  };
+
+  it("shows the run's loss next to the controls", () => {
+    render(<ScenarioPanel {...props} simulation={simulation} stale={false} />);
+    expect(screen.getByText("1.5%")).toBeInTheDocument();
+    expect(screen.getByText("0.985")).toBeInTheDocument();
+    expect(screen.queryByText(/failure set changed/i)).not.toBeInTheDocument();
+  });
+
+  it("flags a result that no longer matches the failure set", () => {
+    render(<ScenarioPanel {...props} removed={[3, 7]} simulation={simulation} stale />);
+    expect(screen.getByText(/failure set changed/i)).toBeInTheDocument();
   });
 });
