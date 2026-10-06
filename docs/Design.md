@@ -95,4 +95,4 @@ The field targets are p75 LCP ≤ 2.5 s, INP ≤ 200 ms, and CLS ≤ 0.1, matchi
 - The browser never reimplements P2/P3 metrics.
 - Modal remains the sole authenticated GPU boundary; P2/P3 and simulations remain CPU-capable.
 - File artifacts remain the data store. No database or login product is introduced.
-- The licensed `a4-roadseg-v3.3` model is production until another model passes both the registered metric gate and licensing review.
+- `a4-roadseg-v4` is production (owner decision, 2026-10-06): it passed the registered routing gate against v3.3 but trains on the restricted city-grid corpus, so it has not passed licensing review. The licensed `a4-roadseg-v3.3` is the rollback target.

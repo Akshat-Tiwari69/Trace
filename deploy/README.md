@@ -96,7 +96,7 @@ python3 -m venv .venv-modal
 Before deployment, verify:
 
 - the `roadseg-key` Modal secret exists and is non-empty;
-- `MODEL_SHA256` matches the intended `a4-roadseg-v3.3` release asset (rollback target: `a4-roadseg-v3.2`);
+- `MODEL_SHA256` matches the intended `a4-roadseg-v4` release asset (rollback target: `a4-roadseg-v3.3`);
 - the Modal code is from the same approved application ref;
 - an invalid key and oversized payload fail before image decoding.
 

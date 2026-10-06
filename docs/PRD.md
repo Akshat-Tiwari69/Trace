@@ -52,7 +52,7 @@ TRACE is a map-led route-resilience demonstrator that converts satellite imagery
 
 ## Evidence and model policy
 
-- Production P1 is the licensed PyTorch `a4-roadseg-v3.3` checkpoint at threshold `0.50` until a replacement passes the frozen promotion protocol and license review.
+- Production P1 is the PyTorch `a4-roadseg-v4` checkpoint at threshold `0.55` (owner decision, 2026-10-06). It passed the frozen routing gate against v3.3 but trains on the restricted city-grid corpus and has not passed license review; the licensed `a4-roadseg-v3.3` (threshold `0.50`) is the rollback.
 - The SAM-Road++ graph-first candidate won the registered routing comparison but cannot be shipped because no usable upstream license is published.
 - SpaceNet-5 Mumbai is a repeatedly consulted development benchmark, not an untouched final test set.
 - The product does not claim demonstrated generalization to every city, sensor, weather condition, or road class.
