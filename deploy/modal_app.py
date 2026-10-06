@@ -1,7 +1,7 @@
 """Serverless-GPU road-segmentation endpoint (Modal) for the Route Resilience app.
 
-Runs the deployed SegFormer MiT-B3 + SCSE checkpoint (`road_v3_3.pt`, release
-a4-roadseg-v3.3) on a T4 that scales to zero. The dashboard POSTs a base64 image
+Runs the deployed SegFormer MiT-B5 + SCSE checkpoint (`road_v4.pt`, release
+a4-roadseg-v4) on a T4 that scales to zero. The dashboard POSTs a base64 image
 with the shared key in an HTTP header and gets back a base64 binary road-mask
 PNG. Only `model.py` is
 vendored (torch/smp/numpy only), so none of the repo's heavy geo `__init__` chain
@@ -17,15 +17,15 @@ from fastapi import Request
 
 MODEL_URL = (
     "https://github.com/Akshat-Tiwari69/Trace/releases/download/"
-    "a4-roadseg-v3.3/road_v3_3.pt"
+    "a4-roadseg-v4/road_v4.pt"
 )
-# SHA-256 of the release asset above (== local models/road_v3_3.pt). The image
+# SHA-256 of the release asset above (== local models/road_v4.pt). The image
 # build fails closed on mismatch so a tampered/corrupted download can never be
 # baked in. Recompute (Get-FileHash / sha256sum) when a new release is deployed.
-# Rollback target: a4-roadseg-v3.2/road_pan.pt,
-# sha256 0ebedf973c0ffe0b1148d3de38382d17ac88398c6a55f4550d661a6b1e9eed1d.
-MODEL_SHA256 = "944ae64e0156046db643f9805688eeb9563bce579e9c06f0156ae6a55cb8bc12"
-MODEL_PATH = "/model/road_v3_3.pt"
+# Rollback target: a4-roadseg-v3.3/road_v3_3.pt,
+# sha256 944ae64e0156046db643f9805688eeb9563bce579e9c06f0156ae6a55cb8bc12.
+MODEL_SHA256 = "5daf088a4fd0a57041db84e1513df173a16088bf80dd76adc60185cfce0b05f3"
+MODEL_PATH = "/model/road_v4.pt"
 
 # Payload guardrails for the public endpoint. The UI enforces the same original-
 # byte limit; derive the base64 ceiling so transport expansion cannot disagree.

@@ -33,7 +33,8 @@ SpaceNet-5 Mumbai has been repeatedly consulted, so these are **development-benc
 
 | Checkpoint | Development-selected threshold | RGB IoU | Gray-proxy IoU | Legacy tile-mask APLS |
 |---|---:|---:|---:|---:|
-| **v3.3** `road_v3_3.pt` (deployed) | 0.50 | **0.4699** | **0.4461** | — |
+| **v4** `road_v4.pt` (deployed) | 0.55 | **0.5256** | **0.5152** | — |
+| v3.3 `road_v3_3.pt` | 0.50 | 0.4699 | 0.4461 | — |
 | v3.2 `road_pan.pt` | 0.52 | 0.4594 | 0.4177 | 0.4987 |
 | v3/v3.1 weights | 0.50 | 0.4493 | 0.4046 | 0.4374 |
 | v1 weights | 0.50 sweep result | 0.3993 | 0.3447 | 0.4198 |
@@ -77,12 +78,12 @@ Open `http://127.0.0.1:8000`. The committed sample needs no model, GPU, or Modal
 
 ## Run your own image through P1→P3
 
-Install the full environment from [SETUP.md](SETUP.md) and download `road_v3_3.pt` from the [`a4-roadseg-v3.3` model release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v3.3) into ignored `models/`.
+Install the full environment from [SETUP.md](SETUP.md) and download `road_v4.pt` from the [`a4-roadseg-v4` model release](https://github.com/Akshat-Tiwari69/Trace/releases/tag/a4-roadseg-v4) into ignored `models/`.
 
 ```bash
 python -m src.pipeline.run_pipeline \
   --image data/raw/your_tile.tif \
-  --checkpoint models/road_v3_3.pt \
+  --checkpoint models/road_v4.pt \
   --aoi your_area \
   --resolution-m 1.0 \
   --postprocess
