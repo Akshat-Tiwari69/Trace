@@ -9,11 +9,14 @@ import {
   fetchAnalysis,
   fetchAnalysisResult,
   fetchGraph,
+  runAnalysisSimulation,
   submitAnalysis,
   type AnalysisJob,
   type AnalysisResult,
   type GeoJsonCollection,
+  type SimulationResult,
 } from "@/lib/api";
+import type { CriticalNode } from "@/lib/types";
 import { formatMetric } from "@/lib/model";
 
 const MAX_BYTES = 11 * 1024 * 1024;
@@ -59,6 +62,9 @@ export function UploadDialog({ open, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [failed, setFailed] = useState<CriticalNode | null>(null);
+  const [stress, setStress] = useState<SimulationResult | null>(null);
+  const [stressError, setStressError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!busy) return;
@@ -173,8 +179,24 @@ export function UploadDialog({ open, onClose }: Props) {
     }
   }
 
+  async function failJunction(row: CriticalNode) {
+    if (!result) return;
+    setFailed(row);
+    setStress(null);
+    setStressError(null);
+    try {
+      const value = await runAnalysisSimulation(result.id, [row.node_id]);
+      setStress(value);
+    } catch (reason) {
+      setStressError(reason instanceof Error ? reason.message : "The stress test could not be completed.");
+    }
+  }
+
   function reset() {
     runRef.current += 1;
+    setFailed(null);
+    setStress(null);
+    setStressError(null);
     rememberFile(null);
     setJob(null);
     setResult(null);
@@ -217,6 +239,7 @@ export function UploadDialog({ open, onClose }: Props) {
                 resolution={result.resolution_m}
                 size={imageSize}
                 onImageSize={setImageSize}
+                failed={failed}
               />
             ) : null}
             <div className="result-score"><span>Worst-junction resilience</span><strong>{formatMetric(result.resilience_index, { digits: 3 })}</strong><i style={{ "--result": result.resilience_index } as CSSProperties} /></div>
@@ -228,6 +251,24 @@ export function UploadDialog({ open, onClose }: Props) {
               <div><dt>Worst junction</dt><dd>{result.top_node == null ? "—" : `J-${result.top_node}`}</dd></div>
               <div><dt>Scale estimate</dt><dd>{result.resolution_m} m/px</dd></div>
             </dl>
+            {result.criticality.length ? (
+              <section className="upload-stress" aria-labelledby="upload-stress-title">
+                <h3 id="upload-stress-title">Stress-test this network</h3>
+                <p>Fail one of its most critical junctions to see what the network loses.</p>
+                <div className="upload-stress-options">
+                  {[...result.criticality].sort((a, b) => a.rank - b.rank).slice(0, 5).map((row) => (
+                    <button key={row.node_id} type="button" aria-pressed={failed?.node_id === row.node_id} onClick={() => void failJunction(row)}>
+                      J-{row.node_id}
+                    </button>
+                  ))}
+                </div>
+                <p role="status" aria-live="polite">
+                  {stressError ?? (failed && !stress ? `Failing J-${failed.node_id}…` : stress && failed
+                    ? `Failing J-${failed.node_id} costs ${formatMetric(stress.efficiency_loss * 100, { digits: 1 })}% of network efficiency (RI ${formatMetric(stress.resilience_index, { digits: 3 })}); ${formatMetric((stress.active_largest_cc_fraction ?? stress.largest_cc_fraction) * 100, { digits: 0 })}% of the remaining junctions stay connected.`
+                    : "")}
+                </p>
+              </section>
+            ) : null}
             <div className="result-actions">
               <a href={result.exports.geojson} download>Download GeoJSON</a>
               <a href={result.exports.json} download>Download evidence JSON</a>
@@ -274,12 +315,14 @@ function UploadOverlay({
   resolution,
   size,
   onImageSize,
+  failed,
 }: {
   image: string;
   graph: GeoJsonCollection | null;
   resolution: number;
   size: [number, number] | null;
   onImageSize: (size: [number, number]) => void;
+  failed: CriticalNode | null;
 }) {
   const path = useMemo(() => {
     if (!graph) return "";
@@ -310,6 +353,7 @@ function UploadOverlay({
             const coordinates = feature.geometry.coordinates as [number, number];
             return <circle key={String(feature.properties.node_id ?? index)} cx={coordinates[0] / resolution} cy={coordinates[1] / resolution} r="5" />;
           })}
+          {failed ? <circle className="failed" cx={failed.x / resolution} cy={failed.y / resolution} r="11" /> : null}
         </svg>
       ) : null}
       <figcaption>{graph ? "Extracted network overlay" : "Network overlay unavailable · downloads remain valid"}</figcaption>

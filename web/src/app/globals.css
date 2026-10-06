@@ -446,6 +446,14 @@
   .upload-overlay img { object-fit: fill; filter: saturate(.66) contrast(1.08) brightness(.72); }
   .upload-overlay svg path { fill: none; stroke: #8cf0c7; stroke-width: 2.2; vector-effect: non-scaling-stroke; }
   .upload-overlay svg circle { fill: var(--coral); stroke: var(--paper); stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .upload-overlay svg circle.failed { fill: none; stroke: var(--ink); stroke-width: 3; }
+  .upload-stress { margin-top: 16px; padding: 14px; border: 1px solid var(--ink); background: var(--paper-2); }
+  .upload-stress h3 { font: 600 19px/1.1 var(--display); }
+  .upload-stress > p { margin-top: 6px; color: var(--muted); font-size: 12px; }
+  .upload-stress > p[role="status"] { color: var(--ink); font-size: 13px; font-weight: 600; }
+  .upload-stress-options { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .upload-stress-options button { min-height: 36px; padding: 6px 11px; border: 1px solid var(--ink); background: var(--paper); font-size: 12px; font-weight: 700; }
+  .upload-stress-options button[aria-pressed="true"] { color: var(--paper); background: var(--coral-dark); border-color: var(--coral-dark); }
   .upload-overlay figcaption { position: absolute; right: 7px; bottom: 7px; padding: 4px 6px; color: var(--paper); background: rgba(11, 20, 19, .82); font-size: 7px; font-weight: 700; text-transform: uppercase; }
   .result-score { display: grid; grid-template-columns: 1fr auto; align-items: end; }
   .result-score > span { font-size: 9px; font-weight: 700; text-transform: uppercase; }

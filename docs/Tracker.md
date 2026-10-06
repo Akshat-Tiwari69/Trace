@@ -140,7 +140,8 @@ Status: ✅ done · 🔄 active · ⏳ ready · 🔒 blocked · ⏸ parked/super
 | **C1** | ✅ | Regenerable city atlases | Akshat | F19 | `build_city_atlas` builds one square area per corpus city from OSM (committed `data/atlas/`, 13 areas) or from local imagery + a checkpoint (ignored `data/atlas_private/`, host-only); each `{aoi}_atlas.json` records source, model + SHA-256, seen-in-training, bbox, headline stats and graph SHA-256; Panaji registered; tests; PR opened into `dev` |
 | **C2** | ✅ | Atlas registry API | Akshat | C1 | `GET /api/v1/aois` lists every atlas on the host; summary/graph/simulation serve any registered `aoi` (registry lookup only, never a path); the Panaji singleton is gone; deploy README covers copying imagery atlases to the host; tests; PR opened into `dev` |
 | **C3** | ✅ | City picker | Akshat | C2 | `/` lists every atlas as area cards (source, model release, unseen/training chip, junctions, worst single-junction loss); `?city=` opens a studio for any atlas, whose place card shows the real source/region/coordinates instead of "Verified sample"; links without `city` (pre-picker shares) open Panaji; unit + e2e tests; PR opened into `dev` |
-| **C4, U1** | ⏳ | Imagery atlases on the host; uploads in the studio | Akshat | C3 | v4 imagery atlases for all 13 areas copied to the host; uploaded analyses explorable |
+| **U1** | ✅ | Stress-test an uploaded network | Akshat | C3 | `POST /api/v1/analyses/{job_id}/simulations` runs the atlas failure simulation on the uploaded graph (image space, no fake georeference); the upload result lets you fail any of its top five critical junctions and shows the loss and connected share, with the failed junction ringed on the overlay; API + e2e tests; PR opened into `dev` |
+| **C4** | ⏳ | v4 imagery atlases on the host | Akshat | C3 + merged/deployed release | All 13 imagery atlases built locally; copy to the host (`deploy/README.md`) once the C-series release is deployed — needs owner go-ahead |
 | **O2** | ✅ | Deploy F12 to production | Akshat | F12 merged | `DEPLOY_REF` `828fd531e2213068c9bdb4cb1b9498be5b4ccbfb` rolled out healthy 2026-09-28 22:27:56 UTC; a fresh public visit has no `failed=0` and a J-278-only stress test shows RI 0.985 / 1.5% loss |
 | **A50** | 🔄 | Scripted Greater Mumbai 1024 m grid corpus (replaces a manual QGIS tiling project) | Akshat | — | Pipeline + tests merged; 127-chip label-agreement check recorded; city build run locally; v3.2 recipe + `--extra-train-dirs` retrain gated on the current-scorer chip APLS |
 | **R34** | ✅ | Release `a4-roadseg-v4` (A51) to production | Akshat | A51 | Pre-release asset + checksum; Modal staging run on the production image matches local inference (2 boundary pixels); production deploy; live upload; promoted to Latest; docs point at v4 |
@@ -220,6 +221,10 @@ flowchart LR
 ---
 
 ## §10 · Daily Log
+
+**2026-10-06 (Akshat — U1: stress-test an upload)**
+
+- The upload result only listed numbers. "Open the upload in the studio" would need a fake georeference (uploads are honest image space), so instead the result view now fails any of the upload's top five critical junctions through a new job-scoped simulation endpoint. Verified locally on a real v4 mask (Delhi CP crop, 105 junctions) run through the CPU job queue: the job's reported worst-junction RI 0.84119 equals the simulated RI for failing its top junction J-86 (15.9% loss); an unknown junction returns 422.
 
 **2026-10-06 (Akshat — C2/C3: atlas API and picker)**
 

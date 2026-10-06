@@ -476,3 +476,29 @@ def test_any_registered_atlas_can_be_explored_and_stressed(client: TestClient) -
     assert result["aoi"] == "pune_shivajinagar_osm"
     # The precomputed targeted curve removes the top-ranked junction first.
     assert result["resilience_index"] == pytest.approx(summary["resilience_curve"][1]["targeted_resilience_index"], abs=1e-3)
+
+
+def test_an_uploaded_network_can_be_stress_tested(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A three-junction chain: failing the middle junction disconnects the ends.
+    graph = nx.MultiGraph()
+    for node, x in ((1, 0.0), (2, 10.0), (3, 20.0)):
+        graph.add_node(node, x=x, y=0.0)
+    graph.add_edge(1, 2, key=0, length_m=10.0)
+    graph.add_edge(2, 3, key=0, length_m=10.0)
+    monkeypatch.setattr(api.job_queue, "ensure_worker", lambda: None)
+    monkeypatch.setattr(api.job_queue, "status", lambda _job_id: {"job_id": JOB_ID, "status": "done"})
+    monkeypatch.setattr(api.job_queue, "result", lambda _job_id: SimpleNamespace(graph=graph))
+    with TestClient(create_app()) as analysis_client:
+        url = f"/api/v1/analyses/{JOB_ID}/simulations"
+        middle = analysis_client.post(url, json={"removed_node_ids": [2]})
+        unknown = analysis_client.post(url, json={"removed_node_ids": [99]})
+        empty = analysis_client.post(url, json={"removed_node_ids": []})
+
+    assert middle.status_code == 200
+    payload = middle.json()
+    assert payload["removed_node_ids"] == [2]
+    assert payload["resilience_index"] == pytest.approx(0.0)
+    assert payload["efficiency_loss"] == pytest.approx(1.0)
+    assert payload["active_largest_cc_fraction"] == pytest.approx(0.5)
+    assert unknown.status_code == 422
+    assert empty.status_code == 422

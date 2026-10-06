@@ -16,7 +16,11 @@ from typing import Any
 import networkx as nx
 from shapely.geometry import shape
 
-from src.pipeline.p3_analysis.resilience import global_efficiency, resilience_index
+from src.pipeline.p3_analysis.resilience import (
+    efficiency_sampling_policy,
+    global_efficiency,
+    resilience_index,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -383,13 +387,7 @@ def _simulate_cached(aoi: str, removed_node_ids: tuple[int, ...]) -> dict:
         )
     metrics = resilience_index(dataset.graph, removed, **kwargs)
     ri = _unit_interval(metrics["resilience_index"], "resilience_index")
-    active_nodes = [node for node in dataset.graph if node not in removed]
-    active = dataset.graph.subgraph(active_nodes)
-    active_lcc = (
-        max(map(len, nx.connected_components(active))) / len(active_nodes)
-        if active_nodes
-        else 0.0
-    )
+    active_lcc = _active_lcc_fraction(dataset.graph, removed)
     return {
         "aoi": aoi,
         "removed_node_ids": removed,
@@ -408,6 +406,36 @@ def _simulate_cached(aoi: str, removed_node_ids: tuple[int, ...]) -> dict:
         "representative_route": (
             representative_reroute(dataset.graph, removed[0]) if len(removed) == 1 else None
         ),
+    }
+
+
+def _active_lcc_fraction(graph: nx.MultiGraph, removed: list[int]) -> float:
+    """Share of the surviving junctions that sit in the largest connected piece."""
+    active_nodes = [node for node in graph if node not in set(removed)]
+    if not active_nodes:
+        return 0.0
+    return max(map(len, nx.connected_components(graph.subgraph(active_nodes)))) / len(active_nodes)
+
+
+def simulate_analysis(result: Any, removed_node_ids: list[int]) -> dict:
+    """Failure simulation on an uploaded analysis graph (image-space metres)."""
+    graph = result.graph
+    removed = sorted(set(removed_node_ids))
+    unknown = [node for node in removed if node not in graph]
+    if unknown:
+        raise ValueError("Unknown node IDs: " + ", ".join(map(str, unknown)))
+    policy = efficiency_sampling_policy(graph)
+    metrics = resilience_index(graph, removed, k=policy["k"], seed=policy["seed"])
+    ri = _unit_interval(metrics["resilience_index"], "resilience_index")
+    return {
+        "removed_node_ids": removed,
+        "resilience_index": ri,
+        "efficiency_loss": 1.0 - ri,
+        "largest_cc_fraction": _unit_interval(metrics["largest_cc_fraction"], "largest_cc_fraction"),
+        "active_largest_cc_fraction": _active_lcc_fraction(graph, removed),
+        "efficiency_method": policy["method"],
+        "efficiency_sample_size": policy["k"],
+        "efficiency_seed": policy["seed"] if policy["k"] else None,
     }
 
 
